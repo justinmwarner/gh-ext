@@ -352,3 +352,114 @@ design and should be spiked first, before any other implementation work.
 
 **Token storage in `chrome.storage.local`** is acceptable for personal use only,
 as described in section 10.
+
+---
+
+## 16. Amendments from API verification (2026-09-01)
+
+Sections 1-15 were written before the Pierre and WXT APIs had been read. Three
+research passes against real source, published tarballs, and a scaffolded WXT
+build invalidated several assumptions. Full detail is in
+`docs/reference/pierre-diffs-api.md`, `pierre-trees-api.md`, and `wxt-setup.md`.
+The changes that alter the design:
+
+### 16.1 Annotations cannot span a line range — §8 changes
+
+`DiffLineAnnotation` is `{ side: 'deletions' | 'additions', lineNumber, metadata }`.
+There is exactly one `lineNumber`; ranges are not representable.
+
+`side` maps 1:1 onto GitHub's `DiffSide` (`deletions` = `LEFT`, `additions` =
+`RIGHT`), so anchoring is otherwise clean. Multi-line threads are still *created*
+with `startLine`/`line` as §8 describes, but when *rendering* an existing
+multi-line thread we anchor the annotation to its end line and carry the range in
+our own `metadata` for the thread header to display.
+
+### 16.2 Annotations on collapsed lines silently do not render
+
+If a thread's line falls outside a rendered hunk, its annotation is dropped with
+no error. Combined with the fact that outdated threads have `line: null` at all
+(section 1 of the API reference), the rule is: **any thread that cannot be
+anchored to a visible line must render in the per-file collapsed section**, not
+just outdated ones. That section is now load-bearing rather than a nicety —
+without it, comments disappear.
+
+### 16.3 Expanding context requires a blob loader — new dependency
+
+A diff parsed from a GitHub patch is `isPartial: true`, and in that state Pierre
+shows **no expand affordance at all** and `revealLine()` returns `false`. Expand
+only appears once a `loadDiffFiles` callback is supplied that returns the full
+contents of **both** sides of the file.
+
+This is a real dependency §6 understated. Expanding one file costs two blob
+fetches, base and head.
+
+### 16.4 No syntax-highlighting worker in v1 — §7 changes
+
+§7 called for `@pierre/diffs/worker`. Dropping it, for four converging reasons:
+
+- The default `preferredHighlighter` is already `'shiki-js'`, using Shiki's
+  JavaScript regex engine — there is no WebAssembly on the default path
+- Grammar resolution must happen on the main thread regardless; it throws in a
+  worker
+- Vite resolves workers to `http://localhost:3000/...` in dev, which is
+  cross-origin from a `chrome-extension://` page, and Chrome 148+ crashes the
+  render process rather than throwing
+- Pierre's own docs banner-flag the worker pool as experimental
+
+Performance is instead carried by `VirtualizedFileDiff`, which is a first-class
+export. Revisit only if profiling shows main-thread stalls.
+
+**Never set `preferredHighlighter: 'shiki-wasm'`.** WXT emits no
+`content_security_policy` key in production builds, so the WASM path works in dev
+and dies silently in prod. This is guarded by a test rather than a comment.
+
+### 16.5 The file tree's built-in search breaks the keyboard map — §9 changes
+
+`isSearchOpenSeedKey` matches any single letter or digit without a modifier, then
+calls `stopPropagation()`. Every single-letter shortcut in §9 would be swallowed
+whenever the tree holds focus.
+
+The tree is constructed with `search: false` and we own the file filter on
+`Mod+K`. §7's claim that "the file tree's built-in search handles ad-hoc
+filtering" is withdrawn.
+
+### 16.6 One decoration per tree row — §5 changes
+
+`FileTreeRowDecoration` is a union of *either* a text cell *or* a single icon,
+never both, alongside the separate git-status lane. Viewed state, line counts,
+and an unresolved-comment badge cannot be three elements.
+
+Resolution: the git lane carries `changeType`; the decoration cell carries
+`+12 −3` using `parts` for per-run colour, which is the exact case the library's
+own source comment cites. The viewed checkbox lives in the diff card header,
+where §5 already put it. Decorations are also inert `<span>`s, so nothing in the
+tree can be clickable beyond row selection.
+
+There is no `refresh()`; changing decoration state requires forcing a re-render
+via `setIcons(currentIcons)`. That mechanism is inferred from source rather than
+documented, and `@pierre/trees` is at `1.0.0-beta.6`, so **both Pierre packages
+are pinned to exact versions**.
+
+### 16.7 The background opens the review tab, not the content script — §4 changes
+
+A content-script navigation to `review.html` is a web-origin navigation and would
+require listing the page in `web_accessible_resources`, which makes the extension
+fingerprintable by github.com. The content script instead messages the background
+worker, which calls `chrome.tabs.update` on the active tab. Same-tab behaviour is
+preserved and nothing is exposed to the page.
+
+### 16.8 Smaller corrections
+
+- Line selection is only reachable through the line-number gutter, so
+  `disableLineNumbers` must never be set. The GitHub-style "+" affordance is
+  `enableGutterUtility` + `onGutterUtilityClick`.
+- `SelectedLineRange` preserves drag direction, so `start` may exceed `end`, and
+  omits `endSide` when it equals `side`. It can also express cross-side ranges,
+  which GitHub cannot. Normalize and reject cross-side before building a payload.
+- Annotation `metadata` is compared by reference; it must be memoized or every
+  render churns annotation DOM.
+- In React, never call the tree's `cleanUp()` — `useFileTree` already does.
+- The WXT dev command is bare `wxt`; `wxt dev` is parsed as a root directory and
+  fails. `vite` is a required peer dependency in 0.21, and Node >= 22 is needed.
+- Content scripts get no HMR and are absent from the dev manifest entirely, so
+  the injected button must be smoke-tested against a production build.
