@@ -25,14 +25,22 @@ const BUTTON_ID = 'fast-review-open-button';
  * Where the button goes, most specific first.
  *
  * These are GitHub's class names, which are not a public API and change without
- * notice. The list is a preference order, not a promise: if none of them match,
- * {@link warnMissingAnchor} fires and the script does nothing further.
+ * notice. The list is a preference order, not a promise.
+ *
+ * All three were verified present on a live pull request page on 2026-09-01.
+ * Two earlier speculative entries, `[data-testid="pr-header-actions"]` and
+ * `[data-testid="issue-header-actions"]`, were removed after a DOM probe found
+ * the page carries only two `data-testid` attributes in total and no React
+ * root. Do not add a selector here without checking it against a real page.
+ *
+ * When none match, {@link mountFallback} still adds the button in a fixed
+ * corner position rather than giving up, so a GitHub redesign degrades the
+ * button's placement instead of silently removing the feature.
  */
 const ANCHOR_SELECTORS = [
   '.gh-header-actions',
-  '[data-testid="pr-header-actions"]',
-  '[data-testid="issue-header-actions"]',
   '.gh-header-meta',
+  '.gh-header-title',
 ] as const;
 
 /** How long GitHub gets to render its header before we call the anchor missing. */
@@ -88,24 +96,42 @@ export default defineContentScript({
     }
 
     /**
-     * Complain once, and only after GitHub has had time to render.
+     * Place the button without a header anchor, once, and only after GitHub has
+     * had time to render.
      *
      * At `document_idle` the header may still be on its way, and on a soft
-     * navigation it is briefly gone, so warning on the first miss would cry
-     * wolf on a page that ends up working.
+     * navigation it is briefly gone, so acting on the first miss would cry wolf
+     * on a page that ends up working. Hence the grace period and the re-check.
      */
-    function warnMissingAnchor(): void {
+    function mountFallback(): void {
       if (anchorWarned || anchorWarningTimer !== null) return;
 
       anchorWarningTimer = ctx.setTimeout(() => {
         anchorWarningTimer = null;
         if (anchorWarned || document.getElementById(BUTTON_ID)) return;
         anchorWarned = true;
+
+        // Re-check: the header may have arrived late, in which case prefer it.
+        const late = findAnchor();
+        if (late) {
+          late.prepend(buildButton());
+          return;
+        }
+
         log(
-          'No pull request header found, so the Fast review button was not added. ' +
-            'GitHub markup has probably changed. Tried:',
+          'No pull request header found, so the Fast review button was placed ' +
+            'in the corner instead. GitHub markup has probably changed. Tried:',
           ANCHOR_SELECTORS.join(', '),
         );
+
+        // Placement degrades, the feature does not disappear. A button nobody
+        // can find is indistinguishable from a broken extension.
+        const button = buildButton();
+        button.style.position = 'fixed';
+        button.style.top = '12px';
+        button.style.right = '12px';
+        button.style.zIndex = '2147483647';
+        document.body.appendChild(button);
       }, ANCHOR_GRACE_MS);
     }
 
@@ -160,7 +186,7 @@ export default defineContentScript({
 
       const anchor = findAnchor();
       if (!anchor) {
-        warnMissingAnchor();
+        mountFallback();
         return;
       }
 
