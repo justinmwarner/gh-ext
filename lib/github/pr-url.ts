@@ -9,6 +9,54 @@
 
 import type { PrRef } from '../messages';
 
+/** The only host this extension knows how to talk to. */
+const GITHUB_HOST = 'github.com';
+
+/**
+ * A pull request path, and whatever sub-page follows it.
+ *
+ * `/pull/{n}` is the conversation tab, `/pull/{n}/files` the diff,
+ * `/pull/{n}/commits` the commit list, and there are deeper ones such as
+ * `/pull/{n}/files/{base}..{head}`. All of them are the same pull request.
+ */
+const PR_PATH = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?\/?$/;
+
+/**
+ * Extract pull request coordinates from a github.com URL, or null if the URL is
+ * not a pull request page.
+ *
+ * Parsed through `URL` rather than matched against the whole string, so the
+ * query and the fragment cannot leak into the path match and a lookalike host
+ * such as `github.com.example` cannot pass.
+ *
+ * The protocol is not checked: the manifest's match pattern is what restricts
+ * the content script to https, and this function's job is only to read
+ * coordinates out of a path.
+ */
+export function parsePrUrl(url: string): PrRef | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // Not an absolute URL. Nothing to read.
+    return null;
+  }
+
+  if (parsed.hostname !== GITHUB_HOST) return null;
+
+  const match = PR_PATH.exec(parsed.pathname);
+  if (!match) return null;
+
+  const [, owner, repo, number] = match;
+  if (owner === undefined || repo === undefined || number === undefined) return null;
+
+  return {
+    owner: decodeURIComponent(owner),
+    repo: decodeURIComponent(repo),
+    number: Number(number),
+  };
+}
+
 /**
  * The pull request route on the review page.
  *

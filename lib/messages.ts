@@ -239,6 +239,16 @@ export function message<K extends MessageKind>(
 }
 
 /**
+ * Narrow a reply to a failure.
+ *
+ * Callers get back `unknown` from `sendMessage` — including `undefined` when
+ * the worker was not listening at all — so both ends check rather than assume.
+ */
+export function isErr(value: unknown): value is Err {
+  return typeof value === 'object' && value !== null && (value as Err).ok === false;
+}
+
+/**
  * Narrow an untrusted value to a request.
  *
  * The worker validates before dispatching. `runtime.onMessage` only carries

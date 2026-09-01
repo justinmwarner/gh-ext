@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Message, isMessage, message } from './messages';
+import { type Message, isErr, isMessage, message } from './messages';
 
 const pr = { owner: 'octocat', repo: 'hello-world', number: 42 };
 
@@ -49,5 +49,25 @@ describe('isMessage', () => {
   it('does not mistake inherited Object properties for a kind', () => {
     expect(isMessage({ kind: 'toString' })).toBe(false);
     expect(isMessage({ kind: 'constructor' })).toBe(false);
+  });
+});
+
+describe('isErr', () => {
+  it('recognizes a failed response', () => {
+    expect(
+      isErr({ ok: false, error: { kind: 'auth', message: 'nope', resetAt: null } }),
+    ).toBe(true);
+  });
+
+  it('rejects a successful response', () => {
+    expect(isErr({ ok: true, data: { started: true } })).toBe(false);
+  });
+
+  it('rejects a reply that is not a response at all', () => {
+    // sendMessage resolves undefined when no listener replied.
+    expect(isErr(undefined)).toBe(false);
+    expect(isErr(null)).toBe(false);
+    expect(isErr({})).toBe(false);
+    expect(isErr('error')).toBe(false);
   });
 });

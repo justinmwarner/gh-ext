@@ -1,7 +1,81 @@
 import { describe, expect, it } from 'vitest';
-import { parseReviewHash, reviewHash } from './pr-url';
+import { parsePrUrl, parseReviewHash, reviewHash } from './pr-url';
 
 const ref = { owner: 'octocat', repo: 'hello-world', number: 42 };
+
+describe('parsePrUrl', () => {
+  it('reads a pull request URL', () => {
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pull/42')).toEqual(ref);
+  });
+
+  it('reads the /files sub-path', () => {
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pull/42/files')).toEqual(ref);
+  });
+
+  it('reads the /commits sub-path', () => {
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pull/42/commits')).toEqual(
+      ref,
+    );
+  });
+
+  it('reads a deeper sub-path', () => {
+    expect(
+      parsePrUrl('https://github.com/octocat/hello-world/pull/42/files/abc123..def456'),
+    ).toEqual(ref);
+  });
+
+  it('ignores a query string', () => {
+    expect(
+      parsePrUrl('https://github.com/octocat/hello-world/pull/42/files?w=1&diff=split'),
+    ).toEqual(ref);
+  });
+
+  it('ignores a fragment', () => {
+    expect(
+      parsePrUrl('https://github.com/octocat/hello-world/pull/42#discussion_r123'),
+    ).toEqual(ref);
+  });
+
+  it('ignores a query string and a fragment together', () => {
+    expect(
+      parsePrUrl('https://github.com/octocat/hello-world/pull/42/files?w=1#diff-abc'),
+    ).toEqual(ref);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pull/42/')).toEqual(ref);
+  });
+
+  it('decodes percent-escaped path segments', () => {
+    expect(parsePrUrl('https://github.com/oct%C3%B6cat/hello-world/pull/42')).toEqual({
+      ...ref,
+      owner: 'octöcat',
+    });
+  });
+
+  it('returns null for a GitHub URL that is not a pull request', () => {
+    expect(parsePrUrl('https://github.com/octocat/hello-world')).toBeNull();
+    expect(parsePrUrl('https://github.com/octocat/hello-world/issues/42')).toBeNull();
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pulls')).toBeNull();
+    expect(parsePrUrl('https://github.com/octocat')).toBeNull();
+    expect(parsePrUrl('https://github.com/')).toBeNull();
+  });
+
+  it('returns null when the number is not a number', () => {
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pull/new')).toBeNull();
+    expect(parsePrUrl('https://github.com/octocat/hello-world/pull/42x')).toBeNull();
+  });
+
+  it('returns null for another host that happens to use the same path shape', () => {
+    expect(parsePrUrl('https://gist.github.com/octocat/hello-world/pull/42')).toBeNull();
+    expect(parsePrUrl('https://github.com.evil.test/octocat/hello-world/pull/42')).toBeNull();
+  });
+
+  it('returns null for something that is not a URL', () => {
+    expect(parsePrUrl('')).toBeNull();
+    expect(parsePrUrl('/octocat/hello-world/pull/42')).toBeNull();
+  });
+});
 
 describe('reviewHash', () => {
   it('builds the review page route', () => {
