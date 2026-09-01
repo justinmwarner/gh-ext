@@ -42,6 +42,7 @@ export const ADD_THREAD = `mutation AddThread(
   $side: DiffSide
   $startLine: Int
   $startSide: DiffSide
+  $subjectType: PullRequestReviewThreadSubjectType
 ) {
   addPullRequestReviewThread(input: {
     pullRequestId: $pullRequestId
@@ -52,6 +53,7 @@ export const ADD_THREAD = `mutation AddThread(
     side: $side
     startLine: $startLine
     startSide: $startSide
+    subjectType: $subjectType
   }) {
     thread {${THREAD_FIELDS}}
   }

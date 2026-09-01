@@ -253,3 +253,43 @@ REST: 5000 requests/hour. GraphQL: 5000 points/hour. The batched query above
 costs a single point. For one person this is not a practical constraint, but the
 remaining quota should be surfaced on the options page so an accidental polling
 loop is visible rather than mysterious.
+
+---
+
+## 7. Validating mutation documents without mutating anything
+
+GraphQL validates a document — fields, argument names, argument types, and
+payload selections — **before** it resolves any node. So sending a mutation with
+a syntactically valid but unresolvable node ID proves the document is correct
+while guaranteeing no write occurs.
+
+A valid document returns errors that are all `"type": "NOT_FOUND"`. An invalid
+one returns validation errors naming the offending field or argument, and never
+reaches execution.
+
+```bash
+# body.json = {"query": "<the mutation>", "variables": {...with a fake id...}}
+gh api graphql --input body.json
+```
+
+Use a well-formed but dead id, for example `MDEyOklzc3VlQ29tbWVudDAwMA==`.
+
+All eight mutation documents in `lib/github/mutations.ts` were verified this way
+on 2026-09-01: `ADD_THREAD`, `ADD_REPLY`, `RESOLVE_THREAD`, `UNRESOLVE_THREAD`,
+`START_REVIEW`, `SUBMIT_REVIEW`, `MARK_VIEWED`, `UNMARK_VIEWED`. Every one
+returned `NOT_FOUND` only.
+
+The payload field names were separately introspected and are confirmed:
+
+| Mutation | Payload field |
+|---|---|
+| `addPullRequestReviewThread` | `thread` |
+| `addPullRequestReviewThreadReply` | `comment` |
+| `resolveReviewThread` / `unresolveReviewThread` | `thread` |
+| `addPullRequestReview` | `pullRequestReview` (also `reviewEdge`) |
+| `submitPullRequestReview` | `pullRequestReview` |
+| `markFileAsViewed` / `unmarkFileAsViewed` | `pullRequest` |
+
+Re-run this probe after editing any mutation. It is the only check that catches
+a wrong payload field before it reaches a user, because GitHub reports such a
+mistake as HTTP 200 with an `errors` array rather than as a failure.
