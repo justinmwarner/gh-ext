@@ -29,6 +29,10 @@ These four documents were produced by reading real source, published tarballs, a
 3. Pierre annotations anchor to exactly one line. Ranges are not representable.
 4. An annotation on a line outside a rendered hunk is dropped **silently**.
 5. Never set `preferredHighlighter: 'shiki-wasm'` — it works in dev and dies in production.
+6. `.wxt/tsconfig.json` enables **`noUncheckedIndexedAccess`**, and it typechecks test files too. `const [first] = arr` is `T | undefined`, so property access on it is a compile error. Assert with `expect(arr[0]).toMatchObject({...})` rather than scattering `!` assertions.
+
+**Known parser limitations** (found during Task 5, deliberately not fixed):
+`core.quotepath` octal-escaped paths such as `"a/na\303\257ve.ts"` are not decoded, so a non-ASCII path will not join against the GraphQL `PullRequestFile` list. Combined merge diffs (`diff --cc`) are unrecognized. Neither is reachable through GitHub's PR diff endpoint today.
 
 ---
 
@@ -1447,6 +1451,11 @@ Wraps `@pierre/diffs`. See `docs/reference/pierre-diffs-api.md`:
 Renders each anchored thread as a Pierre annotation via `partitionThreads` from Task 6, and **every unanchorable thread in a collapsed per-file section**. That section is load-bearing: Pierre drops out-of-range annotations silently, so a thread that is neither anchored nor listed is invisible to the reviewer.
 
 Outdated threads display "was on line N" from `originalLine`.
+
+Two obligations this task inherits, both raised during Task 6 and deliberately left to the call site:
+
+- **Cross-check every anchor against the rendered hunk ranges.** `partitionThreads` has no hunk information, so it reports a thread anchored to line 10 as `anchored` even when line 10 sits in collapsed context and Pierre will silently drop it. Only this task knows the real hunk ranges. Any anchor that falls outside them must be demoted into the per-file section, or the comment vanishes — the exact failure `partitionThreads` exists to prevent, one layer up.
+- **Render the line range on multi-line threads.** `anchorThread` collapses a multi-line thread to its end line because Pierre cannot express ranges. Call `isMultiLine(thread)` and read `startLine` to show "lines 5-9" in the thread header, otherwise a range comment is indistinguishable from a single-line one.
 
 - [ ] Commit: `git commit -m "Render review threads as annotations with unanchorable fallback"`
 

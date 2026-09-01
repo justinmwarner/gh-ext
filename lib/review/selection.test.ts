@@ -45,3 +45,32 @@ describe('normalizeSelection', () => {
     });
   });
 });
+
+describe('normalizeSelection edge cases', () => {
+  it('derives a missing side from endSide rather than rejecting', () => {
+    // Pierre leaves `side` undefined in single-file mode but still emits
+    // `endSide`. Defaulting side to 'additions' would read that as a
+    // cross-side drag and reject a perfectly ordinary selection.
+    expect(normalizeSelection({ start: 1, end: 4, endSide: 'deletions' })).toEqual({
+      ok: true, value: { line: 4, side: 'LEFT', startLine: 1, startSide: 'LEFT' },
+    });
+  });
+
+  it('rejects a non-integer endpoint', () => {
+    expect(normalizeSelection({ start: 1.5, end: 4, side: 'additions' })).toEqual({
+      ok: false, reason: 'invalid-range',
+    });
+  });
+
+  it('rejects NaN, which would otherwise reach GitHub as line: NaN', () => {
+    expect(normalizeSelection({ start: Number.NaN, end: 5, side: 'additions' })).toEqual({
+      ok: false, reason: 'invalid-range',
+    });
+  });
+
+  it('rejects a non-positive line number', () => {
+    expect(normalizeSelection({ start: 0, end: 3, side: 'additions' })).toEqual({
+      ok: false, reason: 'invalid-range',
+    });
+  });
+});
