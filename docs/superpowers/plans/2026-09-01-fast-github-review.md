@@ -1433,9 +1433,22 @@ Wraps `@pierre/trees`. Non-obvious constraints, all verified — see `docs/refer
 
 ### Task 20: Diff rendering
 
-Wraps `@pierre/diffs`. See `docs/reference/pierre-diffs-api.md`:
+Wraps `@pierre/diffs`. See `docs/reference/pierre-diffs-api.md`.
 
-- Use `VirtualizedFileDiff` for performance. **Do not** use the worker export — see spec §16.4.
+**Correction, verified against the installed `@pierre/diffs@1.3.6` type declarations on 2026-09-01:** `VirtualizedFileDiff` is **not exported from `@pierre/diffs/react`**. It exists only on the vanilla entry point. The React surface is `CodeView`, `PatchDiff`, `MultiFileDiff`, `FileDiff`, `File`, `UnresolvedFile`, `Virtualizer`, and `useVirtualizer`.
+
+Use **`CodeView`** for the main column. It takes a list of `CodeViewItem`s, virtualizes them itself, and passes the owning `item` to every render callback — `renderAnnotation(annotation, item)`, `renderGutterUtility(getHoveredLine, item)` — which is how a stacked multi-file diff knows which file a callback fired for. `PatchDiff` (props: `patch: string`, plus the shared diff props) is the single-file equivalent and takes the patch text `parseUnifiedDiff` already produces; reach for it only if `CodeView` proves awkward.
+
+Verified option and callback names, all present in the installed declarations:
+
+- `enableLineSelection`, `enableGutterUtility`, `onGutterUtilityClick(range: SelectedLineRange)`
+- `onLineSelectionStart`, `onLineSelectionChange`, `onLineSelectionEnd`, `onLineSelected`
+- `lineAnnotations: DiffLineAnnotation<T>[]`, `renderAnnotation`
+- `loadDiffFiles?: FileDiffContentsLoader`, where `FileDiffContentsLoader = (fileDiff: FileDiffMetadata) => Promise<FileDiffLoadedFiles>` — this is Task 26's hook
+- `preferredHighlighter`, `disableLineNumbers`, `disableWorkerPool`
+- In diff mode `getHoveredLine()` returns `{ lineNumber: number; side: AnnotationSide }`
+
+Set **`disableWorkerPool`** rather than leaving the worker pool to its default — see spec §16.4.
 - Never set `disableLineNumbers`; line selection is only reachable through the gutter.
 - Never set `preferredHighlighter: 'shiki-wasm'`.
 - Memoize annotation `metadata` — it is compared by reference, so a fresh object every render churns annotation DOM.
