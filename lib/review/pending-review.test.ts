@@ -43,3 +43,27 @@ describe('pending review state machine', () => {
     expect(reduce(s, { type: 'review-started', reviewId: 'R_2' })).toEqual(s);
   });
 });
+
+describe('resuming a review started elsewhere', () => {
+  it('hydrates browse into pending with the server comment count', () => {
+    // GitHub keeps a PENDING review across sessions. If the user started one
+    // in GitHub's own UI, we must attach to it — posting standalone comments
+    // alongside an open pending review orphans them.
+    expect(
+      reduce(initialState(), { type: 'review-resumed', reviewId: 'R_9', commentCount: 3 })
+    ).toEqual({ kind: 'pending', reviewId: 'R_9', commentCount: 3 });
+  });
+
+  it('targets the resumed review for new comments', () => {
+    const s = reduce(initialState(), {
+      type: 'review-resumed', reviewId: 'R_9', commentCount: 3,
+    });
+    expect(commentTarget(s, 'PR_1')).toEqual({ pullRequestReviewId: 'R_9' });
+  });
+
+  it('does not clobber a local pending review', () => {
+    let s = reduce(initialState(), { type: 'review-started', reviewId: 'R_1' });
+    s = reduce(s, { type: 'comment-added' });
+    expect(reduce(s, { type: 'review-resumed', reviewId: 'R_9', commentCount: 3 })).toEqual(s);
+  });
+});

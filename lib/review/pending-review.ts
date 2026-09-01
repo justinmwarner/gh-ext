@@ -4,6 +4,12 @@ export type PendingReviewState =
 
 export type PendingReviewAction =
   | { type: 'review-started'; reviewId: string }
+  /**
+   * A PENDING review already existed on the server, typically because the user
+   * started it in GitHub's own UI. Without this the first comment would post
+   * standalone against the pull request and be orphaned by the open review.
+   */
+  | { type: 'review-resumed'; reviewId: string; commentCount: number }
   | { type: 'comment-added' }
   | { type: 'submitted' }
   | { type: 'discarded' };
@@ -20,6 +26,15 @@ export function reduce(
       return state.kind === 'pending'
         ? state
         : { kind: 'pending', reviewId: action.reviewId, commentCount: 0 };
+    case 'review-resumed':
+      // Local state wins: it reflects comments this session already queued.
+      return state.kind === 'pending'
+        ? state
+        : {
+            kind: 'pending',
+            reviewId: action.reviewId,
+            commentCount: action.commentCount,
+          };
     case 'comment-added':
       return state.kind === 'pending'
         ? { ...state, commentCount: state.commentCount + 1 }
