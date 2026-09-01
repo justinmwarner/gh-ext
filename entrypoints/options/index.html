@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="manifest.open_in_tab" content="true" />
+    <title>Fast GitHub Review — Options</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 2rem;
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #1f2328;
+        background: #ffffff;
+      }
+      main {
+        max-width: 44rem;
+      }
+      h1 {
+        font-size: 1.375rem;
+        margin: 0 0 1.5rem;
+      }
+      h2 {
+        font-size: 1rem;
+        margin: 2rem 0 0.5rem;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+      input[type="password"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.4rem 0.6rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        border: 1px solid #d1d9e0;
+        border-radius: 6px;
+      }
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      button {
+        padding: 0.4rem 0.85rem;
+        font: inherit;
+        border: 1px solid #d1d9e0;
+        border-radius: 6px;
+        background: #f6f8fa;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .hint {
+        color: #59636e;
+        margin: 0.35rem 0 0;
+      }
+      .warning {
+        border: 1px solid #d1242f;
+        border-left-width: 4px;
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        margin: 1.5rem 0;
+      }
+      .warning h2 {
+        margin: 0 0 0.5rem;
+        color: #d1242f;
+      }
+      .warning p {
+        margin: 0 0 0.5rem;
+      }
+      .warning p:last-child {
+        margin-bottom: 0;
+      }
+      .result {
+        margin: 0.75rem 0 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .result.bad {
+        color: #d1242f;
+      }
+      .result.good {
+        color: #1a7f37;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.25rem 1rem;
+        margin: 0;
+      }
+      dt {
+        color: #59636e;
+      }
+      dd {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #f6f8fa;
+        padding: 0.05rem 0.3rem;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
