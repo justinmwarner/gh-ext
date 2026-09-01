@@ -31,9 +31,7 @@ export default defineConfig({
           name: 'ui',
           environment: 'jsdom',
           include: ['ui/**/*.test.tsx'],
-          // Every UI test mocks the runtime boundary; leaking a mock from one
-          // test into the next would make failures depend on file order.
-          restoreMocks: true,
+          setupFiles: ['./ui/testSetup.ts'],
         },
       },
     ],

@@ -3,36 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Declared here as well as in the stylesheet so the browser paints the
+         right background before the CSS lands. -->
+    <meta name="color-scheme" content="light dark" />
     <title>Fast GitHub Review</title>
-    <style>
-      body {
-        margin: 0;
-        padding: 2rem;
-        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-        color: #1f2328;
-        background: #ffffff;
-      }
-      h1 {
-        font-size: 1.25rem;
-        margin: 0 0 1rem;
-      }
-      dl {
-        display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 0.25rem 1rem;
-        margin: 0;
-      }
-      dt {
-        color: #59636e;
-      }
-      dd {
-        margin: 0;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-      .empty {
-        color: #59636e;
-      }
-    </style>
   </head>
   <body>
     <div id="root"></div>
