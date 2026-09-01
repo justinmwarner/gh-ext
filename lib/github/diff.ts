@@ -14,7 +14,10 @@ const FILE_HEADER = /^diff --git (?:"?a\/(.+?)"?) (?:"?b\/(.+?)"?)$/;
 export function parseUnifiedDiff(diff: string): ParsedDiffFile[] {
   if (diff.trim() === '') return [];
 
-  const lines = diff.split('\n');
+  // Split on either line ending. A trailing \r would defeat the $-anchored
+  // header regex, dropping the file or merging it into the previous one's
+  // patch with no error. Rejoining with \n normalizes the stored patch text.
+  const lines = diff.split(/\r?\n/);
   const files: ParsedDiffFile[] = [];
   let current: string[] | null = null;
 
