@@ -9,7 +9,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Shell } from './Shell';
-import { prPayload } from './prPayload.fixture';
+import { fileFixture, prPayload, prPayloadWithFiles } from './prPayload.fixture';
 
 describe('Shell', () => {
   it('renders the top bar, the left rail and the main column', () => {
@@ -49,6 +49,57 @@ describe('Shell', () => {
     render(<Shell payload={prPayload()} />);
 
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('gives every changed file a card in the main column', () => {
+    render(
+      <Shell
+        payload={prPayloadWithFiles([
+          fileFixture({ path: 'src/app.ts', additions: 12, deletions: 3 }),
+          fileFixture({ path: 'README.md' }),
+        ])}
+      />,
+    );
+
+    const column = screen.getByRole('main');
+    expect(column.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
+    expect(column.querySelector('[data-file-card="README.md"]')).not.toBeNull();
+  });
+
+  it('reads the counts and the viewed state off the payload, not the patch', () => {
+    render(
+      <Shell
+        payload={prPayloadWithFiles([
+          fileFixture({
+            path: 'src/app.ts',
+            additions: 12,
+            deletions: 3,
+            viewedState: 'VIEWED',
+          }),
+        ])}
+      />,
+    );
+
+    expect(screen.getByText('+12')).toBeDefined();
+    expect(screen.getByText('−3')).toBeDefined();
+    expect(
+      (screen.getByRole('checkbox', { name: /src\/app\.ts/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+  });
+
+  it('puts the file tree in the rail, below the overview', () => {
+    render(<Shell payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])} />);
+
+    const tree = screen.getByRole('navigation', { name: /changed files/i });
+    expect(screen.getByRole('complementary').contains(tree)).toBe(true);
+    expect(tree.querySelector('file-tree-container')).not.toBeNull();
+  });
+
+  it('says so in both regions when a pull request changed nothing', () => {
+    render(<Shell payload={prPayload()} />);
+
+    expect(screen.getAllByText(/no changed files/i).length).toBe(2);
   });
 
   it('gives the rail a resize handle the keyboard can reach', () => {

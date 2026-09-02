@@ -237,19 +237,37 @@ code {
 
 /* ----------------------------------------------------------------- layout */
 
+/* Both Pierre surfaces virtualize against a scrollport they measure, so the
+   page itself must not be the scroller: the shell is exactly one viewport tall
+   and the tree and the diff column each scroll inside it. An unbounded host
+   measures zero and renders nothing. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
 .shell-body {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .rail {
-  position: sticky;
-  top: var(--topbar-height);
+  display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
-  height: calc(100vh - var(--topbar-height));
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 12px;
   border-right: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.overview {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
 }
 
 .overview summary {
@@ -258,12 +276,27 @@ code {
   padding: 4px 0;
 }
 
+/* The tree owns the remaining height and does its own scrolling. */
+.filetree {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 8px;
+}
+
+/* An explicit height, not an inherited one. The tree virtualizes against this
+   element's scrollport, and without a resolved height it paints against a
+   fallback of 420px once and then measures zero. */
+.filetree-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
 .rail-resizer {
-  position: sticky;
-  top: var(--topbar-height);
   flex: 0 0 auto;
+  align-self: stretch;
   width: 5px;
-  height: calc(100vh - var(--topbar-height));
   margin-left: -3px;
   cursor: col-resize;
   background: transparent;
@@ -275,9 +308,122 @@ code {
 }
 
 .column {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
-  padding: 12px;
+  min-height: 0;
+}
+
+.diff-view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* -------------------------------------------------------------- diff cards */
+
+/* Header content is ordinary light DOM projected into the shadow row through a
+   slot, so it is styled from here like anything else on the page. */
+.file-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+}
+
+.file-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.collapse-toggle:hover {
+  background: light-dark(#eef1f4, #262c36);
+}
+
+.file-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.file-path-old {
+  color: light-dark(#59636e, #9198a1);
+  text-decoration: line-through;
+}
+
+.file-counts {
+  display: inline-flex;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.file-counts .additions {
+  color: light-dark(#1a7f37, #3fb950);
+}
+
+.file-counts .deletions {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.viewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+  white-space: nowrap;
+}
+
+/* DISMISSED is a third state, not a shade of unviewed: the reviewer did look,
+   and what they looked at has since changed. */
+.viewed[data-viewed-state='DISMISSED'] {
+  color: light-dark(#9a6700, #d29922);
+}
+
+.viewed-note::before {
+  content: '· ';
+}
+
+.file-note {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: light-dark(#59636e, #9198a1);
+  border-radius: 6px;
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .placeholder {

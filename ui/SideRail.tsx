@@ -1,12 +1,25 @@
 /**
  * The left rail: an Overview disclosure on top, the file tree below it.
  *
- * Both are empty this task. The frame is here so the tasks that fill them have
- * a place to land, and so the layout is settled before there is content to
- * argue with.
+ * The Overview is still empty; the tree is not. The tree virtualizes against
+ * its own scrollport, so the rail is a flex column and the tree gets what is
+ * left after the disclosure — an unconstrained host would measure zero and
+ * render nothing.
  */
 
-export function SideRail({ width }: { width: number }) {
+import { FileTree } from './FileTree';
+import type { CurrentFile } from './currentFile';
+import type { ReviewFile } from './reviewFiles';
+
+export interface SideRailProps {
+  width: number;
+  files: readonly ReviewFile[];
+  /** The file the review is on, and which surface last moved it. */
+  current: CurrentFile;
+  onSelect: (path: string) => void;
+}
+
+export function SideRail({ width, files, current, onSelect }: SideRailProps) {
   return (
     <aside className="rail" style={{ width: `${width}px` }}>
       <details className="overview" open>
@@ -18,7 +31,7 @@ export function SideRail({ width }: { width: number }) {
       </details>
 
       <nav className="filetree" aria-label="Changed files">
-        <p className="placeholder">The file tree goes here.</p>
+        <FileTree files={files} current={current} onSelect={onSelect} />
       </nav>
     </aside>
   );
