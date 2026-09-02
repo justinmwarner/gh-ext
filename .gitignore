@@ -7,3 +7,7 @@ dist/
 # Playwright
 test-results/
 playwright-report/
+
+# Never commit a packing key
+*.pem
+.extension-key*
