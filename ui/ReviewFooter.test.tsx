@@ -269,31 +269,80 @@ describe('a review resumed from GitHub', () => {
   });
 });
 
-describe('approving your own pull request', () => {
-  it('is disabled, with the reason said out loud', async () => {
-    // GitHub rejects it outright. Letting the button look live only trades a
-    // clear explanation for an opaque 422.
-    const user = userEvent.setup();
+/**
+ * Reviewing your own pull request.
+ *
+ * GitHub allows exactly one verdict on your own work: COMMENT. Both of the
+ * others are rejected outright —
+ *
+ *   Can not approve your own pull request
+ *   Can not request changes on your own pull request
+ *
+ * — and a rejected submit is not a harmless one. The review stays pending with
+ * every queued comment still invisible, and the reviewer is left holding a
+ * review the page appeared to offer them a way to send.
+ *
+ * Request changes used to be left live, on the belief that only approval was
+ * blocked. It was not tested, and it was wrong.
+ */
+describe('reviewing your own pull request', () => {
+  const own = async (user: ReturnType<typeof userEvent.setup>) => {
     mount({ viewerIsAuthor: true });
     await startReview(user);
+  };
 
-    const approve = screen.getByRole('button', { name: /^approve$/i });
-    expect((approve as HTMLButtonElement).disabled).toBe(true);
-    expect(footer()?.textContent).toMatch(/your own pull request/i);
+  const control = (name: RegExp) =>
+    screen.getByRole('button', { name }) as HTMLButtonElement;
+
+  it('disables Approve', async () => {
+    await own(userEvent.setup());
+
+    expect(control(/^approve$/i).disabled).toBe(true);
   });
 
-  it('leaves Comment and Request changes alone', async () => {
+  it('disables Request changes, which GitHub rejects for the same reason', async () => {
+    await own(userEvent.setup());
+
+    expect(control(/request changes/i).disabled).toBe(true);
+  });
+
+  it('leaves Comment alone, because that one works', async () => {
+    // The whole reason for not blocking self-review outright: leaving notes on
+    // your own pull request is an ordinary thing to do, and it is allowed.
+    await own(userEvent.setup());
+
+    expect(control(/^comment$/i).disabled).toBe(false);
+  });
+
+  it('says what is unavailable, and what still is', async () => {
+    // A disabled button with no explanation reads as a bug. A disabled button
+    // with no way forward reads as a dead end — and there is a way forward.
+    await own(userEvent.setup());
+
+    // The note itself, not the footer: the footer's text contains the button
+    // labels, so asserting on it would pass whatever the note said.
+    const note = screen.getByRole('note').textContent ?? '';
+    expect(note).toMatch(/your own pull request/i);
+    expect(note).toMatch(/request(ing)? changes/i);
+    expect(note).toMatch(/comment/i);
+  });
+
+  it('gives each blocked control the reason on hover', async () => {
+    await own(userEvent.setup());
+
+    expect(control(/^approve$/i).title).toMatch(/your own pull request/i);
+    expect(control(/request changes/i).title).toMatch(/your own pull request/i);
+  });
+
+  it('blocks none of it for anybody else', async () => {
     const user = userEvent.setup();
-    mount({ viewerIsAuthor: true });
+    mount();
     await startReview(user);
 
-    expect(
-      (screen.getByRole('button', { name: /^comment$/i }) as HTMLButtonElement).disabled,
-    ).toBe(false);
-    expect(
-      (screen.getByRole('button', { name: /request changes/i }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+    for (const name of [/^comment$/i, /^approve$/i, /request changes/i]) {
+      expect(control(name).disabled).toBe(false);
+    }
+    expect(footer()?.textContent).not.toMatch(/your own pull request/i);
   });
 });
 

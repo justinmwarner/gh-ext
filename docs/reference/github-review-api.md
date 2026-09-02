@@ -310,6 +310,26 @@ threads: DraftPullRequestReviewThread
 Omitting `event` is what creates the `PENDING` review. Passing `event` submits
 immediately.
 
+### What the author may submit on their own pull request
+
+Only `COMMENT`. GitHub refuses the other two, each with its own sentence:
+
+```
+Can not approve your own pull request
+Can not request changes on your own pull request
+```
+
+Both arrive as GraphQL errors at `submitPullRequestReview`, after the review has
+been written — so a rejected submit is not harmless. The review stays `PENDING`
+with every queued comment still invisible to everyone else.
+
+`ReviewFooter` disables both controls when `viewerDidAuthor` is true, and says
+that a comment is still available. Self-review is *not* blocked outright:
+leaving notes on your own pull request is ordinary, and `COMMENT` works.
+
+Recorded 2026-09-02. `REQUEST_CHANGES` had been left enabled on the belief that
+only approval was blocked — untested, and wrong.
+
 ### Submit — `submitPullRequestReview`
 
 ```

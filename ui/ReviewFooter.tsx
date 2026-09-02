@@ -15,9 +15,11 @@
  *   invites the reviewer to submit an empty-looking review and wonder later
  *   where the comments went. The machine tracks whether the count is complete;
  *   this reads it.
- * - **Offer an approval GitHub will reject.** You cannot approve your own pull
- *   request. Disabling the control with the reason beside it is strictly better
- *   than an opaque 422 after the fact.
+ * - **Offer a verdict GitHub will reject.** On your own pull request the only
+ *   one allowed is COMMENT: approving and requesting changes are both refused.
+ *   Disabling those two with the reason beside them, and saying which one still
+ *   works, is strictly better than an opaque 422 after the fact — a rejected
+ *   submit leaves the review pending and every comment on it still invisible.
  * - **Discard anything quietly.** A failed submit keeps the review exactly as
  *   it was and says so; a deliberate discard asks first, and then deletes the
  *   review on GitHub rather than only forgetting about it here.
@@ -51,7 +53,34 @@ export function pendingCountLabel(pending: {
   return `At least ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} not posted yet — ${commentCount} queued here, plus anything already on this review`;
 }
 
-const APPROVE_BLOCKED = 'GitHub does not allow approving your own pull request.';
+/**
+ * The verdicts GitHub refuses on your own pull request.
+ *
+ * Both of them, not just the obvious one. GitHub answers each with its own
+ * sentence — "Can not approve your own pull request", "Can not request changes
+ * on your own pull request" — and a rejected submit is not a harmless one: the
+ * review stays pending with every queued comment still invisible, and the
+ * reviewer is left holding a review the page appeared to offer a way to send.
+ *
+ * `REQUEST_CHANGES` was left live here on the belief that only approval was
+ * blocked. That belief was untested and wrong.
+ */
+const BLOCKED_ON_OWN_PR: ReadonlySet<SubmitEvent> = new Set([
+  'APPROVE',
+  'REQUEST_CHANGES',
+]);
+
+const OWN_PR_BLOCKED =
+  'GitHub does not allow approving or requesting changes on your own pull request.';
+
+/**
+ * Said alongside, because a dead end and a detour read the same on screen.
+ *
+ * COMMENT is allowed on your own pull request, which is why self-review is not
+ * blocked outright — leaving notes on your own work is an ordinary thing to do.
+ * Without this sentence, two disabled buttons look like the review is stuck.
+ */
+const OWN_PR_REMEDY = 'You can still submit this review as a comment.';
 
 interface SubmitAction {
   event: SubmitEvent;
@@ -139,14 +168,14 @@ export function ReviewFooter({ viewerIsAuthor }: { viewerIsAuthor: boolean }) {
 
         <div className="review-footer-actions">
           {ACTIONS.map((action) => {
-            const blocked = action.event === 'APPROVE' && viewerIsAuthor;
+            const blocked = viewerIsAuthor && BLOCKED_ON_OWN_PR.has(action.event);
             return (
               <button
                 key={action.event}
                 type="button"
                 className={action.className}
                 disabled={busy || blocked}
-                title={blocked ? APPROVE_BLOCKED : undefined}
+                title={blocked ? OWN_PR_BLOCKED : undefined}
                 onClick={() => submit(action.event)}
               >
                 {action.label}
@@ -169,7 +198,7 @@ export function ReviewFooter({ viewerIsAuthor }: { viewerIsAuthor: boolean }) {
 
       {viewerIsAuthor && (
         <p className="review-note" role="note">
-          {APPROVE_BLOCKED}
+          {`${OWN_PR_BLOCKED} ${OWN_PR_REMEDY}`}
         </p>
       )}
 
