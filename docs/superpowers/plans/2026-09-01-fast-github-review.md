@@ -1529,6 +1529,10 @@ Supplies the `loadDiffFiles` callback. A diff parsed from a GitHub patch is `isP
 
 This is the largest hidden dependency in the project and is deliberately sequenced last, since everything else works without it.
 
+**This task silently invalidates the out-of-hunk cross-check from Task 21 unless you handle it.** `DiffColumn` memoizes each file's thread layout on a signature built from thread fields alone. Expanding context changes the rendered hunk ranges, and Pierre **mutates the `FileDiffMetadata` in place** when `loadDiffFiles` hydrates it — so the signature never notices. A thread demoted to the unanchorable list while its line was collapsed would stay in that list after the reviewer expands to it, permanently, even though it could now be anchored.
+
+The memo signature must gain a hunk-revision term as part of this task. Add a test that expands context around a demoted thread and asserts it becomes an anchored annotation.
+
 - [ ] Commit: `git commit -m "Add expand-unchanged-context via blob loader"`
 
 ---
