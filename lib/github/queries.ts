@@ -149,3 +149,40 @@ export const REVIEW_THREADS_PAGE_QUERY = `query PullRequestReviewThreadsPage($ow
 }
 ${REVIEW_THREAD_FIELDS}
 `;
+
+/**
+ * The viewer's own PENDING review on this pull request, if they have one.
+ *
+ * GitHub allows exactly one, and refuses `addPullRequestReview` with "User can
+ * only have one pending review per pull request" when a second is asked for.
+ * That refusal is what this exists to prevent: a reviewer with a review already
+ * open — started here, in another tab, or in GitHub's own UI — could neither
+ * start a review nor post a single comment, because both begin by opening one.
+ *
+ * Two routes to the same fact, deliberately:
+ *
+ * - `viewerLatestReview` is "the latest review *given* from the viewer", and a
+ *   PENDING review has not been given to anyone. It is not certain that it
+ *   reports one, and the extension behaved as though it does.
+ * - `reviews(states: [PENDING])` asks the question directly. A pending review
+ *   is visible only to its author, so this connection can only ever return the
+ *   viewer's own.
+ *
+ * Whichever answers, the id is the same. `PullRequestReviewState.PENDING` is
+ * introspected (reference section 2); the `states` argument is not, which is
+ * exactly why this is its own document rather than four more lines on
+ * PULL_REQUEST_QUERY. A mistake here costs the ability to find an existing
+ * review — a mistake there would fail validation and take the whole page down
+ * with it. Fold it in once it has been executed against the live schema.
+ */
+export const VIEWER_PENDING_REVIEW = `query ViewerPendingReview($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      viewerLatestReview { id state }
+      reviews(last: 20, states: [PENDING]) {
+        nodes { id state }
+      }
+    }
+  }
+}
+`;

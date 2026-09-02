@@ -118,9 +118,10 @@ function prData(options: PrDataOptions = {}) {
 }
 
 /** Which document a call carries, read off its operation name. */
-function operationOf(document: string): 'pr' | 'files' | 'threads' {
+function operationOf(document: string): 'pr' | 'files' | 'threads' | 'pending' {
   if (document.includes('query PullRequestFilesPage')) return 'files';
   if (document.includes('query PullRequestReviewThreadsPage')) return 'threads';
+  if (document.includes('query ViewerPendingReview')) return 'pending';
   return 'pr';
 }
 
@@ -133,6 +134,10 @@ interface StubOptions {
   diffError?: Error;
   /** Fields GitHub refused, reported the way the real client reports them. */
   denied?: DeniedField[];
+  /** What VIEWER_PENDING_REVIEW answers. */
+  pendingReview?: unknown;
+  /** A lookup that fails — which must cost the lookup and nothing else. */
+  pendingReviewError?: Error;
 }
 
 /** A `GitHubPort` that answers from fixtures and records what it was asked. */
@@ -147,12 +152,23 @@ function stubGitHub(options: StubOptions = {}) {
       const operation = operationOf(document);
       calls.push(`graphql:${operation}`);
       if (options.graphqlError) throw options.graphqlError;
-      if (options.denied && options.denied.length > 0) onPartial?.(options.denied);
+      // Only the main read selects the subtree a token gets refused — the
+      // pending-review lookup asks for nothing permission-gated. Reporting the
+      // same denial from every document would make `mergeDenied` sum it.
+      if (operation === 'pr' && options.denied && options.denied.length > 0) {
+        onPartial?.(options.denied);
+      }
       if (operation === 'files') {
         return options.filesPage?.(String(variables['after'])) as T;
       }
       if (operation === 'threads') {
         return options.threadsPage?.(String(variables['after'])) as T;
+      }
+      if (operation === 'pending') {
+        if (options.pendingReviewError) throw options.pendingReviewError;
+        return (options.pendingReview ?? {
+          repository: { pullRequest: { viewerLatestReview: null, reviews: { nodes: [] } } },
+        }) as T;
       }
       return (options.pr ?? prData()) as T;
     },
@@ -231,13 +247,17 @@ describe('assemblePullRequest — the two cold-start round trips', () => {
     // through — so anything issued by now was issued concurrently.
     await settleAll();
 
+    // Three, not two: the pending-review lookup needs only the coordinates the
+    // caller already had, so it rides along rather than waiting its turn.
     expect(gate.urls).toEqual([
+      'https://api.github.com/graphql',
       'https://api.github.com/graphql',
       'https://api.github.com/repos/acme/widgets/pulls/42',
     ]);
 
     gate.gates[0]?.(new Response(JSON.stringify({ data: prData() }), { status: 200 }));
-    gate.gates[1]?.(new Response(SAMPLE_DIFF, { status: 200 }));
+    gate.gates[1]?.(new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    gate.gates[2]?.(new Response(SAMPLE_DIFF, { status: 200 }));
 
     const resolved = await payload;
     expect(resolved.headSha).toBe(HEAD);
@@ -501,5 +521,88 @@ describe('a partly-denied response', () => {
     const cached = await payloadFromCache(ports, PR);
 
     expect(cached?.denied).toEqual(CHECKS_DENIED);
+  });
+});
+
+/**
+ * Finding the review the viewer already has open.
+ *
+ * GitHub allows one PENDING review per pull request. Both ways the page writes
+ * a comment begin by opening one, so a reviewer who already had a review open
+ * — in another tab, in GitHub's own UI, or left behind by an earlier build —
+ * could do neither, and the only thing on screen was "User can only have one
+ * pending review per pull request".
+ *
+ * The lookup rides along as its own query rather than four more lines on
+ * PULL_REQUEST_QUERY. That is the point of the last test here: a mistake in a
+ * document that is not the main read must cost the lookup and nothing else.
+ */
+describe('the viewer’s open pending review', () => {
+  const lookup = (pendingId: string | null) => ({
+    repository: {
+      pullRequest: {
+        viewerLatestReview: null,
+        reviews: {
+          nodes: pendingId === null ? [] : [{ id: pendingId, state: 'PENDING' }],
+        },
+      },
+    },
+  });
+
+  it('is attached to the node so the page starts out knowing about it', async () => {
+    const github = stubGitHub({ pendingReview: lookup('PRR_open') });
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.pullRequest['viewerPendingReview']).toEqual({ id: 'PRR_open' });
+  });
+
+  it('is null when the reviewer has none, which is the ordinary case', async () => {
+    const github = stubGitHub({ pendingReview: lookup(null) });
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.pullRequest['viewerPendingReview']).toBeNull();
+  });
+
+  it('never overwrites viewerLatestReview, which means something else', async () => {
+    // `prViewerReviewedAt` reads that field for "since my last review".
+    // Repairing it with a pending review would narrow the diff to the wrong
+    // commit, or to none.
+    const github = stubGitHub({ pendingReview: lookup('PRR_open') });
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.pullRequest['viewerLatestReview']).toBeUndefined();
+  });
+
+  it('does not fail the read when the lookup itself fails', async () => {
+    // The `states` argument on `reviews` has not been introspected. If it is
+    // wrong the document fails validation — and that must cost the lookup, not
+    // the pull request.
+    const github = stubGitHub({ pendingReviewError: new Error('Unknown argument states') });
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.pullRequest.title).toBe('Cache the diff on head SHA');
+    expect(payload.diff.files).toHaveLength(1);
+    expect(payload.pullRequest['viewerPendingReview']).toBeNull();
+  });
+
+  it('asks for it without waiting for the main query to answer', async () => {
+    const github = stubGitHub();
+    const { ports } = testPorts(github.port);
+
+    await assemblePullRequest(ports, PR);
+
+    // Issued in the first wave, beside the pull request itself — it needs only
+    // the coordinates the caller already had.
+    expect(github.calls.slice(0, 3).sort()).toEqual(
+      ['diff', 'graphql:pending', 'graphql:pr'].sort(),
+    );
   });
 });

@@ -26,10 +26,12 @@ import { type DeniedField, mergeDenied } from './graphql-errors';
 import { parseUnifiedDiff } from './diff';
 import { fetchFilesFallback } from './files-fallback';
 import { type Connection, type Paged, collectConnection } from './pagination';
+import { readPendingReviewId } from './pending-review-lookup';
 import {
   FILES_PAGE_QUERY,
   PULL_REQUEST_QUERY,
   REVIEW_THREADS_PAGE_QUERY,
+  VIEWER_PENDING_REVIEW,
 } from './queries';
 import type { PullRequestFile, ReviewThread } from './types';
 
@@ -344,6 +346,31 @@ export async function assemblePullRequest(
   // would bury it — and must not sit unhandled while the query is inspected.
   const diffPromise = settle(loadDiff(ports, pr));
 
+  /**
+   * Whether the reviewer already has a review open on this pull request.
+   *
+   * Its own document, and settled rather than unwrapped, for the same reason:
+   * GitHub allows one PENDING review per pull request and refuses to open a
+   * second, and both ways the page writes a comment begin by opening one — so
+   * a reviewer with a review already open could neither start a review nor post
+   * a single comment. The page has to start out knowing.
+   *
+   * Not folded into PULL_REQUEST_QUERY because the `states` argument it needs
+   * has not been introspected. There, a mistake would fail validation and take
+   * the whole pull request down. Here it costs the lookup and nothing else, and
+   * the page loads exactly as it did before.
+   *
+   * Needs only the coordinates the caller already had, so it goes out with the
+   * other two rather than after them.
+   */
+  const pendingPromise = settle(
+    ports.github.graphql<unknown>(
+      VIEWER_PENDING_REVIEW,
+      { owner: pr.owner, repo: pr.repo, number: pr.number },
+      denials.collect,
+    ),
+  );
+
   const data = await queryPromise;
 
   const node = data.repository?.pullRequest;
@@ -381,10 +408,29 @@ export async function assemblePullRequest(
     threads: threads.truncated,
   };
 
+  const pendingLookup = await pendingPromise;
+  /**
+   * The reviewer's open review, as a field of its own.
+   *
+   * Deliberately not written over `viewerLatestReview`, which means something
+   * different and is read for something else: `prViewerReviewedAt` uses it to
+   * find the commit "since my last review" compares against. Repairing that
+   * field with a pending review would narrow the diff to the wrong commit.
+   *
+   * Null when the lookup failed as well as when there is genuinely no review.
+   * The two are the same to every reader — neither can name a review to join —
+   * and the failure path that matters is covered where it happens.
+   */
+  const viewerPendingReview = pendingLookup.ok
+    ? readPendingReviewId(pendingLookup.value)
+    : null;
+
   const fullNode: PullRequestNode = {
     ...node,
     files: merged(node.files, files),
     reviewThreads: merged(node.reviewThreads, threads),
+    viewerPendingReview:
+      viewerPendingReview === null ? null : { id: viewerPendingReview },
   };
   const checks = node.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null;
 

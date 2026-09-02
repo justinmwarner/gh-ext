@@ -83,6 +83,19 @@ type OpenReviewResult =
   | { ok: false; kind: 'no-id' };
 
 /**
+ * The same, plus whether the review was already there.
+ *
+ * `joined` changes what the caller may do with it. A review this page opened
+ * holds exactly what this page put in it, so publishing it is safe. One that
+ * was already open may hold comments made elsewhere, and submitting it would
+ * send those too.
+ */
+type JoinReviewResult =
+  | { ok: true; reviewId: string; joined: boolean }
+  | { ok: false; kind: 'refused'; message: string }
+  | { ok: false; kind: 'no-id' };
+
+/**
  * The events a reviewer can submit.
  *
  * `DISMISS` is a member of `PullRequestReviewEvent` but is not a reviewer
@@ -158,20 +171,54 @@ export function useReviewSession(): ReviewSessionValue {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** A usable review id, or null. An empty one is worse than none. */
+const reviewIdOf = (value: unknown): string | null => {
+  if (!isRecord(value)) return null;
+  const id = value['id'];
+  return typeof id === 'string' && id !== '' ? id : null;
+};
+
+/**
+ * The id of the review the viewer has open on the server, if any.
+ *
+ * Two fields, in this order, because they do not mean the same thing:
+ *
+ * - `viewerPendingReview` is the worker's own lookup — it asked GitHub directly
+ *   for a review in PENDING state. This is the reliable answer.
+ * - `viewerLatestReview` is "the latest review *given* from the viewer", and a
+ *   PENDING review has not been given to anyone. It is read second, and only
+ *   when it *is* pending, both because a payload cached before the lookup
+ *   existed still carries it and because it costs nothing to accept.
+ *
+ * Order matters when both are set: `viewerLatestReview` may be last week's
+ * approval while a review is open right now. Comments belong on the open one.
+ */
+export function openReviewId(node: PullRequestNode | undefined | null): string | null {
+  // `findOpenReview` reads this off a re-read of the pull request, on a path
+  // that has already failed once, and what comes back crossed `sendMessage` as
+  // JSON. A throw here escapes `postThread` unhandled, which leaves the
+  // composer stuck on "Posting…" with no way back and the comment in limbo.
+  if (!isRecord(node)) return null;
+
+  const found = reviewIdOf(node['viewerPendingReview']);
+  if (found !== null) return found;
+
+  const latest = node['viewerLatestReview'];
+  return isRecord(latest) && latest['state'] === 'PENDING' ? reviewIdOf(latest) : null;
+}
+
 /**
  * The review the viewer already has open on the server, if it is still pending.
  *
  * A reviewer who started a review in GitHub's own UI and then came here has an
- * open PENDING review this page knows nothing about. Posting standalone in that
- * state orphans the comment: it is attached to the pull request, the pending
- * review is submitted without it, and nobody is told.
+ * open PENDING review this page knows nothing about. Every way this page writes
+ * a comment begins by opening a review, and GitHub allows exactly one — so
+ * without this, the reviewer can neither start a review nor post a comment, and
+ * the only thing on screen is "User can only have one pending review".
  */
 export function initialPendingReview(node: PullRequestNode): PendingReviewState {
-  const review = node['viewerLatestReview'];
-  if (!isRecord(review) || review['state'] !== 'PENDING') return initialState();
-
-  const reviewId = review['id'];
-  if (typeof reviewId !== 'string' || reviewId === '') return initialState();
+  const reviewId = openReviewId(node);
+  if (reviewId === null) return initialState();
 
   // Straight through the machine rather than around it: `review-resumed` is
   // the transition that exists for exactly this, and it declines to clobber a
@@ -471,6 +518,45 @@ export function ReviewSessionProvider({
     return { ok: true, reviewId };
   }, [mutate, prId]);
 
+  /**
+   * The review the viewer has open on GitHub right now, if any.
+   *
+   * A re-read rather than a query of its own: the worker already asks this
+   * question on every read and puts the answer on the node, and the page has no
+   * way to run a query itself — only mutations cross the protocol. Refreshing
+   * also leaves the cache holding the truth, so the next surface to look agrees
+   * with this one.
+   */
+  const findOpenReview = useCallback(async (): Promise<string | null> => {
+    const response = await request(message('get-pr', { pr: prRef, refresh: true }));
+    return response.ok ? openReviewId(response.data?.pullRequest) : null;
+  }, [prRef]);
+
+  /**
+   * Get a review to write into — a new one, or the one already open.
+   *
+   * GitHub allows one PENDING review per pull request and answers a second with
+   * "User can only have one pending review per pull request". Both ways this
+   * page writes a comment begin by opening one, so without this a reviewer
+   * holding an open review can do neither.
+   *
+   * The refusal is not read. Matching GitHub's wording would strand the
+   * reviewer again the day it changes, and the wording is not the question: if
+   * a review is open, joining it is the right move whatever the refusal said.
+   * The cost of asking is one re-read on a path that has already failed.
+   */
+  const openOrJoinReview = useCallback(async (): Promise<JoinReviewResult> => {
+    const opened = await openReview();
+    if (opened.ok) return { ...opened, joined: false };
+
+    const existing = await findOpenReview();
+    if (existing !== null) return { ok: true, reviewId: existing, joined: true };
+
+    // Nothing is open, so the refusal was about something else. Inventing a
+    // review to join would replace a real explanation with a wrong one.
+    return opened;
+  }, [findOpenReview, openReview]);
+
   const addThread = useCallback(
     (reviewId: string, { path, body, anchor }: NewThreadInput) =>
       mutate(ADD_THREAD, {
@@ -495,6 +581,23 @@ export function ReviewSessionProvider({
       return created;
     },
     [],
+  );
+
+  /** Add one comment to the review the reviewer opened. It stays unposted. */
+  const queueThread = useCallback(
+    async (reviewId: string, input: NewThreadInput): Promise<boolean> => {
+      const added = await addThread(reviewId, input);
+      if (!added.ok) {
+        fail(NEW_THREAD, `Posting this comment failed: ${added.error.message}`);
+        return false;
+      }
+
+      const created = takeThread(added.data.data);
+      if (created !== null) markUnpublished(created.id);
+      dispatch({ type: 'comment-added' });
+      return true;
+    },
+    [addThread, fail, markUnpublished, takeThread],
   );
 
   /**
@@ -525,7 +628,7 @@ export function ReviewSessionProvider({
    */
   const publishThread = useCallback(
     async (input: NewThreadInput): Promise<boolean> => {
-      const opened = await openReview();
+      const opened = await openOrJoinReview();
       if (!opened.ok) {
         fail(
           NEW_THREAD,
@@ -536,6 +639,33 @@ export function ReviewSessionProvider({
         return false;
       }
       const { reviewId } = opened;
+
+      /**
+       * The reviewer already had a review open, so this comment joins it.
+       *
+       * Publishing it would mean submitting that whole review — including
+       * comments made in another tab or in GitHub's own UI that this page has
+       * never seen. Sending someone's half-written review because they left one
+       * line of feedback is not a thing to do on their behalf.
+       *
+       * So the comment is queued and the page says plainly that it was queued.
+       * The composer promised "posts immediately" and that turned out not to be
+       * available; the reviewer has to hear that from us rather than discover
+       * it when nobody replies.
+       */
+      if (opened.joined) {
+        dispatch({ type: 'review-resumed', reviewId, commentCount: 0 });
+        const queued = await queueThread(reviewId, input);
+        if (queued) {
+          fail(
+            REVIEW_SUBMIT,
+            'You already had a review open on GitHub, so this comment was ' +
+              'added to it rather than posted on its own. Nothing on that ' +
+              'review is visible to anyone else until you submit it below.',
+          );
+        }
+        return queued;
+      }
 
       const added = await addThread(reviewId, input);
       if (!added.ok) {
@@ -567,24 +697,7 @@ export function ReviewSessionProvider({
 
       return true;
     },
-    [addThread, fail, markUnpublished, mutate, openReview, takeThread],
-  );
-
-  /** Add one comment to the review the reviewer opened. It stays unposted. */
-  const queueThread = useCallback(
-    async (reviewId: string, input: NewThreadInput): Promise<boolean> => {
-      const added = await addThread(reviewId, input);
-      if (!added.ok) {
-        fail(NEW_THREAD, `Posting this comment failed: ${added.error.message}`);
-        return false;
-      }
-
-      const created = takeThread(added.data.data);
-      if (created !== null) markUnpublished(created.id);
-      dispatch({ type: 'comment-added' });
-      return true;
-    },
-    [addThread, fail, markUnpublished, takeThread],
+    [addThread, fail, markUnpublished, mutate, openOrJoinReview, queueThread, takeThread],
   );
 
   const postThread = useCallback(
@@ -604,7 +717,7 @@ export function ReviewSessionProvider({
     if (pendingNow.current.kind === 'pending') return true;
 
     clearFailure(REVIEW_START);
-    const opened = await openReview();
+    const opened = await openOrJoinReview();
 
     if (!opened.ok) {
       fail(
@@ -616,9 +729,16 @@ export function ReviewSessionProvider({
       return false;
     }
 
-    dispatch({ type: 'review-started', reviewId: opened.reviewId });
+    // A joined review is `review-resumed`, not `review-started`: the machine
+    // uses that distinction to say its comment count is a floor rather than a
+    // total, and a joined review really may hold comments made elsewhere.
+    dispatch(
+      opened.joined
+        ? { type: 'review-resumed', reviewId: opened.reviewId, commentCount: 0 }
+        : { type: 'review-started', reviewId: opened.reviewId },
+    );
     return true;
-  }, [clearFailure, fail, openReview]);
+  }, [clearFailure, fail, openOrJoinReview]);
 
   /**
    * Submit the pending review.

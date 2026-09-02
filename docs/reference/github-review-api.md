@@ -253,6 +253,49 @@ threadId: ID!
 resolutionReason: PullRequestReviewThreadResolutionReason   # optional
 ```
 
+### One pending review per pull request
+
+GitHub allows a reviewer **one** `PENDING` review per pull request and refuses a
+second with:
+
+```
+User can only have one pending review per pull request
+```
+
+Both ways this extension writes a comment begin by opening a review — the single
+comment path above opens one, and "Start a review" opens one — so a reviewer
+already holding an open review could previously do neither. The review may have
+been started in another tab, in GitHub's own UI, or left behind by an earlier
+build of this extension.
+
+`viewerLatestReview` is documented as "the latest review **given** from the
+viewer", and a review still being written has not been given to anyone. It is
+not established that it reports a `PENDING` one, and this extension behaved as
+though it does — which is why `initialPendingReview` said Browse while GitHub
+held an open review. Not verified either way: it could not be executed against
+the live schema at the time. `VIEWER_PENDING_REVIEW` therefore asks **both** ways
+and takes whichever answers:
+
+```graphql
+viewerLatestReview { id state }
+reviews(last: 20, states: [PENDING]) { nodes { id state } }
+```
+
+A pending review is visible only to its author, so the `reviews` connection can
+only ever return the viewer's own.
+
+That lives in its own document, issued alongside `PULL_REQUEST_QUERY` and
+settled rather than unwrapped. The `states` argument has **not** been
+introspected: on the main read a mistake would fail validation and take the
+whole page down, whereas here it costs the lookup and nothing else. Fold it into
+`PULL_REQUEST_QUERY` and save the round trip once it has been executed against
+the live schema.
+
+Recovery does not match on GitHub's wording. When opening a review is refused,
+the page asks whether one is open and joins it if so — a review being open is
+the answer whatever the refusal said, so a reworded message cannot strand the
+reviewer again.
+
 ### Open a pending review — `addPullRequestReview`
 
 ```

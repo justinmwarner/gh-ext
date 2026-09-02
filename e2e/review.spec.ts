@@ -242,7 +242,9 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
   // the review is opened, written to, and submitted in one go — and this
   // asserts the third round trip really happens, in a real browser, because
   // the version that did not looked identical on screen.
-  const mutations = api.operations.filter((name) => name !== 'PullRequestReview');
+  const mutations = api.operations.filter(
+    (name) => name !== 'PullRequestReview' && name !== 'ViewerPendingReview',
+  );
   expect(mutations).toEqual(['StartReview', 'AddThread', 'SubmitReview']);
   expect(api.variables[api.operations.indexOf('SubmitReview')]?.['event']).toBe(
     'COMMENT',
@@ -255,6 +257,53 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
 
   // Nothing is left queued: no pending-review bar, no "not posted" chip.
   await expect(page.getByText(/not posted yet/i)).toHaveCount(0);
+});
+
+/**
+ * A reviewer who already has a review open.
+ *
+ * GitHub allows one PENDING review per pull request and answers a second with
+ * "User can only have one pending review per pull request". Both ways this page
+ * writes a comment begin by opening one, so this reviewer could previously do
+ * neither — the only thing on screen was that refusal.
+ *
+ * The fake API enforces the same rule, so this exercises the real recovery.
+ */
+test('joins a review the reviewer already had open', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  api.pendingReviewId = 'PRR_already';
+
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Known before anything is typed: the page asked, and says what it found.
+  await expect(page.getByText(/not posted yet/i).first()).toBeVisible();
+
+  const gutter = page
+    .locator('diffs-container')
+    .first()
+    .locator('[data-column-number][data-line-type="change-addition"]')
+    .first();
+  await gutter.click();
+  await page.locator('body').press('c');
+
+  const box = page.getByRole('textbox', { name: /comment on src\/app\.ts/i });
+  await expect(box).toBeVisible();
+  await box.fill('Added to the review that was already open.');
+  await page.getByRole('button', { name: 'Add to review', exact: true }).click();
+
+  await expect
+    .poll(() => api.operations.filter((name) => name === 'AddThread').length)
+    .toBe(1);
+
+  // Onto the existing review, and emphatically not submitted: that review may
+  // hold comments made elsewhere, and sending them is not this page's call.
+  const sent = api.variables[api.operations.indexOf('AddThread')];
+  expect(sent?.['pullRequestReviewId']).toBe('PRR_already');
+  expect(api.operations).not.toContain('SubmitReview');
 });
 
 test('the keyboard map works against real key events', async ({

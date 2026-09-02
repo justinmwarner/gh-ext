@@ -38,6 +38,14 @@ export interface ApiLog {
   operations: string[];
   variables: Record<string, unknown>[];
   urls: string[];
+  /**
+   * The review this reviewer already has open, if a test wants one.
+   *
+   * GitHub allows one PENDING review per pull request and refuses a second, so
+   * a reviewer holding one cannot open another — which is the state the page
+   * has to detect and join rather than fail in. Set it before opening the page.
+   */
+  pendingReviewId: string | null;
 }
 
 const json = (route: Route, body: unknown) =>
@@ -57,8 +65,29 @@ const json = (route: Route, body: unknown) =>
 const operationOf = (query: string): string =>
   /(?:query|mutation)\s+(\w+)/.exec(query)?.[1] ?? 'unknown';
 
-function graphqlReply(operation: string, variables: Record<string, unknown>): unknown {
+function graphqlReply(
+  operation: string,
+  variables: Record<string, unknown>,
+  log: ApiLog,
+): unknown {
   switch (operation) {
+    case 'ViewerPendingReview':
+      return {
+        data: {
+          repository: {
+            pullRequest: {
+              viewerLatestReview: null,
+              reviews: {
+                nodes:
+                  log.pendingReviewId === null
+                    ? []
+                    : [{ id: log.pendingReviewId, state: 'PENDING' }],
+              },
+            },
+          },
+        },
+      };
+
     case 'PullRequestReview':
       return { data: { repository: { pullRequest: PULL_REQUEST_NODE } } };
 
@@ -103,6 +132,16 @@ function graphqlReply(operation: string, variables: Record<string, unknown>): un
       };
 
     case 'StartReview':
+      // GitHub allows one pending review per pull request, and this fake obeys
+      // that: a reviewer who already has one gets the same refusal they would
+      // get from the real API.
+      if (log.pendingReviewId !== null) {
+        return {
+          errors: [
+            { message: 'User can only have one pending review per pull request' },
+          ],
+        };
+      }
       return {
         data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_pending' } } },
       };
@@ -139,7 +178,7 @@ function graphqlReply(operation: string, variables: Record<string, unknown>): un
  * instead of quietly succeeding against github.com.
  */
 export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
-  const log: ApiLog = { operations: [], variables: [], urls: [] };
+  const log: ApiLog = { operations: [], variables: [], urls: [], pendingReviewId: null };
 
   await context.route('https://api.github.com/**', async (route) => {
     const request = route.request();
@@ -154,7 +193,7 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
       const operation = operationOf(body.query);
       log.operations.push(operation);
       log.variables.push(body.variables ?? {});
-      await json(route, graphqlReply(operation, body.variables ?? {}));
+      await json(route, graphqlReply(operation, body.variables ?? {}, log));
       return;
     }
 
