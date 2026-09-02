@@ -89,6 +89,16 @@ export function isRenderedLine(
   );
 }
 
+/**
+ * "Nothing has been expanded", shared so the default costs no allocation.
+ *
+ * Expansion is reported per line and only ever on the additions side: Pierre's
+ * `isLineRenderable` takes a one-based new-file line and there is no
+ * deletion-side counterpart, so a deletion-side thread in collapsed context
+ * stays listed. Listed is the safe verdict — it is visible either way.
+ */
+const EMPTY_LINES: ReadonlySet<number> = new Set();
+
 const toAnnotationSide = (side: DiffSide): AnnotationSide =>
   side === 'LEFT' ? 'deletions' : 'additions';
 
@@ -105,6 +115,7 @@ export function layoutThreads(
   threads: readonly ReviewThread[],
   fileDiff: FileDiffMetadata,
   metadata: Map<string, ThreadMetadata> = new Map(),
+  revealed: ReadonlySet<number> = EMPTY_LINES,
 ): FileThreadLayout {
   const lines = renderedLines(fileDiff);
   const { anchored, unanchorable } = partitionThreads([...threads]);
@@ -127,7 +138,15 @@ export function layoutThreads(
   for (const { thread, anchor } of anchored) {
     // The cross-check. Pierre would accept this annotation and then draw
     // nothing, so a line outside the hunks is demoted rather than trusted.
-    if (!isRenderedLine(lines, anchor.side, anchor.lineNumber)) {
+    //
+    // `revealed` is the escape hatch, and it is not a guess: it holds lines
+    // the renderer itself has reported as renderable after expanding
+    // unchanged context. A hunk range is what the *patch* draws; expansion
+    // draws more than that, and none of it is visible in the metadata.
+    if (
+      !isRenderedLine(lines, anchor.side, anchor.lineNumber) &&
+      !(anchor.side === 'additions' && revealed.has(anchor.lineNumber))
+    ) {
       listed.push({ thread, reason: 'out-of-hunk' });
       continue;
     }

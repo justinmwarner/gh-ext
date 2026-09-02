@@ -63,7 +63,11 @@ export const PULL_REQUEST_QUERY = `query PullRequestReview($owner: String!, $rep
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       id number title bodyHTML state isDraft merged
-      baseRefName headRefName headRefOid
+      # baseRefOid as well as headRefOid: expanding unchanged context needs the
+      # whole file on *both* sides, and a blob is read at a commit. Added
+      # 2026-09-01 for Task 26; it is the base-side counterpart of the field
+      # beside it and is a non-null GitObjectID on PullRequest.
+      baseRefName headRefName baseRefOid headRefOid
       permalink
       author { login avatarUrl }
       # GitHub rejects an approval of your own pull request. Comparing

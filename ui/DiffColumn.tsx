@@ -38,7 +38,7 @@ import {
 } from 'react';
 import { CodeView } from '@pierre/diffs/react';
 import type { CodeViewHandle, CodeViewReactOptions } from '@pierre/diffs/react';
-import type { DiffLineAnnotation, SelectedLineRange } from '@pierre/diffs';
+import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from '@pierre/diffs';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnnotationSide } from '@/lib/review/threads';
 import { Composer } from './Composer';
@@ -46,11 +46,12 @@ import { FileCard } from './FileCard';
 import { ThreadCard } from './ThreadCard';
 import { type ComposerTarget, composerFor } from './composerAnchor';
 import { type CardTop, type CurrentFile, shouldScrollDiff, topmostFile } from './currentFile';
+import { type BlobRefs, createDiffFilesLoader } from './blobLoader';
 import {
   codeViewItems,
   diffGeneration,
   fileDiffFor,
-  fileDiffRevision,
+  fileDiffSignature,
   hunkStops,
 } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
@@ -60,7 +61,9 @@ import {
   type ComposerMetadata,
   type FileThreadLayout,
   type ThreadMetadata,
+  isRenderedLine,
   layoutThreads,
+  renderedLines,
   sourceLines,
 } from './reviewThreads';
 
@@ -106,6 +109,14 @@ export interface DiffColumnProps {
   onScrollTo: (path: string) => void;
   /** The Overview asked for a thread. Null until it has. */
   jump?: ThreadJump | null;
+  /**
+   * The two commits to read whole files from, for expanding context.
+   *
+   * Null when there is no base commit to read — an older cached payload — and
+   * the column then passes no loader at all, which is the state Pierre already
+   * handles by drawing no expander rather than one that always fails.
+   */
+  blobs?: BlobRefs | null;
   ref?: Ref<DiffColumnHandle>;
 }
 
@@ -133,6 +144,25 @@ export const CODE_VIEW_SAFE_PROPS = {
 const NO_ANNOTATIONS: DiffLineAnnotation<AnnotationMetadata>[] = [];
 const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: [] };
 
+/**
+ * The two questions only the renderer can answer about a hydrated diff.
+ *
+ * Structural rather than the `FileDiff` class, because the instance handed to
+ * `onPostRender` under `CodeView` is a `VirtualizedFileDiff` and neither is
+ * exported as a value this module should depend on. Both take a one-based
+ * new-file line; there is no deletion-side counterpart in the library.
+ */
+interface LineProbe {
+  /** Is this line on screen *now*, given whatever has been expanded? */
+  isLineRenderable(lineNumber: number): boolean;
+  /** Expand enough context to put it there. False if it already is. */
+  revealLine(lineNumber: number): boolean;
+}
+
+const isLineProbe = (value: unknown): value is LineProbe =>
+  typeof (value as LineProbe | null)?.isLineRenderable === 'function' &&
+  typeof (value as LineProbe).revealLine === 'function';
+
 /** Everything about a thread that decides where — or whether — it anchors. */
 const anchorSignature = (thread: {
   id: string;
@@ -159,12 +189,32 @@ export function DiffColumn({
   current,
   onScrollTo,
   jump = null,
+  blobs = null,
   ref,
 }: DiffColumnProps) {
   const session = useReviewSession();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
+  const [expansionError, setExpansionError] = useState<string | null>(null);
+
+  /**
+   * Which lines the renderer has told us it will actually draw, per file.
+   *
+   * Expanding unchanged context is invisible in the metadata — `expandedHunks`
+   * lives on Pierre's renderer and nothing about `FileDiffMetadata` moves when
+   * a hunk grows — so the only honest source for "is line N on screen" is the
+   * instance's own `isLineRenderable`. That is asked after each render and the
+   * answers accumulate here.
+   *
+   * Accumulating is sound because expansion only ever grows: `expandHunk` adds
+   * to the region and nothing shrinks it short of tearing the renderer down.
+   */
+  const revealed = useRef(new Map<string, Set<number>>());
+  /** Lines already offered to `revealLine`, so a refusal is never retried. */
+  const revealAttempted = useRef(new Set<string>());
+  /** Bumped when a file hydrates or grows, which is what re-runs the layouts. */
+  const [expansion, setExpansion] = useState(0);
 
   /**
    * Annotation metadata, kept alive across renders and across thread updates.
@@ -184,17 +234,27 @@ export function DiffColumn({
    * hand `CodeView` a new array for five hundred untouched files and re-render
    * all of them. So the signature is exactly the fields anchoring reads, and
    * anchoring reads two things, not one: the thread, and the hunks it has to
-   * fall inside. `fileDiffRevision` is the second half. Without it, switching
+   * fall inside. `fileDiffSignature` is the second half. Without it, switching
    * to "changes since my last review" leaves every thread with the verdict it
    * got against the *full* diff — and one whose line is no longer in any hunk
    * stays an annotation Pierre silently declines to draw.
+   *
+   * That signature is a *string of mutable state*, not an identity number,
+   * because expanding context hydrates the metadata **in place** — the object
+   * grows a whole file's worth of lines without ever becoming a different
+   * object. And the revealed-line set is folded in beside it, because the one
+   * thing hydration does *not* write anywhere is which of those new lines the
+   * renderer has been asked to draw.
    */
   const cache = useRef(new Map<string, { signature: string; layout: FileThreadLayout }>());
   const layouts = useMemo(() => {
     const built = new Map<string, FileThreadLayout>();
     for (const file of files) {
       const threads = session.byPath.get(file.path) ?? [];
-      const signature = `${fileDiffRevision(file)}#${threads.map(anchorSignature).join('|')}`;
+      const open = revealed.current.get(file.path);
+      const signature =
+        `${fileDiffSignature(file)}#${open?.size ?? 0}#` +
+        threads.map(anchorSignature).join('|');
       const cached = cache.current.get(file.path);
       if (cached !== undefined && cached.signature === signature) {
         built.set(file.path, cached.layout);
@@ -203,12 +263,16 @@ export function DiffColumn({
       const layout =
         threads.length === 0
           ? NO_LAYOUT
-          : layoutThreads(threads, fileDiffFor(file), metadata.current);
+          : layoutThreads(threads, fileDiffFor(file), metadata.current, open);
       cache.current.set(file.path, { signature, layout });
       built.set(file.path, layout);
     }
     return built;
-  }, [files, session.byPath]);
+    // `expansion` is not read here — it is what tells React the mutable state
+    // above has moved. Pierre hydrates in place and fires no callback a
+    // consumer can subscribe to, so a render has to be provoked from the
+    // outside or the memo would never be asked the question again.
+  }, [files, session.byPath, expansion]);
 
   const annotationsByPath = useMemo(() => {
     const built = new Map<string, DiffLineAnnotation<AnnotationMetadata>[]>();
@@ -365,14 +429,114 @@ export function DiffColumn({
     [stops],
   );
 
+  /**
+   * What a rendered file has to say about itself, once per render pass.
+   *
+   * This is the only channel there is. Pierre hydrates the metadata in place
+   * and fires no hydration or expansion callback a consumer of `CodeView` can
+   * subscribe to — `onHunkExpand` is wired to the library's own handler and is
+   * not on the options a consumer can set — so `onPostRender` is where the
+   * question gets asked, and the instance it hands over is what answers it.
+   */
+  const noticeExpansion = useRef(
+    (path: string, fileDiff: FileDiffMetadata, probe: LineProbe) => {},
+  );
+  noticeExpansion.current = (path, fileDiff, probe) => {
+    // A partial diff draws exactly its hunks, which the layout already knows.
+    if (fileDiff.isPartial) return;
+
+    const threads = session.byPath.get(path) ?? [];
+    if (threads.length === 0) return;
+
+    const drawn = renderedLines(fileDiff);
+    let open = revealed.current.get(path);
+    let grew = false;
+
+    for (const thread of threads) {
+      const line = thread.line;
+      // Only the additions side, and only threads with a live line: those are
+      // the ones `isLineRenderable` can be asked about at all.
+      if (line === null || thread.diffSide !== 'RIGHT' || thread.subjectType !== 'LINE') {
+        continue;
+      }
+      if (isRenderedLine(drawn, 'additions', line) || open?.has(line) === true) continue;
+
+      if (probe.isLineRenderable(line)) {
+        if (open === undefined) {
+          open = new Set<number>();
+          revealed.current.set(path, open);
+        }
+        open.add(line);
+        grew = true;
+        continue;
+      }
+
+      // Still collapsed. Ask once for it to be drawn: the reviewer has already
+      // chosen to expand this file, and a comment sitting invisibly in the
+      // middle of the context they just revealed is the exact failure the
+      // per-file list exists to prevent.
+      const attempt = `${path} ${line}`;
+      if (revealAttempted.current.has(attempt)) continue;
+      revealAttempted.current.add(attempt);
+      probe.revealLine(line);
+    }
+
+    // Only when something actually moved. This runs after every render of
+    // every mounted file, and an unconditional bump would be a render loop.
+    if (grew) setExpansion((count) => count + 1);
+  };
+
+  /**
+   * The loader, rebuilt only when the two commits move.
+   *
+   * Keyed on a string rather than on `blobs` itself because the caller builds
+   * that object inline; a new identity per render would hand `CodeView` new
+   * options every render and re-render every mounted diff.
+   */
+  const refsKey =
+    blobs === null
+      ? ''
+      : `${blobs.pr.owner}/${blobs.pr.repo}/${blobs.pr.number}@${blobs.baseSha}..${blobs.headSha}`;
+  const refs = useRef(blobs);
+  refs.current = blobs;
+  const loadDiffFiles = useMemo(
+    () =>
+      refs.current === null
+        ? null
+        : createDiffFilesLoader(refs.current, (_path, reason) => {
+            setExpansionError(reason);
+          }),
+    [refsKey],
+  );
+
   const options = useMemo<CodeViewReactOptions<AnnotationMetadata>>(
     () => ({
       ...CODE_VIEW_OPTIONS,
+      // Present only when there is somewhere to load from. Its mere presence
+      // is what makes Pierre draw an expander at all, so an always-present
+      // loader that always failed would be worse than none.
+      ...(loadDiffFiles === null ? {} : { loadDiffFiles }),
       onGutterUtilityClick(range: SelectedLineRange, context: { item: { id: string } }) {
         openComposer.current(context.item.id, range);
       },
+      onPostRender(_node: HTMLElement, instance: unknown, phase: string, context: unknown) {
+        // 'unmount' fires whenever virtualization recycles an item out of the
+        // window. Nothing to read from an instance that is being torn down.
+        if (phase === 'unmount' || !isLineProbe(instance)) return;
+
+        const record = context as {
+          type?: unknown;
+          item?: { id?: unknown; fileDiff?: FileDiffMetadata };
+        };
+        if (record.type !== 'diff') return;
+        const path = record.item?.id;
+        const fileDiff = record.item?.fileDiff;
+        if (typeof path !== 'string' || fileDiff === undefined) return;
+
+        noticeExpansion.current(path, fileDiff, instance);
+      },
     }),
-    [],
+    [loadDiffFiles],
   );
 
   /** The source text under the composer's selection, for the suggestion button. */
@@ -515,6 +679,15 @@ export function DiffColumn({
       {unplaceable !== null && (
         <p className="notice" role="alert">
           {unplaceable}
+        </p>
+      )}
+
+      {expansionError !== null && (
+        // Pierre catches a rejected `loadDiffFiles`, logs it and leaves the
+        // hunk shut — so without this the expander is a control that visibly
+        // does nothing.
+        <p className="notice" role="alert" data-expansion-error>
+          {expansionError}
         </p>
       )}
 

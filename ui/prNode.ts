@@ -72,6 +72,22 @@ export function prBranches(node: PullRequestNode): {
   };
 }
 
+/**
+ * The base commit this pull request is diffed against, or null.
+ *
+ * Half of what expanding unchanged context needs: a blob is read at a commit,
+ * and the head side alone would only ever fill in the additions.
+ *
+ * Null rather than a guess when the field is missing. A payload cached by a
+ * build that predates the field has no `baseRefOid`, and falling back to the
+ * base *branch* would read whatever has landed on it since — the expanded
+ * context would be someone else's code, silently. Without a base commit the
+ * loader is simply not offered, and Pierre goes back to showing no expander.
+ */
+export function prBaseSha(node: PullRequestNode): string | null {
+  return readString(node['baseRefOid']);
+}
+
 export function prPermalink(node: PullRequestNode): string | null {
   return safeGitHubUrl(node['permalink']);
 }

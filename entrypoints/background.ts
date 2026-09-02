@@ -25,6 +25,7 @@ import {
   prKey,
   readHeadSha,
 } from '@/lib/github/assembly';
+import { type BlobResult, BlobCache, fetchBlob } from '@/lib/github/blobs';
 import { AuthError, GitHubClient, RateLimitError } from '@/lib/github/client';
 import { parseUnifiedDiff } from '@/lib/github/diff';
 import { reviewHash } from '@/lib/github/pr-url';
@@ -200,6 +201,48 @@ export default defineBackground({
       return { base, head, files: parseUnifiedDiff(raw) };
     }
 
+    /**
+     * Blobs already read, in memory for as long as this worker lives.
+     *
+     * In memory rather than in `storage.session` on purpose: a file's whole
+     * contents are far larger than anything else this extension caches, two of
+     * them are read per expanded file, and losing them on a worker restart
+     * costs one request the reviewer already waited for once.
+     *
+     * A blob at a commit cannot change, so there is no TTL and no invalidation
+     * — only the budget in `BlobCache`.
+     */
+    const blobs = new BlobCache();
+
+    /**
+     * One side of one file, for `loadDiffFiles` on the review page.
+     *
+     * `absent`, `too-large` and `binary` come back as values rather than as
+     * errors because each is a fact about the file that the reviewer has to be
+     * told in its own words. They are cached alongside the successes: a file
+     * that had no base side a moment ago still has none.
+     */
+    async function getBlob(pr: PrRef, path: string, ref: string): Promise<BlobResult> {
+      if (path === '' || ref === '') {
+        throw new ProtocolFailure(
+          'bad-request',
+          'A blob needs both a path and a commit, and one of them was missing.',
+        );
+      }
+
+      const cached = blobs.get(ref, path);
+      if (cached !== undefined) return cached;
+
+      const result = await fetchBlob(authorizedFetch, {
+        owner: pr.owner,
+        repo: pr.repo,
+        path,
+        ref,
+      });
+      blobs.set(ref, path, result);
+      return result;
+    }
+
     async function validateToken(): Promise<TokenValidation> {
       const data = await client.graphql<{ viewer: { login: string } }>(VIEWER_QUERY, {});
       return { login: data.viewer.login };
@@ -242,6 +285,10 @@ export default defineBackground({
           case 'compare-diff':
             return ok<'compare-diff'>(
               await compareDiff(message.pr, message.base, message.head),
+            );
+          case 'get-blob':
+            return ok<'get-blob'>(
+              await getBlob(message.pr, message.path, message.ref),
             );
           case 'validate-token':
             return ok<'validate-token'>(await validateToken());

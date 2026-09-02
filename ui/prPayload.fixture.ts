@@ -24,6 +24,7 @@ export function pullRequestNode(
     number: 42,
     title: 'Cache the diff on head SHA',
     headRefOid: 'f'.repeat(40),
+    baseRefOid: 'a'.repeat(40),
     state: 'OPEN',
     isDraft: false,
     merged: false,

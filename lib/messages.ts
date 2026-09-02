@@ -12,6 +12,7 @@
  * instants are epoch milliseconds and absence is `null`.
  */
 
+import type { BlobResult } from './github/blobs';
 import type { ParsedDiffFile } from './github/diff';
 import type { FallbackDiffFile } from './github/files-fallback';
 import type { ReviewThread } from './github/types';
@@ -202,6 +203,24 @@ export interface ProtocolMap {
     response: CompareDiff;
   };
 
+  /**
+   * Review page → worker: one file's whole contents at one commit.
+   *
+   * What makes "expand unchanged context" possible. A patch carries only the
+   * lines it changed, so Pierre marks the parsed diff `isPartial` and draws no
+   * expand affordance at all until it is handed both sides of the file in full;
+   * `ref` is the base commit for one call and the head commit for the other.
+   *
+   * Here rather than on the page for the reason every other fetch is: the page
+   * has no token and never calls `fetch`. The reply is a result rather than an
+   * error for the three cases that are facts about the file — no such side, too
+   * large, not text — because each needs its own sentence on screen.
+   */
+  'get-blob': {
+    request: { pr: PrRef; path: string; ref: string };
+    response: BlobResult;
+  };
+
   /** Options page → worker: does the stored token work, and who is it? */
   'validate-token': { request: Record<string, never>; response: TokenValidation };
 
@@ -287,6 +306,7 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   'get-pr': true,
   mutate: true,
   'compare-diff': true,
+  'get-blob': true,
   'validate-token': true,
   'get-rate-limit': true,
 };

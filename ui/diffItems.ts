@@ -133,7 +133,8 @@ export function fileDiffFor(file: ReviewFile): FileDiffMetadata {
 }
 
 /**
- * A number that changes exactly when a file's parsed diff does.
+ * A value that changes exactly when a file's parsed diff does — including when
+ * it changes without becoming a different object.
  *
  * The column memoizes each file's thread layout, and the obvious cache key —
  * the threads themselves — is not enough. Switching to "changes since my last
@@ -144,21 +145,51 @@ export function fileDiffFor(file: ReviewFile): FileDiffMetadata {
  * annotation outside a rendered hunk in silence: the comment disappears with no
  * error anywhere.
  *
- * A revision number rather than the object itself so it composes into the
- * string signature the layout cache already builds, and a `WeakMap` so a diff
- * that is collected takes its number with it.
+ * **Identity alone is not enough either, and this is the subtler half.** When
+ * `loadDiffFiles` hydrates a partial diff, Pierre upgrades the metadata *in
+ * place*: `CodeView.recomputeLayout` calls `Object.assign(item.item.fileDiff,
+ * hydrated)` on the very object handed to it (verified against 1.3.6 — see the
+ * test that pins it). `isPartial` flips to false, `hunks` is rebuilt and both
+ * line arrays grow to the whole file, and through all of it `===` still holds.
+ * A `WeakMap`-keyed revision number can never notice, so a thread demoted while
+ * its line was collapsed would stay in the per-file list forever after the
+ * reviewer expanded to it.
+ *
+ * So the signature is the identity number *plus* the mutable state hydration
+ * rewrites. The identity term keeps two structurally identical parses of
+ * different files apart; the rest is what changes underneath one.
  */
 const diffRevisions = new WeakMap<FileDiffMetadata, number>();
 let nextDiffRevision = 0;
 
-export function fileDiffRevision(file: ReviewFile): number {
-  const parsed = fileDiffFor(file);
+function identityOf(parsed: FileDiffMetadata): number {
   const seen = diffRevisions.get(parsed);
   if (seen !== undefined) return seen;
 
   nextDiffRevision += 1;
   diffRevisions.set(parsed, nextDiffRevision);
   return nextDiffRevision;
+}
+
+/**
+ * The state hydration rewrites, as a string.
+ *
+ * Lengths and counts rather than contents: this runs for every file on every
+ * render of the column, and a five-hundred-file pull request cannot afford to
+ * hash half a million lines to find out that nothing moved. Every one of these
+ * is rewritten by `hydrateTwoSidedFileDiff`, so any of them alone would do —
+ * together they also catch a re-parse that produced a different shape.
+ */
+export function fileDiffSignature(file: ReviewFile): string {
+  const parsed = fileDiffFor(file);
+  return [
+    identityOf(parsed),
+    parsed.isPartial ? 'partial' : 'whole',
+    parsed.hunks.length,
+    parsed.additionLines.length,
+    parsed.deletionLines.length,
+    parsed.unifiedLineCount,
+  ].join('.');
 }
 
 /**

@@ -120,6 +120,34 @@ export function clickGutterUtility(
   button.dispatchEvent(new PointerEvent('pointerup', POINTER));
 }
 
+/**
+ * The expand affordance on a hunk separator, if Pierre drew one.
+ *
+ * It only exists when the diff can grow: a patch-parsed diff is `isPartial`,
+ * and Pierre renders no expander at all for one unless a `loadDiffFiles` loader
+ * has been supplied. So "is this null" is the honest test of whether the
+ * loader reached the renderer.
+ */
+export function hunkExpander(path: string): HTMLElement | null {
+  const found = fileShadow(path).querySelector('[data-expand-button]');
+  return found instanceof HTMLElement ? found : null;
+}
+
+/**
+ * Press it.
+ *
+ * `InteractionManager` acts on a composed `click`, not on the pointer sequence
+ * the gutter "+" needs, so this is an ordinary click that crosses the shadow
+ * boundary.
+ */
+export function clickHunkExpander(path: string): void {
+  const button = hunkExpander(path);
+  if (button === null) {
+    throw new Error(`no hunk expander is showing on ${path}`);
+  }
+  button.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+}
+
 export interface GutterPoint {
   lineNumber: number;
   side: AnnotationSide;

@@ -30,7 +30,8 @@ import { TopBar } from './TopBar';
 import { TruncationNotice } from './TruncationNotice';
 import { type CurrentFile, NO_FILE, fromScroll, fromTree } from './currentFile';
 import { pullRequestUrl } from './githubUrl';
-import { prPermalink, prViewerIsAuthor, prViewerReviewedAt } from './prNode';
+import type { BlobRefs } from './blobLoader';
+import { prBaseSha, prPermalink, prViewerIsAuthor, prViewerReviewedAt } from './prNode';
 import { type ReviewFile, reviewFiles } from './reviewFiles';
 import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 import { orderedThreads } from './reviewThreads';
@@ -125,6 +126,27 @@ function ReviewSurface({ payload }: { payload: PrPayload }) {
   }, []);
 
   const paths = useMemo(() => files.map((file) => file.path), [files]);
+
+  /**
+   * The two commits the column reads whole files from, for expanding context.
+   *
+   * The base moves with the diff on screen. While the comparison is showing,
+   * the patches are `reviewedAt...head`, so their unchanged context is the
+   * file as it stood at the reviewer's last review — expanding against the
+   * pull request's own base would splice in lines from a different diff.
+   *
+   * Null when there is no base commit at all: a payload cached before
+   * `baseRefOid` was queried has none, and the column then offers no expander
+   * rather than one that cannot work.
+   */
+  const baseSha = narrowed ? reviewedAt : prBaseSha(payload.pullRequest);
+  const blobs = useMemo(
+    (): BlobRefs | null =>
+      baseSha === null
+        ? null
+        : { pr: payload.ref, baseSha, headSha: payload.headSha },
+    [baseSha, payload.ref, payload.headSha],
+  );
 
   // Read inside the keyboard handlers, which are rebuilt every render but are
   // installed once. Everything they need is here rather than closed over.
@@ -274,6 +296,7 @@ function ReviewSurface({ payload }: { payload: PrPayload }) {
           current={current}
           onScrollTo={selectFromScroll}
           jump={jump}
+          blobs={blobs}
         />
       </div>
       <ReviewFooter viewerIsAuthor={prViewerIsAuthor(payload.pullRequest)} />

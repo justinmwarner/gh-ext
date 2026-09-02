@@ -22,14 +22,17 @@ import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
 import { request } from './background';
+import { fileDiffFor, fileDiffSignature } from './diffItems';
 import { NO_FILE } from './currentFile';
 import { memoryStore } from './memoryStore.fixture';
 import {
   annotationIsVisible,
   annotationNode,
   clickGutterUtility,
+  clickHunkExpander,
   diffHasRendered,
   dragGutterUtility,
+  hunkExpander,
 } from './pierreDom.fixture';
 import { pullRequestNode, reviewThread } from './prPayload.fixture';
 import type { ReviewFile } from './reviewFiles';
@@ -771,5 +774,142 @@ describe('starting a comment from the gutter', () => {
     expect(alert.textContent).toMatch(/both sides/i);
     expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
     expect(requestMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('expanding unchanged context', () => {
+  // Task 26. A patch-parsed diff is `isPartial`, so Pierre draws no expand
+  // affordance for it at all until `loadDiffFiles` is supplied — and once it
+  // hydrates, it upgrades the metadata object *in place*, so the layout memo
+  // keyed on that object's identity never notices that the file grew.
+
+  const BASE_SHA = 'a'.repeat(40);
+  const HEAD_SHA = 'f'.repeat(40);
+  const BLOBS = { pr: PR_REF, baseSha: BASE_SHA, headSha: HEAD_SHA } as const;
+
+  /** The lines `gappedPatch` never sends: the collapsed 4–19 gap. */
+  const GAP = Array.from({ length: 16 }, (_, index) => `context ${index + 4}`);
+
+  const wholeFile = (second: string, twentyFirst: string): string =>
+    ['one', second, 'three', ...GAP, 'twenty', twentyFirst, 'twentytwo'].join('\n');
+
+  const OLD_FILE = wholeFile('before', 'old');
+  const NEW_FILE = wholeFile('after', 'new');
+
+  const serveBlobs = () => {
+    requestMock.mockImplementation((msg: { kind: string; ref?: string }) => {
+      if (msg.kind !== 'get-blob') {
+        return Promise.resolve({ ok: true, data: { data: {} } });
+      }
+      return Promise.resolve({
+        ok: true,
+        data: { status: 'ok', text: msg.ref === BASE_SHA ? OLD_FILE : NEW_FILE },
+      });
+    });
+  };
+
+  it('anchors a thread that was demoted while its line was collapsed', async () => {
+    serveBlobs();
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], { blobs: BLOBS }, [
+      reviewThread({ path: 'src/app.ts', line: 5 }),
+    ]);
+    await untilDrawn('src/app.ts');
+
+    // Line 5 sits in the 4-19 gap between the two hunks. It exists in the
+    // file, it is not outdated, and `partitionThreads` calls it anchored — and
+    // Pierre would draw nothing for it, so it is demoted into the list.
+    await waitFor(() => {
+      expect(section('src/app.ts')).toBeDefined();
+    });
+    expect(
+      section('src/app.ts').querySelector('[data-listed-reason="out-of-hunk"]'),
+    ).not.toBeNull();
+
+    // The affordance only exists because a loader was supplied.
+    expect(hunkExpander('src/app.ts')).not.toBeNull();
+
+    await act(async () => {
+      clickHunkExpander('src/app.ts');
+    });
+
+    // The gap is now drawn, so the comment can be — and is — anchored to it.
+    await waitFor(
+      () => {
+        expect(annotationIsVisible('src/app.ts', 'additions', 5)).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+
+    const node = annotationNode('src/app.ts', 'additions', 5);
+    if (node === null) throw new Error('unreachable');
+    expect(within(node).getByText('This allocates on every call.')).toBeDefined();
+    // And it is no longer listed as something the diff cannot show.
+    expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
+  });
+
+  it('shows no expand affordance at all without a loader', async () => {
+    // The other half of the same fact, and the reason this task exists.
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    expect(hunkExpander('src/app.ts')).toBeNull();
+  });
+
+  it('upgrades the very object it was handed, which is why the memo watches its contents', async () => {
+    // Not a test of this codebase. It pins the library behaviour the memo
+    // signature is built around, verified against 1.3.6: `CodeView` hydrates
+    // through `Object.assign(item.item.fileDiff, hydrated)`, so the metadata
+    // object we parsed and cached is upgraded where it stands. Identity does
+    // not move, which is exactly why an identity-keyed revision cannot see it.
+    // If this ever stops being true the signature is merely redundant; while
+    // it is true and the signature only watched identity, a comment revealed
+    // by expanding context would stay listed as undrawable forever.
+    serveBlobs();
+    const target = file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') });
+    mount([target], { blobs: BLOBS });
+    await untilDrawn('src/app.ts');
+
+    const parsed = fileDiffFor(target);
+    expect(parsed.isPartial).toBe(true);
+    expect(parsed.additionLines.length).toBe(6);
+    const before = fileDiffSignature(target);
+
+    await act(async () => {
+      clickHunkExpander('src/app.ts');
+    });
+    await waitFor(() => {
+      expect(fileDiffFor(target).isPartial).toBe(false);
+    });
+
+    // The same object, holding the whole file.
+    expect(fileDiffFor(target)).toBe(parsed);
+    expect(parsed.additionLines.length).toBe(22);
+    expect(parsed.deletionLines.length).toBe(22);
+    // And the signature moved with it, which identity alone could not.
+    expect(fileDiffSignature(target)).not.toBe(before);
+  });
+
+  it('says why when a side of the file cannot be loaded', async () => {
+    // A binary blob, an oversized one, or a side that does not exist at that
+    // commit. Pierre catches a rejected loader, logs it and leaves the hunk
+    // shut, so without this the expander is a control that does nothing.
+    requestMock.mockImplementation((msg: { kind: string }) =>
+      Promise.resolve(
+        msg.kind === 'get-blob'
+          ? { ok: true, data: { status: 'too-large' } }
+          : { ok: true, data: { data: {} } },
+      ),
+    );
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], {
+      blobs: BLOBS,
+    });
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickHunkExpander('src/app.ts');
+    });
+
+    const notice = await screen.findByRole('alert');
+    expect(notice.textContent).toMatch(/too large to load in full/i);
   });
 });
