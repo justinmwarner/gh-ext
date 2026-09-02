@@ -59,6 +59,20 @@ interface SubmitAction {
   className: string;
 }
 
+/**
+ * Whether the Discard control is offered.
+ *
+ * Off. Discarding calls `deletePullRequestReview`, which is the only
+ * destructive thing this extension can do — it removes a pending review and
+ * every comment queued on it, including comments made in GitHub's own UI that
+ * this page has never seen, and nothing brings them back.
+ *
+ * The machinery stays wired and tested so this is a one-line change rather
+ * than an archaeology exercise. Discarding meanwhile is GitHub's job, and the
+ * escape hatch already goes there.
+ */
+const SHOW_DISCARD = false;
+
 const ACTIONS: readonly SubmitAction[] = [
   { event: 'COMMENT', label: 'Comment', className: 'button' },
   { event: 'APPROVE', label: 'Approve', className: 'button primary' },
@@ -140,14 +154,16 @@ export function ReviewFooter({ viewerIsAuthor }: { viewerIsAuthor: boolean }) {
             );
           })}
 
-          <button
-            type="button"
-            className="button danger"
-            disabled={busy}
-            onClick={() => setConfirming(true)}
-          >
-            Discard
-          </button>
+          {SHOW_DISCARD && (
+            <button
+              type="button"
+              className="button danger"
+              disabled={busy}
+              onClick={() => setConfirming(true)}
+            >
+              Discard
+            </button>
+          )}
         </div>
       </div>
 

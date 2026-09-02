@@ -50,6 +50,14 @@ function Harness() {
       <button
         type="button"
         onClick={() => {
+          void session.discardReview();
+        }}
+      >
+        harness discard
+      </button>
+      <button
+        type="button"
+        onClick={() => {
           void session.postThread({
             path: 'src/app.ts',
             body: 'a comment',
@@ -290,25 +298,32 @@ describe('approving your own pull request', () => {
 });
 
 describe('discarding', () => {
-  it('asks before deleting queued comments', async () => {
+  /**
+   * The control is deliberately hidden. `deletePullRequestReview` is the only
+   * destructive thing this extension can do — it removes a pending review and
+   * every comment queued on it, including ones made in GitHub's own UI that
+   * this page never saw, and nothing brings them back.
+   *
+   * The wiring stays covered here so re-enabling it is a one-line change to
+   * SHOW_DISCARD rather than a rebuild. These drive the session directly,
+   * which is exactly what the button would do.
+   */
+  it('offers no discard control in the footer', async () => {
     const user = userEvent.setup();
     mount();
     await startReview(user);
 
-    await user.click(screen.getByRole('button', { name: /^discard/i }));
-
-    expect(requestMock.mock.calls.length).toBe(1);
-    expect(footer()?.textContent).toMatch(/cannot be undone|permanently/i);
+    expect(screen.queryByRole('button', { name: /^discard/i })).toBeNull();
+    expect(footer()).not.toBeNull();
   });
 
-  it('deletes the review on GitHub once confirmed', async () => {
+  it('deletes the review on GitHub when asked', async () => {
     const user = userEvent.setup();
     mount();
     await startReview(user);
 
-    await user.click(screen.getByRole('button', { name: /^discard/i }));
     requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
-    await user.click(screen.getByRole('button', { name: /discard the review/i }));
+    await user.click(screen.getByRole('button', { name: /harness discard/i }));
 
     await waitFor(() => {
       expect(footer()).toBeNull();
@@ -322,12 +337,11 @@ describe('discarding', () => {
     mount();
     await startReview(user);
 
-    await user.click(screen.getByRole('button', { name: /^discard/i }));
     requestMock.mockResolvedValue({
       ok: false,
       error: { kind: 'unknown', message: 'GitHub said no', resetAt: null },
     });
-    await user.click(screen.getByRole('button', { name: /discard the review/i }));
+    await user.click(screen.getByRole('button', { name: /harness discard/i }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/GitHub said no/);
