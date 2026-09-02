@@ -19,8 +19,9 @@
  */
 
 import { parsePatchFiles } from '@pierre/diffs';
-import type { CodeViewItem, FileDiffMetadata } from '@pierre/diffs';
+import type { CodeViewItem, DiffLineAnnotation, FileDiffMetadata } from '@pierre/diffs';
 import type { ReviewFile } from './reviewFiles';
+import type { AnnotationMetadata } from './reviewThreads';
 
 export type FileBodyKind = 'diff' | 'binary' | 'omitted' | 'renamed-only' | 'no-content';
 
@@ -122,7 +123,7 @@ function parseFileDiff(file: ReviewFile): FileDiffMetadata {
  */
 const parsedByFile = new WeakMap<ReviewFile, FileDiffMetadata>();
 
-function fileDiffFor(file: ReviewFile): FileDiffMetadata {
+export function fileDiffFor(file: ReviewFile): FileDiffMetadata {
   const cached = parsedByFile.get(file);
   if (cached !== undefined) return cached;
 
@@ -137,25 +138,49 @@ function fileDiffFor(file: ReviewFile): FileDiffMetadata {
  * Without it the viewer keeps the record it already measured and the collapse
  * toggle moves our state and nothing else. It is derived rather than counted so
  * that re-deriving the list — which happens on every render — is idempotent.
+ *
+ * The annotations half is derived from the array's *identity*, not its
+ * contents. The column memoizes an annotation array per file and only rebuilds
+ * it when something that affects anchoring moved, so identity is exactly the
+ * question "did these annotations change" — and asking it this way keeps a
+ * resolve on one file from re-rendering every other file's diff.
  */
-const versionOf = (collapsed: boolean): number => (collapsed ? 1 : 0);
+const annotationRevisions = new WeakMap<object, number>();
+let nextRevision = 0;
+
+const revisionOf = (annotations: readonly unknown[] | undefined): number => {
+  if (annotations === undefined || annotations.length === 0) return 0;
+  const seen = annotationRevisions.get(annotations);
+  if (seen !== undefined) return seen;
+  nextRevision += 1;
+  annotationRevisions.set(annotations, nextRevision);
+  return nextRevision;
+};
+
+const versionOf = (
+  collapsed: boolean,
+  annotations: readonly unknown[] | undefined,
+): number => revisionOf(annotations) * 2 + (collapsed ? 1 : 0);
 
 export function codeViewItems(
   files: readonly ReviewFile[],
   collapsedPaths: ReadonlySet<string>,
-): CodeViewItem[] {
+  annotationsByPath: ReadonlyMap<string, DiffLineAnnotation<AnnotationMetadata>[]> = new Map(),
+): CodeViewItem<AnnotationMetadata>[] {
   return files.map((file) => {
     // A file with no diff is collapsed whatever the reviewer chose: expanding
     // it would reveal an empty rectangle where its message used to be.
     const collapsed =
       fileBody(file).kind !== 'diff' || collapsedPaths.has(file.path);
+    const annotations = annotationsByPath.get(file.path);
 
     return {
       id: file.path,
       type: 'diff',
       fileDiff: fileDiffFor(file),
       collapsed,
-      version: versionOf(collapsed),
+      ...(annotations !== undefined ? { annotations } : {}),
+      version: versionOf(collapsed, annotations),
     };
   });
 }

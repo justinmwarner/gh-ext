@@ -8,7 +8,12 @@
  */
 
 import type { FallbackDiffFile } from '@/lib/github/files-fallback';
-import type { FileViewedState, PatchStatus } from '@/lib/github/types';
+import type {
+  FileViewedState,
+  PatchStatus,
+  ReviewComment,
+  ReviewThread,
+} from '@/lib/github/types';
 import type { PrPayload, PullRequestNode } from '@/lib/messages';
 
 export function pullRequestNode(
@@ -156,4 +161,53 @@ export function prPayloadWithFiles(
       },
     }),
   });
+}
+
+/**
+ * One review comment, shaped like `comments.nodes[0]`.
+ *
+ * `author` is nullable in the schema — a comment left by a since-deleted
+ * account arrives with it null — so the fixture types it that way rather than
+ * letting a component assume a login is always there.
+ */
+export function reviewComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
+  return {
+    id: 'PRRC_1',
+    author: { login: 'dana', avatarUrl: 'https://avatars.example/dana' },
+    body: 'This allocates on every call.',
+    createdAt: '2026-08-30T09:15:00Z',
+    url: 'https://github.com/acme/widgets/pull/42#discussion_r1',
+    ...overrides,
+  };
+}
+
+/**
+ * One review thread, with the field relationships GitHub actually maintains.
+ *
+ * `startLine` defaults to `line` rather than to null, because that is what real
+ * payloads carry for a single-line thread (see the API reference, section 1) —
+ * a fixture that nulled it would let `isMultiLine` look correct while being
+ * wrong on every real thread.
+ */
+export function reviewThread(
+  overrides: Partial<ReviewThread> & { path: string },
+): ReviewThread {
+  const line = overrides.line === undefined ? 2 : overrides.line;
+  return {
+    id: `PRRT_${overrides.path}:${line ?? 'none'}`,
+    isResolved: false,
+    isOutdated: false,
+    line,
+    startLine: line,
+    originalLine: line,
+    originalStartLine: null,
+    diffSide: 'RIGHT',
+    startDiffSide: null,
+    subjectType: 'LINE',
+    viewerCanReply: true,
+    viewerCanResolve: true,
+    viewerCanUnresolve: true,
+    comments: { totalCount: 1, nodes: [reviewComment()] },
+    ...overrides,
+  };
 }

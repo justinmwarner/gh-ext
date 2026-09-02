@@ -60,10 +60,21 @@ export const ADD_THREAD = `mutation AddThread(
 }`;
 
 /** Reply to an existing thread. */
-export const ADD_REPLY = `mutation AddReply($pullRequestReviewThreadId: ID!, $body: String!) {
+/**
+ * `pullRequestReviewId` is optional and must be passed whenever a review is
+ * pending. Without it the reply publishes immediately while line comments on
+ * the same review sit queued, so a reviewer submits their review only to find
+ * their replies went out some time earlier.
+ */
+export const ADD_REPLY = `mutation AddReply(
+  $pullRequestReviewThreadId: ID!
+  $body: String!
+  $pullRequestReviewId: ID
+) {
   addPullRequestReviewThreadReply(input: {
     pullRequestReviewThreadId: $pullRequestReviewThreadId
     body: $body
+    pullRequestReviewId: $pullRequestReviewId
   }) {
     comment { id author { login avatarUrl } body createdAt url }
   }

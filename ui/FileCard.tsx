@@ -12,8 +12,10 @@
  */
 
 import type { FileViewedState } from '@/lib/github/types';
+import { UnanchoredThreads } from './UnanchoredThreads';
 import { fileBody } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
+import type { ListedThread } from './reviewThreads';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
 const MINUS = '−';
@@ -66,6 +68,12 @@ export interface FileCardProps {
   onToggleCollapsed: (path: string) => void;
   /** Called with the header element so the column can tell where it sits. */
   onHeaderRef: (path: string, node: HTMLElement | null) => void;
+  /**
+   * Threads on this file that the diff cannot draw. They live in the header
+   * rather than the body because the body is exactly what cannot hold them —
+   * and because the header is rendered even when the card is collapsed.
+   */
+  unanchored: readonly ListedThread[];
 }
 
 export function FileCard({
@@ -73,6 +81,7 @@ export function FileCard({
   collapsed,
   onToggleCollapsed,
   onHeaderRef,
+  unanchored,
 }: FileCardProps) {
   const body = fileBody(file);
   // Nothing to collapse: the card is already only its header, and a toggle that
@@ -125,6 +134,8 @@ export function FileCard({
           {body.message}
         </p>
       )}
+
+      <UnanchoredThreads path={file.path} threads={unanchored} />
     </div>
   );
 }

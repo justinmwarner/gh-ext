@@ -20,6 +20,7 @@ import { TopBar } from './TopBar';
 import { TruncationNotice } from './TruncationNotice';
 import { type CurrentFile, NO_FILE, fromScroll, fromTree } from './currentFile';
 import { prPermalink } from './prNode';
+import { ReviewSessionProvider } from './reviewSession';
 import { reviewFiles } from './reviewFiles';
 import { useRailWidth } from './useRailWidth';
 
@@ -39,28 +40,38 @@ export function Shell({ payload }: { payload: PrPayload }) {
   }, []);
 
   return (
-    <div className="shell">
-      <TopBar payload={payload} />
-      <TruncationNotice
-        truncated={payload.truncated}
-        pr={payload.ref}
-        href={prPermalink(payload.pullRequest)}
-      />
-      <div className="shell-body">
-        <SideRail
-          width={rail.width}
-          files={files}
-          current={current}
-          onSelect={selectFromTree}
+    // The session wraps the whole shell rather than the column alone: a
+    // resolve has to be visible everywhere at once, and the pending-review
+    // state is hydrated here from `viewerLatestReview` before anything can
+    // post a comment against the wrong target.
+    <ReviewSessionProvider
+      pullRequest={payload.pullRequest}
+      prRef={payload.ref}
+      threads={payload.threads}
+    >
+      <div className="shell">
+        <TopBar payload={payload} />
+        <TruncationNotice
+          truncated={payload.truncated}
+          pr={payload.ref}
+          href={prPermalink(payload.pullRequest)}
         />
-        <RailResizer {...rail} />
-        <DiffColumn
-          files={files}
-          diff={{ source: payload.diff.source, truncated: payload.diff.truncated }}
-          current={current}
-          onScrollTo={selectFromScroll}
-        />
+        <div className="shell-body">
+          <SideRail
+            width={rail.width}
+            files={files}
+            current={current}
+            onSelect={selectFromTree}
+          />
+          <RailResizer {...rail} />
+          <DiffColumn
+            files={files}
+            diff={{ source: payload.diff.source, truncated: payload.diff.truncated }}
+            current={current}
+            onScrollTo={selectFromScroll}
+          />
+        </div>
       </div>
-    </div>
+    </ReviewSessionProvider>
   );
 }

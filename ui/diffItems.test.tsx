@@ -110,6 +110,9 @@ describe('fileBody', () => {
   });
 });
 
+/** One memoized annotation payload, as the column would hand it over. */
+const THREAD = { kind: 'thread', threadId: 'PRRT_1' } as const;
+
 describe('codeViewItems', () => {
   it('makes one diff item per file, identified by its path', () => {
     const items = codeViewItems(
@@ -175,6 +178,50 @@ describe('codeViewItems', () => {
       throw new Error('expected diff items');
     }
     expect(second[0].fileDiff).toBe(first[0].fileDiff);
+  });
+
+  it('hands the annotations for a file through to its item', () => {
+    const annotations = new Map([
+      ['src/a.ts', [{ side: 'additions' as const, lineNumber: 2, metadata: THREAD }]],
+    ]);
+
+    const items = codeViewItems([file({ path: 'src/a.ts' })], new Set(), annotations);
+    const item = items[0];
+
+    if (item?.type !== 'diff') throw new Error('expected a diff item');
+    expect(item.annotations).toBe(annotations.get('src/a.ts'));
+  });
+
+  it('keeps an item’s version steady while its annotations are the same array', () => {
+    // The column memoizes one annotation array per file and only rebuilds it
+    // when something that affects anchoring moved. A version that changed on
+    // every render would re-render every mounted diff — including on a resolve
+    // in some other file.
+    const annotations = new Map([
+      ['src/a.ts', [{ side: 'additions' as const, lineNumber: 2, metadata: THREAD }]],
+    ]);
+    const files = [file({ path: 'src/a.ts' })];
+
+    const first = codeViewItems(files, new Set(), annotations);
+    const second = codeViewItems(files, new Set(), annotations);
+
+    expect(second[0]?.version).toBe(first[0]?.version);
+  });
+
+  it('changes an item’s version when its annotations do', () => {
+    // Without this, a thread that was just posted would never appear: CodeView
+    // keeps the record it already measured.
+    const files = [file({ path: 'src/a.ts' })];
+    const before = codeViewItems(files, new Set(), new Map());
+    const after = codeViewItems(
+      files,
+      new Set(),
+      new Map([
+        ['src/a.ts', [{ side: 'additions' as const, lineNumber: 2, metadata: THREAD }]],
+      ]),
+    );
+
+    expect(after[0]?.version).not.toBe(before[0]?.version);
   });
 
   it('carries the previous path for a rename into the metadata', () => {
