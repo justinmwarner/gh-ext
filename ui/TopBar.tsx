@@ -18,7 +18,34 @@ import { prBranches, prPermalink, prReviewers, prState } from './prNode';
 import { REVIEW_START, useReviewSession } from './reviewSession';
 
 /**
+ * That nothing has gone out yet, in the one place that is always on screen.
+ *
+ * The footer says this too, but the footer sits below a diff that can run to
+ * thousands of lines, so for most of a large review it is nowhere in sight —
+ * and forgetting the review has not been submitted is the entire hazard. This
+ * costs a few characters of the sticky bar and removes the only way to lose a
+ * whole review's worth of writing by closing a tab.
+ */
+function PendingChip() {
+  const session = useReviewSession();
+  if (session.pending.kind !== 'pending') return null;
+
+  return (
+    <span
+      className="chip chip-pending"
+      title="Your comments are queued on a pending review. Submit it from the bar at the bottom of the page to post them."
+    >
+      Not posted yet
+    </span>
+  );
+}
+
+/**
  * Start a review, explicitly.
+ *
+ * Explicitly is the point. Comments post as they are written unless a review is
+ * open, so this is the only thing that makes them queue — and until a reviewer
+ * presses it, nothing they write is held back.
  *
  * `START_REVIEW` omits `event`, which is what leaves the review PENDING —
  * `addPullRequestReview` with an event submits on the spot. Once one is open
@@ -121,6 +148,7 @@ export function TopBar({ payload, compare, compareError = null }: TopBarProps) {
           </span>
         )}
         <ChecksChip checks={payload.checks} />
+        <PendingChip />
         <ReviewerAvatars reviewers={prReviewers(node)} />
       </div>
 

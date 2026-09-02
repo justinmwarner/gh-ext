@@ -114,7 +114,7 @@ describe('ReviewFooter', () => {
     mount();
     await startReview(user);
 
-    expect(footer()?.textContent).toMatch(/no comments queued/i);
+    expect(footer()?.textContent).toMatch(/nothing queued yet/i);
   });
 
   it('starts the review with START_REVIEW, which omits the event', async () => {
@@ -137,7 +137,7 @@ describe('ReviewFooter', () => {
     await user.click(screen.getByRole('button', { name: /queue comment/i }));
 
     await waitFor(() => {
-      expect(footer()?.textContent).toMatch(/1 comment queued/i);
+      expect(footer()?.textContent).toMatch(/1 comment not posted yet/i);
     });
   });
 
@@ -210,7 +210,7 @@ describe('submitting', () => {
     requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
     await user.click(screen.getByRole('button', { name: /queue comment/i }));
     await waitFor(() => {
-      expect(footer()?.textContent).toMatch(/1 comment queued/i);
+      expect(footer()?.textContent).toMatch(/1 comment not posted yet/i);
     });
 
     requestMock.mockResolvedValue({
@@ -222,7 +222,7 @@ describe('submitting', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/GitHub said no/);
     expect(footer()).not.toBeNull();
-    expect(footer()?.textContent).toMatch(/1 comment queued/i);
+    expect(footer()?.textContent).toMatch(/1 comment not posted yet/i);
   });
 });
 
@@ -235,7 +235,7 @@ describe('a review resumed from GitHub', () => {
     mount(resumed);
 
     expect(footer()).not.toBeNull();
-    expect(footer()?.textContent).not.toMatch(/no comments queued/i);
+    expect(footer()?.textContent).not.toMatch(/nothing queued yet/i);
     expect(footer()?.textContent).not.toMatch(/\b0 comments\b/i);
     expect(footer()?.textContent).toMatch(/unknown|already open|do not know/i);
   });
@@ -248,7 +248,7 @@ describe('a review resumed from GitHub', () => {
     await user.click(screen.getByRole('button', { name: /queue comment/i }));
 
     await waitFor(() => {
-      expect(footer()?.textContent).toMatch(/at least 1 comment/i);
+      expect(footer()?.textContent).toMatch(/at least 1 comment not posted yet/i);
     });
   });
 

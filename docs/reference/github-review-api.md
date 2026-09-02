@@ -203,9 +203,31 @@ subjectType: PullRequestReviewThreadSubjectType
 ```
 
 `pullRequestId` and `pullRequestReviewId` are both optional and mutually
-exclusive in practice. This is precisely what the two-state review machine needs:
-**Browse** passes `pullRequestId`, **Pending review** passes
-`pullRequestReviewId`.
+exclusive in practice.
+
+> **Corrected 2026-09-02.** The comment above used to read "set `pullRequestId`
+> for a standalone comment". That describes the *input shape* and is wrong about
+> the *runtime effect*, and the mistake shipped: the composer told reviewers
+> "this will post immediately as a single comment" while doing the opposite.
+>
+> **`addPullRequestReviewThread` has no standalone mode.** Passing
+> `pullRequestId` does not publish a comment — it opens a `PENDING` review to
+> hold one. The comment is then invisible to everyone but its author until that
+> review is submitted, and because the page never learned the review existed, it
+> offered no way to submit it. Observed on a real pull request; the reviewer
+> found the review had been "started automatically".
+>
+> To publish one comment on its own — what GitHub's own **Add single comment**
+> button does — takes three round trips:
+>
+> 1. `addPullRequestReview(pullRequestId:)` with no `event` → a `PENDING` review,
+>    and its id.
+> 2. `addPullRequestReviewThread(pullRequestReviewId:)` → the comment.
+> 3. `submitPullRequestReview(pullRequestReviewId:, event: COMMENT)` → published.
+>
+> Every one of those documents was already validated against the live schema, so
+> composing them needs no field this file has not introspected. See
+> `publishThread` in `ui/reviewSession.tsx`.
 
 For a multi-line comment set `startLine` + `startSide` alongside `line` + `side`.
 For single-line, omit the `start*` fields.
@@ -217,6 +239,12 @@ pullRequestReviewThreadId: ID!
 body: String!
 pullRequestReviewId: ID     # optional; attaches the reply to a pending review
 ```
+
+`pullRequestReviewId` must be sent whenever a review is pending. Without it the
+reply publishes on the spot while the line comments beside it sit queued, so the
+reviewer submits their review and finds their replies went out some time
+earlier — out of order and out of context. Fixed 2026-09-02; it had been
+documented here and not done.
 
 ### Resolve — `resolveReviewThread` / `unresolveReviewThread`
 

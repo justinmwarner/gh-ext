@@ -146,7 +146,7 @@ describe('the pending-review footer', () => {
     await waitFor(() => {
       expect(screen.getByRole('contentinfo')).toBeDefined();
     });
-    expect(screen.getByRole('contentinfo').textContent).toMatch(/no comments queued/i);
+    expect(screen.getByRole('contentinfo').textContent).toMatch(/nothing queued yet/i);
   });
 
   it('is already there for a review GitHub still has open', () => {

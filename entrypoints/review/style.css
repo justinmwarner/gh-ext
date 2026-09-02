@@ -1144,3 +1144,35 @@ code {
   padding: 16px;
   color: light-dark(#656d76, #8b949e);
 }
+
+/* ------------------------------------------- not posted yet
+   A comment queued on a pending review is invisible to everyone but its
+   author, and a thread renders identically either way. The colour is the same
+   amber the pending chip and the truncation banner use, so "there is something
+   here you should know" reads the same everywhere on the page.
+
+   Words as well as colour, on the badge and in its title: a tint alone cannot
+   say *why*, and cannot be read at all by a reviewer who does not see it. */
+.thread-unpublished {
+  border-color: light-dark(#d4a72c, #d29922);
+  background: light-dark(#fff8c5, #2a2213);
+}
+
+.thread-flag-unposted {
+  border-color: light-dark(#d4a72c, #d29922);
+  color: light-dark(#7d4e00, #e3b341);
+  cursor: help;
+}
+
+/* The sticky bar's copy is the same fact; the footer is below a diff that can
+   run to thousands of lines, so for most of a review it is off screen. */
+.chip-pending {
+  cursor: help;
+}
+
+/* The composer says which of the two things the button is about to do. Queued
+   is the surprising one, so it is the one that gets the colour. */
+.composer-target-queued {
+  color: light-dark(#7d4e00, #e3b341);
+  font-weight: 600;
+}

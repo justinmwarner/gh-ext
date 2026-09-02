@@ -45,12 +45,7 @@ import type {
 } from '@/lib/github/types';
 import { type JsonValue, type PrRef, type PullRequestNode, message } from '@/lib/messages';
 import type { DraftStore } from '@/lib/review/drafts';
-import {
-  type PendingReviewState,
-  commentTarget,
-  initialState,
-  reduce,
-} from '@/lib/review/pending-review';
+import { type PendingReviewState, initialState, reduce } from '@/lib/review/pending-review';
 import type { CommentAnchor } from '@/lib/review/selection';
 import { request } from './background';
 import { draftStore } from './draftStore';
@@ -72,6 +67,22 @@ export const REVIEW_SUBMIT = 'review-submit';
 export const viewedKey = (path: string): string => `viewed:${path}`;
 
 /**
+ * GitHub said yes and then did not say what it had made.
+ *
+ * Its own sentence, because it is the same problem wherever it happens and the
+ * reviewer's move is the same: try again.
+ */
+const NO_REVIEW_ID =
+  'GitHub accepted the request but returned no review id, so there is nothing ' +
+  'for comments to attach to. Try again.';
+
+/** What `openReview` found. The two failures need different words. */
+type OpenReviewResult =
+  | { ok: true; reviewId: string }
+  | { ok: false; kind: 'refused'; message: string }
+  | { ok: false; kind: 'no-id' };
+
+/**
  * The events a reviewer can submit.
  *
  * `DISMISS` is a member of `PullRequestReviewEvent` but is not a reviewer
@@ -87,13 +98,22 @@ export interface NewThreadInput {
 }
 
 export interface ReviewSessionValue {
-  /** The pull request's node id — the target for a standalone comment. */
+  /** The pull request's node id — what a review is opened against. */
   prId: string;
   prRef: PrRef;
   threads: readonly ReviewThread[];
   byPath: ReadonlyMap<string, readonly ReviewThread[]>;
   byId: ReadonlyMap<string, ReviewThread>;
   pending: PendingReviewState;
+  /**
+   * Threads holding a comment queued on the pending review, and so not visible
+   * to anyone but the reviewer until it is submitted.
+   *
+   * What this session queued, which is not necessarily all of it: a resumed
+   * review may hold comments made elsewhere. Treat it as "known unposted", and
+   * see `pendingCountLabel` for how the same limit is worded on the footer.
+   */
+  unpublished: ReadonlySet<string>;
   drafts: DraftStore;
   /**
    * Keyed by thread id, by `NEW_THREAD` for the composer, by `REVIEW_START` /
@@ -274,6 +294,19 @@ export function ReviewSessionProvider({
     () => new Set(),
   );
   const [pending, dispatch] = useReducer(reduce, pullRequest, initialPendingReview);
+  /**
+   * Threads holding a comment that is queued on the pending review.
+   *
+   * This session's own knowledge, not GitHub's. A review resumed from the
+   * server may hold comments that were queued in another tab or in GitHub's UI
+   * and this set cannot know about them — which is exactly why the footer says
+   * its count is a floor rather than a total.
+   */
+  const [unpublished, setUnpublished] = useState<ReadonlySet<string>>(() => new Set());
+
+  const markUnpublished = useCallback((threadId: string) => {
+    setUnpublished((current) => new Set(current).add(threadId));
+  }, []);
 
   // A refreshed payload replaces the threads outright. Comparing the prop
   // against the one this state was seeded from is the only way to tell a new
@@ -364,9 +397,15 @@ export function ReviewSessionProvider({
       clearFailure(threadId);
       setSending((current) => new Map(current).set(threadId, body));
 
+      // Whichever review is open has to be named. Without it the reply
+      // publishes on the spot while the line comments beside it sit queued, so
+      // the reviewer submits their review and finds their replies left some
+      // time earlier — out of order, and out of context.
+      const state = pendingNow.current;
       const response = await mutate(ADD_REPLY, {
         pullRequestReviewThreadId: threadId,
         body,
+        ...(state.kind === 'pending' ? { pullRequestReviewId: state.reviewId } : {}),
       });
 
       setSending((current) => {
@@ -379,6 +418,11 @@ export function ReviewSessionProvider({
         fail(threadId, `Posting this reply failed: ${response.error.message}`);
         return false;
       }
+
+      // Queued on the review, so nobody else can see it yet. The thread has to
+      // say so: it renders identically either way, and the person who wrote the
+      // reply has no reason to think it did not go out.
+      if (state.kind === 'pending') markUnpublished(threadId);
 
       const comment = readComment(
         field(response.data.data, 'addPullRequestReviewThreadReply', 'comment'),
@@ -400,79 +444,181 @@ export function ReviewSessionProvider({
       }
       return true;
     },
-    [clearFailure, fail, mutate],
-  );
-
-  const postThread = useCallback(
-    async ({ path, body, anchor }: NewThreadInput): Promise<boolean> => {
-      clearFailure(NEW_THREAD);
-
-      const variables: Record<string, JsonValue> = {
-        // Exactly one of pullRequestId / pullRequestReviewId, chosen by the
-        // machine. The unused one is left out of the object entirely: an
-        // explicit null is sent as a null, which is not the same thing.
-        ...commentTarget(pendingNow.current, prId),
-        path,
-        body,
-        line: anchor.line,
-        side: anchor.side,
-        ...(anchor.startLine !== undefined && anchor.startSide !== undefined
-          ? { startLine: anchor.startLine, startSide: anchor.startSide }
-          : {}),
-      };
-
-      const response = await mutate(ADD_THREAD, variables);
-      if (!response.ok) {
-        fail(NEW_THREAD, `Posting this comment failed: ${response.error.message}`);
-        return false;
-      }
-
-      const created = readThread(
-        field(response.data.data, 'addPullRequestReviewThread', 'thread'),
-      );
-      if (created !== null) setLive((list) => [...list, created]);
-      dispatch({ type: 'comment-added' });
-      return true;
-    },
-    [clearFailure, fail, mutate, prId],
+    [clearFailure, fail, markUnpublished, mutate],
   );
 
   /**
-   * Open a PENDING review.
+   * Open a PENDING review and return its id.
    *
    * `START_REVIEW` omits `event`, and that omission is the whole mechanism:
    * `addPullRequestReview` with an event submits a review on the spot instead
    * of leaving one open for comments to attach to.
+   *
+   * Shared by the two callers that need a review to exist — the reviewer
+   * asking for one, and publishing a single comment, which needs one for about
+   * a second. Each writes its own message; this only reports what happened.
    */
+  const openReview = useCallback(async (): Promise<OpenReviewResult> => {
+    const response = await mutate(START_REVIEW, { pullRequestId: prId });
+    if (!response.ok) return { ok: false, kind: 'refused', message: response.error.message };
+
+    const review = field(response.data.data, 'addPullRequestReview', 'pullRequestReview');
+    const reviewId = isRecord(review) ? review['id'] : undefined;
+    // An id-less review is worse than none: every later comment would go to
+    // `pullRequestReviewId: undefined` and open a review of its own.
+    if (typeof reviewId !== 'string' || reviewId === '') return { ok: false, kind: 'no-id' };
+
+    return { ok: true, reviewId };
+  }, [mutate, prId]);
+
+  const addThread = useCallback(
+    (reviewId: string, { path, body, anchor }: NewThreadInput) =>
+      mutate(ADD_THREAD, {
+        pullRequestReviewId: reviewId,
+        path,
+        body,
+        line: anchor.line,
+        side: anchor.side,
+        // Left out entirely rather than sent null: an unsupplied variable is
+        // dropped from the coerced input, an explicit null is sent as a null.
+        ...(anchor.startLine !== undefined && anchor.startSide !== undefined
+          ? { startLine: anchor.startLine, startSide: anchor.startSide }
+          : {}),
+      }),
+    [mutate],
+  );
+
+  const takeThread = useCallback(
+    (data: JsonValue): ReviewThread | null => {
+      const created = readThread(field(data, 'addPullRequestReviewThread', 'thread'));
+      if (created !== null) setLive((list) => [...list, created]);
+      return created;
+    },
+    [],
+  );
+
+  /**
+   * Post one comment, immediately, on its own.
+   *
+   * Three round trips for one comment, and every one of them is load-bearing.
+   * `addPullRequestReviewThread` has **no standalone mode**: `pullRequestId`
+   * does not publish a comment, it opens a PENDING review to hold one. So a
+   * reviewer who had not asked for a review and was told "this will post
+   * immediately" got neither — the comment sat queued inside a review the page
+   * did not know existed, invisible until they next loaded the pull request.
+   *
+   * This is what GitHub's own "Add single comment" does: open a review, put the
+   * comment in it, submit it as COMMENT. The review lives for one round trip
+   * and the machine is never told about it, so the pending-review bar does not
+   * flash on screen for a comment that is already published.
+   *
+   * The three failure points are not interchangeable, and the difference is
+   * whether the reviewer's writing survives:
+   *
+   * - **No review.** Nothing happened. Say so; the composer keeps the text.
+   * - **No comment.** An empty review is open on GitHub. Enter Pending so it is
+   *   visible and can be submitted or discarded, rather than left behind.
+   * - **Not submitted.** The comment exists. Returning false here would reopen
+   *   the composer over text that is already on GitHub and invite a duplicate,
+   *   so this reports success, enters Pending, and moves the explanation to the
+   *   footer — which is now on screen, and is where the review gets submitted.
+   */
+  const publishThread = useCallback(
+    async (input: NewThreadInput): Promise<boolean> => {
+      const opened = await openReview();
+      if (!opened.ok) {
+        fail(
+          NEW_THREAD,
+          opened.kind === 'refused'
+            ? `Posting this comment failed: ${opened.message}`
+            : `Posting this comment failed. ${NO_REVIEW_ID}`,
+        );
+        return false;
+      }
+      const { reviewId } = opened;
+
+      const added = await addThread(reviewId, input);
+      if (!added.ok) {
+        dispatch({ type: 'review-started', reviewId });
+        fail(
+          NEW_THREAD,
+          `Posting this comment failed: ${added.error.message} A review was ` +
+            'opened to hold it and is still open — submit or discard it below.',
+        );
+        return false;
+      }
+      const created = takeThread(added.data.data);
+
+      const submitted = await mutate(SUBMIT_REVIEW, {
+        pullRequestReviewId: reviewId,
+        event: 'COMMENT',
+      });
+      if (!submitted.ok) {
+        dispatch({ type: 'review-started', reviewId });
+        dispatch({ type: 'comment-added' });
+        if (created !== null) markUnpublished(created.id);
+        fail(
+          REVIEW_SUBMIT,
+          `Your comment was saved but has not been posted: ${submitted.error.message} ` +
+            'It is queued on a pending review — submit that review below to post it.',
+        );
+        return true;
+      }
+
+      return true;
+    },
+    [addThread, fail, markUnpublished, mutate, openReview, takeThread],
+  );
+
+  /** Add one comment to the review the reviewer opened. It stays unposted. */
+  const queueThread = useCallback(
+    async (reviewId: string, input: NewThreadInput): Promise<boolean> => {
+      const added = await addThread(reviewId, input);
+      if (!added.ok) {
+        fail(NEW_THREAD, `Posting this comment failed: ${added.error.message}`);
+        return false;
+      }
+
+      const created = takeThread(added.data.data);
+      if (created !== null) markUnpublished(created.id);
+      dispatch({ type: 'comment-added' });
+      return true;
+    },
+    [addThread, fail, markUnpublished, takeThread],
+  );
+
+  const postThread = useCallback(
+    (input: NewThreadInput): Promise<boolean> => {
+      clearFailure(NEW_THREAD);
+      const state = pendingNow.current;
+      return state.kind === 'pending'
+        ? queueThread(state.reviewId, input)
+        : publishThread(input);
+    },
+    [clearFailure, publishThread, queueThread],
+  );
+
   const startReview = useCallback(async (): Promise<boolean> => {
     // A second review would orphan the first, along with everything queued on
     // it. The machine refuses the transition; this refuses the request.
     if (pendingNow.current.kind === 'pending') return true;
 
     clearFailure(REVIEW_START);
-    const response = await mutate(START_REVIEW, { pullRequestId: prId });
+    const opened = await openReview();
 
-    if (!response.ok) {
-      fail(REVIEW_START, `Starting a review failed: ${response.error.message}`);
-      return false;
-    }
-
-    const review = field(response.data.data, 'addPullRequestReview', 'pullRequestReview');
-    const reviewId = isRecord(review) ? review['id'] : undefined;
-    if (typeof reviewId !== 'string' || reviewId === '') {
-      // Entering Pending without an id would send every later comment to
-      // `pullRequestReviewId: undefined` and post it standalone instead.
+    if (!opened.ok) {
       fail(
         REVIEW_START,
-        'GitHub accepted the request but returned no review id, so there is ' +
-          'nothing for comments to attach to. Try again.',
+        opened.kind === 'refused'
+          ? `Starting a review failed: ${opened.message}`
+          : NO_REVIEW_ID,
       );
       return false;
     }
 
-    dispatch({ type: 'review-started', reviewId });
+    dispatch({ type: 'review-started', reviewId: opened.reviewId });
     return true;
-  }, [clearFailure, fail, mutate, prId]);
+  }, [clearFailure, fail, openReview]);
 
   /**
    * Submit the pending review.
@@ -507,6 +653,9 @@ export function ReviewSessionProvider({
       }
 
       dispatch({ type: 'submitted' });
+      // Posted now, so nothing is outstanding. Leaving the marks would keep
+      // saying otherwise on threads that are live on GitHub.
+      setUnpublished(new Set());
       return true;
     },
     [clearFailure, fail, mutate],
@@ -535,6 +684,7 @@ export function ReviewSessionProvider({
     }
 
     dispatch({ type: 'discarded' });
+    setUnpublished(new Set());
     return true;
   }, [clearFailure, fail, mutate]);
 
@@ -604,6 +754,7 @@ export function ReviewSessionProvider({
       byPath,
       byId,
       pending,
+      unpublished,
       drafts,
       failures,
       sending,
@@ -625,6 +776,7 @@ export function ReviewSessionProvider({
       byPath,
       byId,
       pending,
+      unpublished,
       drafts,
       failures,
       sending,

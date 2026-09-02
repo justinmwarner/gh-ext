@@ -209,10 +209,28 @@ export function ThreadCard({ threadId }: { threadId: string }) {
   const position = threadPosition(thread);
   const count = thread.comments.totalCount;
 
+  /**
+   * Held back inside the pending review, so nobody else can see it.
+   *
+   * A thread renders identically whether its comments are live or queued, and
+   * the person who wrote them has no reason to assume they did not go out. The
+   * badge is words rather than only a colour, and carries the remedy in its
+   * title — "pending" alone does not tell anyone what to do about it.
+   */
+  const unposted = session.unpublished.has(thread.id);
+
   const header = (
     <>
       <span className="thread-position">{position}</span>
       {thread.isOutdated && <span className="thread-flag">Outdated</span>}
+      {unposted && (
+        <span
+          className="thread-flag thread-flag-unposted"
+          title="This is part of your pending review. Nobody else can see it until you submit the review."
+        >
+          Not posted yet
+        </span>
+      )}
     </>
   );
 
@@ -220,7 +238,10 @@ export function ThreadCard({ threadId }: { threadId: string }) {
     // One line until asked. A resolved thread is settled business and should
     // not take up the room an open one does.
     return (
-      <details className="thread thread-resolved" data-thread={thread.id}>
+      <details
+        className={`thread thread-resolved${unposted ? ' thread-unpublished' : ''}`}
+        data-thread={thread.id}
+      >
         <summary>
           <span className="thread-flag">Resolved</span>
           {header}
@@ -234,7 +255,10 @@ export function ThreadCard({ threadId }: { threadId: string }) {
   }
 
   return (
-    <article className="thread" data-thread={thread.id}>
+    <article
+      className={`thread${unposted ? ' thread-unpublished' : ''}`}
+      data-thread={thread.id}
+    >
       <header className="thread-head">{header}</header>
       <ThreadBody thread={thread} />
     </article>

@@ -72,15 +72,11 @@ export function reduce(
   }
 }
 
-/**
- * addPullRequestReviewThread takes either a pullRequestId (standalone comment)
- * or a pullRequestReviewId (attached to a pending review), never both.
+/*
+ * `commentTarget` used to live here, returning `{ pullRequestId }` in Browse so
+ * a comment would post "standalone". It was deleted on 2026-09-02 because that
+ * is not a thing `addPullRequestReviewThread` can do: `pullRequestId` does not
+ * publish a comment, it opens a PENDING review to hold one. Every comment now
+ * goes to a `pullRequestReviewId` — the reviewer's, or a review opened and
+ * submitted in the same breath. See `publishThread` in ui/reviewSession.tsx.
  */
-export function commentTarget(
-  state: PendingReviewState,
-  pullRequestId: string
-): { pullRequestId: string } | { pullRequestReviewId: string } {
-  return state.kind === 'pending'
-    ? { pullRequestReviewId: state.reviewId }
-    : { pullRequestId };
-}

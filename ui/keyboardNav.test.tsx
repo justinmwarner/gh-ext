@@ -34,7 +34,16 @@ const requestMock = request as unknown as Mock;
 
 beforeEach(() => {
   requestMock.mockReset();
-  requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
+  requestMock.mockImplementation((msg: { document: string }) =>
+    Promise.resolve({
+      ok: true,
+      data: {
+        data: msg.document.includes('mutation StartReview')
+          ? { addPullRequestReview: { pullRequestReview: { id: 'PRR_1' } } }
+          : {},
+      },
+    }),
+  );
 });
 
 afterEach(() => {
@@ -301,9 +310,11 @@ describe('never while the reviewer is typing', () => {
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalled();
     });
-    expect(requestMock.mock.calls[0]?.[0]?.document).toMatch(
-      /addPullRequestReviewThread/,
-    );
+    // Posting one comment is three round trips — open a review, add the
+    // thread, submit it — because `addPullRequestReviewThread` has no
+    // standalone mode. The chord still has to reach the middle one.
+    const sent = requestMock.mock.calls.map((call) => call[0]?.document as string);
+    expect(sent.some((doc) => doc.includes('addPullRequestReviewThread('))).toBe(true);
   });
 });
 

@@ -13,6 +13,7 @@ import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vite
 import { DraftStore, type KeyValueStore, draftKey } from '@/lib/review/drafts';
 import type { CommentAnchor } from '@/lib/review/selection';
 import { Composer, type ComposerProps } from './Composer';
+import { START_REVIEW } from '@/lib/github/mutations';
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
 import { pullRequestNode } from './prPayload.fixture';
@@ -43,6 +44,33 @@ const FAILURE = {
 } as const;
 
 const OK = { ok: true, data: { data: {} } } as const;
+
+/**
+ * Answer the whole publish path.
+ *
+ * Posting a single comment is three round trips — open a review, add the
+ * thread, submit it — because `addPullRequestReviewThread` has no standalone
+ * mode. A blanket `OK` leaves the first one with no review id and nothing else
+ * ever runs, so the mock has to answer that one specifically.
+ */
+function answersPublish(reviewId = 'PRR_transient') {
+  requestMock.mockImplementation((msg: { document: string }) =>
+    Promise.resolve(
+      msg.document === START_REVIEW
+        ? {
+            ok: true,
+            data: {
+              data: { addPullRequestReview: { pullRequestReview: { id: reviewId } } },
+            },
+          }
+        : OK,
+    ),
+  );
+}
+
+/** Which call carried ADD_THREAD. The publish path puts START_REVIEW ahead of it. */
+const threadCall = (): number =>
+  requestMock.mock.calls.findIndex((call) => call[0]?.document !== START_REVIEW);
 
 function mount(
   props: Partial<ComposerProps> = {},
@@ -93,14 +121,14 @@ describe('Composer', () => {
   });
 
   it('sends the start fields for a multi-line comment', async () => {
-    requestMock.mockResolvedValue(OK);
+    answersPublish();
     mount({ anchor: { line: 9, side: 'RIGHT', startLine: 5, startSide: 'RIGHT' } });
 
     await userEvent.type(box(), 'a range comment');
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
 
-    await waitFor(() => expect(requestMock).toHaveBeenCalled());
-    expect(variablesOf(0)).toMatchObject({
+    await waitFor(() => expect(threadCall()).toBeGreaterThan(-1));
+    expect(variablesOf(threadCall())).toMatchObject({
       path: 'src/app.ts',
       line: 9,
       side: 'RIGHT',
@@ -167,7 +195,7 @@ describe('Composer', () => {
   });
 
   it('clears the draft only after the post succeeds', async () => {
-    requestMock.mockResolvedValue(OK);
+    answersPublish();
     const { store, onClose } = mount();
 
     await userEvent.type(box(), 'a comment worth keeping');

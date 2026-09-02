@@ -29,10 +29,13 @@ beforeEach(() => {
 
 const PR_REF = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 
-function mount(thread: ReviewThread) {
+function mount(
+  thread: ReviewThread,
+  node: Parameters<typeof pullRequestNode>[0] = {},
+) {
   return render(
     <ReviewSessionProvider
-      pullRequest={pullRequestNode()}
+      pullRequest={pullRequestNode(node)}
       prRef={PR_REF}
       threads={[thread]}
       drafts={new DraftStore(memoryStore())}
@@ -325,5 +328,72 @@ describe('ThreadCard', () => {
     const note = screen.getByRole('note');
     expect(note.textContent).toMatch(/59/);
     expect(within(note).getByRole('link')).toBeDefined();
+  });
+});
+
+/**
+ * A comment nobody else can see yet.
+ *
+ * A comment queued on a pending review is invisible to everyone but its author
+ * until the review is submitted. That is a fine thing to want and a terrible
+ * thing to not know — the reviewer who wrote it has no reason to think it did
+ * not go out, and the thread renders identically either way.
+ */
+describe('a thread holding an unposted comment', () => {
+  const PENDING_NODE = {
+    viewerLatestReview: { id: 'PRR_pending', state: 'PENDING' },
+  };
+
+  const queueAReply = async () => {
+    requestMock.mockResolvedValue({
+      ok: true,
+      data: {
+        data: {
+          addPullRequestReviewThreadReply: {
+            comment: { id: 'PRRC_q', body: 'not yet', author: { login: 'me' } },
+          },
+        },
+      },
+    });
+    await userEvent.type(screen.getByRole('textbox', { name: /reply/i }), 'not yet');
+    await userEvent.click(screen.getByRole('button', { name: 'Reply' }));
+  };
+
+  it('says so, in words, not just a colour', async () => {
+    mount(reviewThread({ path: 'src/app.ts' }), PENDING_NODE);
+
+    await queueAReply();
+
+    await waitFor(() => {
+      expect(screen.getByText(/not posted yet/i)).toBeTruthy();
+    });
+  });
+
+  it('marks the card itself so it is findable down a long diff', async () => {
+    const { container } = mount(reviewThread({ path: 'src/app.ts' }), PENDING_NODE);
+
+    await queueAReply();
+
+    await waitFor(() => {
+      expect(container.querySelector('.thread-unpublished')).not.toBeNull();
+    });
+  });
+
+  it('explains what unposted means rather than leaving a bare badge', async () => {
+    mount(reviewThread({ path: 'src/app.ts' }), PENDING_NODE);
+
+    await queueAReply();
+
+    const badge = await screen.findByText(/not posted yet/i);
+    expect(badge.getAttribute('title')).toMatch(/submit/i);
+  });
+
+  it('says nothing on a thread that is already public', () => {
+    // The overwhelming majority. A badge here would be noise, and worse, would
+    // make the real one mean nothing.
+    const { container } = mount(reviewThread({ path: 'src/app.ts' }));
+
+    expect(screen.queryByText(/not posted yet/i)).toBeNull();
+    expect(container.querySelector('.thread-unpublished')).toBeNull();
   });
 });

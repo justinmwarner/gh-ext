@@ -1,18 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { commentTarget, initialState, reduce } from './pending-review';
+import { initialState, reduce } from './pending-review';
 
 describe('pending review state machine', () => {
   it('starts in browse', () => {
     expect(initialState()).toEqual({ kind: 'browse' });
-  });
-
-  it('targets the pull request when browsing', () => {
-    expect(commentTarget({ kind: 'browse' }, 'PR_1')).toEqual({ pullRequestId: 'PR_1' });
-  });
-
-  it('targets the review once one is pending', () => {
-    const s = reduce(initialState(), { type: 'review-started', reviewId: 'R_1' });
-    expect(commentTarget(s, 'PR_1')).toEqual({ pullRequestReviewId: 'R_1' });
   });
 
   it('counts comments added to a pending review', () => {
@@ -108,13 +99,6 @@ describe('resuming a review started elsewhere', () => {
       commentCount: 1,
       countIsComplete: false,
     });
-  });
-
-  it('targets the resumed review for new comments', () => {
-    const s = reduce(initialState(), {
-      type: 'review-resumed', reviewId: 'R_9', commentCount: 3,
-    });
-    expect(commentTarget(s, 'PR_1')).toEqual({ pullRequestReviewId: 'R_9' });
   });
 
   it('does not clobber a local pending review', () => {

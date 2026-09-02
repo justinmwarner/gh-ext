@@ -190,3 +190,40 @@ describe('starting a review', () => {
     expect(button.title).toMatch(/already/i);
   });
 });
+
+/**
+ * The page-level "nothing has gone out yet" indicator.
+ *
+ * The footer already says this, but the footer is at the bottom of a diff that
+ * can be thousands of lines long. A reviewer working down a large pull request
+ * spends almost all of their time with it off screen — and the whole hazard is
+ * forgetting that the review has not been submitted.
+ */
+describe('while a review is pending', () => {
+  const pendingPayload = () =>
+    prPayload({
+      pullRequest: pullRequestNode({
+        viewerLatestReview: { id: 'PRR_pending', state: 'PENDING' },
+      }),
+    });
+
+  it('says the comments are not posted, in the bar that is always on screen', () => {
+    mount(pendingPayload());
+
+    expect(screen.getByText(/not posted/i)).toBeTruthy();
+  });
+
+  it('explains where to post them', () => {
+    mount(pendingPayload());
+
+    expect(screen.getByText(/not posted/i).getAttribute('title')).toMatch(/submit/i);
+  });
+
+  it('says nothing of the kind while browsing', () => {
+    // Every comment goes out as it is written, so there is nothing outstanding
+    // and a permanent banner would only teach the reviewer to ignore it.
+    mount();
+
+    expect(screen.queryByText(/not posted/i)).toBeNull();
+  });
+});

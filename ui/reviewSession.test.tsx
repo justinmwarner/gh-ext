@@ -10,7 +10,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ADD_THREAD, RESOLVE_THREAD } from '@/lib/github/mutations';
+import {
+  ADD_REPLY,
+  ADD_THREAD,
+  RESOLVE_THREAD,
+  START_REVIEW,
+  SUBMIT_REVIEW,
+} from '@/lib/github/mutations';
 import { DraftStore } from '@/lib/review/drafts';
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
@@ -58,11 +64,80 @@ function Harness() {
       >
         resolve
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          void session.startReview();
+        }}
+      >
+        start
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void session.submitReview('COMMENT', '');
+        }}
+      >
+        submit
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void session.reply('PRRT_src/app.ts:2', 'a reply');
+        }}
+      >
+        reply
+      </button>
       <p data-testid="mode">{session.pending.kind}</p>
       <p data-testid="threads">{session.threads.map((t) => t.id).join(',')}</p>
+      <p data-testid="unpublished">{[...session.unpublished].join(',')}</p>
+      <p data-testid="failures">{[...session.failures.values()].join(' | ')}</p>
     </div>
   );
 }
+
+/**
+ * Answer each mutation by which document it carries.
+ *
+ * The publish path is three round trips, and asserting on it needs the review
+ * id from the first to come back so the second can be checked against it.
+ */
+function answerByDocument(
+  overrides: Partial<Record<string, unknown>> = {},
+  reviewId = 'PRR_transient',
+) {
+  requestMock.mockImplementation((msg: { document: string }) => {
+    if (msg.document in overrides) return Promise.resolve(overrides[msg.document]);
+    if (msg.document === START_REVIEW) {
+      return Promise.resolve({
+        ok: true,
+        data: { data: { addPullRequestReview: { pullRequestReview: { id: reviewId } } } },
+      });
+    }
+    if (msg.document === ADD_THREAD) {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          data: {
+            addPullRequestReviewThread: {
+              thread: { id: 'PRRT_new', path: 'src/app.ts', comments: { nodes: [] } },
+            },
+          },
+        },
+      });
+    }
+    return Promise.resolve({ ok: true, data: { data: {} } });
+  });
+}
+
+const REFUSED = {
+  ok: false,
+  error: { kind: 'unknown', message: 'GitHub said no', resetAt: null },
+} as const;
+
+/** Which documents were sent, in order. */
+const documents = (): string[] =>
+  requestMock.mock.calls.map((call) => call[0]?.document as string);
 
 function mount(node: Parameters<typeof pullRequestNode>[0] = {}) {
   return render(
@@ -121,16 +196,51 @@ describe('initialPendingReview', () => {
 });
 
 describe('postThread', () => {
-  it('targets the pull request when no review is open', async () => {
-    requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
+  it('publishes the comment instead of leaving a review open behind it', async () => {
+    // `addPullRequestReviewThread` has no standalone mode. Passing
+    // `pullRequestId` does not post a comment — it opens a PENDING review to
+    // hold one, which is how a reviewer who never asked for a review ended up
+    // with their comments queued invisibly inside one.
+    answerByDocument();
     mount();
 
     await userEvent.click(screen.getByRole('button', { name: 'post' }));
 
-    await waitFor(() => expect(requestMock).toHaveBeenCalled());
-    expect(requestMock.mock.calls[0]?.[0]?.document).toBe(ADD_THREAD);
-    expect(variablesOf(0)['pullRequestId']).toBe('PR_kwDOABCD');
-    expect('pullRequestReviewId' in variablesOf(0)).toBe(false);
+    await waitFor(() => {
+      expect(documents()).toEqual([START_REVIEW, ADD_THREAD, SUBMIT_REVIEW]);
+    });
+    expect(variablesOf(1)['pullRequestReviewId']).toBe('PRR_transient');
+    expect('pullRequestId' in variablesOf(1)).toBe(false);
+    expect(variablesOf(2)).toEqual({
+      pullRequestReviewId: 'PRR_transient',
+      event: 'COMMENT',
+    });
+  });
+
+  it('is still in Browse afterwards, with nothing queued', async () => {
+    // The review it opened is an implementation detail of publishing. Leaving
+    // the page in Pending would offer a submit for a review that is already in.
+    answerByDocument();
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(documents()).toHaveLength(3);
+    });
+    expect(screen.getByTestId('mode').textContent).toBe('browse');
+  });
+
+  it('does not mark a published comment as unposted', async () => {
+    answerByDocument();
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('threads').textContent).toContain('PRRT_new');
+    });
+    expect(screen.getByTestId('unpublished').textContent).toBe('');
   });
 
   it('targets the resumed review, not the pull request', async () => {
@@ -161,9 +271,11 @@ describe('postThread', () => {
 
   it('adds the thread GitHub returned so the reviewer sees it at once', async () => {
     const created = reviewThread({ path: 'src/app.ts', line: 3, id: 'PRRT_new' });
-    requestMock.mockResolvedValue({
-      ok: true,
-      data: { data: { addPullRequestReviewThread: { thread: created } } },
+    answerByDocument({
+      [ADD_THREAD]: {
+        ok: true,
+        data: { data: { addPullRequestReviewThread: { thread: created } } },
+      },
     });
     mount();
 
@@ -175,7 +287,7 @@ describe('postThread', () => {
   });
 
   it('names the pull request so the worker can drop its stale cache', async () => {
-    requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
+    answerByDocument();
     mount();
 
     await userEvent.click(screen.getByRole('button', { name: 'post' }));
@@ -195,5 +307,155 @@ describe('setResolved', () => {
     await waitFor(() => expect(requestMock).toHaveBeenCalled());
     expect(requestMock.mock.calls[0]?.[0]?.document).toBe(RESOLVE_THREAD);
     expect(variablesOf(0)['threadId']).toBe('PRRT_src/app.ts:2');
+  });
+});
+
+/**
+ * Publishing a single comment is three round trips, and each one can fail
+ * differently. What must never happen is the reviewer believing a comment went
+ * out when it did not, or believing it was lost when it exists.
+ */
+describe('a single comment that only partly went out', () => {
+  it('reports a refused review without pretending the comment exists', async () => {
+    answerByDocument({ [START_REVIEW]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('failures').textContent).toMatch(/GitHub said no/);
+    });
+    expect(documents()).toEqual([START_REVIEW]);
+    expect(screen.getByTestId('threads').textContent).not.toContain('PRRT_new');
+  });
+
+  it('surfaces the empty review it opened when the comment will not attach', async () => {
+    // A review was created and the comment did not land in it. Staying in
+    // Browse would leave that review open on GitHub with nothing on this page
+    // admitting it exists — which is the original bug, one layer down.
+    answerByDocument({ [ADD_THREAD]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mode').textContent).toBe('pending');
+    });
+    expect(screen.getByTestId('failures').textContent).toMatch(/still open|submit|discard/i);
+  });
+
+  it('keeps a comment that was saved but not published, and says so', async () => {
+    // The comment is real: it is queued on a review GitHub would not submit.
+    // Discarding it here, or reopening the composer to be retyped, would either
+    // lose the writing or duplicate it.
+    answerByDocument({ [SUBMIT_REVIEW]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mode').textContent).toBe('pending');
+    });
+    expect(screen.getByTestId('threads').textContent).toContain('PRRT_new');
+    expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
+    expect(screen.getByTestId('failures').textContent).toMatch(/has not been posted/i);
+  });
+});
+
+describe('comments queued on a review the reviewer opened', () => {
+  const start = async () => {
+    answerByDocument();
+    mount();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('mode').textContent).toBe('pending');
+    });
+  };
+
+  it('attaches to that review and does not publish it', async () => {
+    await start();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(documents()).toEqual([START_REVIEW, ADD_THREAD]);
+    });
+    expect(variablesOf(1)['pullRequestReviewId']).toBe('PRR_transient');
+  });
+
+  it('marks the comment as not posted yet', async () => {
+    await start();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
+    });
+  });
+
+  it('clears the marks once the review is submitted', async () => {
+    await start();
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'submit' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mode').textContent).toBe('browse');
+    });
+    expect(screen.getByTestId('unpublished').textContent).toBe('');
+  });
+
+  it('keeps the marks when the submit fails', async () => {
+    // The comments are still queued and still unpublished. Clearing the marks
+    // here would say they went out.
+    await start();
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
+    });
+
+    answerByDocument({ [SUBMIT_REVIEW]: REFUSED });
+    await userEvent.click(screen.getByRole('button', { name: 'submit' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('failures').textContent).toMatch(/GitHub said no/);
+    });
+    expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
+  });
+});
+
+describe('replies', () => {
+  it('joins the pending review rather than going out ahead of it', async () => {
+    // Without `pullRequestReviewId` a reply publishes immediately while the
+    // line comments beside it sit queued, so the reviewer submits their review
+    // and finds their replies left some time earlier.
+    answerByDocument();
+    mount();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('mode').textContent).toBe('pending');
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'reply' }));
+
+    await waitFor(() => {
+      expect(documents()).toEqual([START_REVIEW, ADD_REPLY]);
+    });
+    expect(variablesOf(1)['pullRequestReviewId']).toBe('PRR_transient');
+  });
+
+  it('posts immediately while browsing', async () => {
+    answerByDocument();
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'reply' }));
+
+    await waitFor(() => {
+      expect(documents()).toEqual([ADD_REPLY]);
+    });
+    expect('pullRequestReviewId' in variablesOf(0)).toBe(false);
   });
 });

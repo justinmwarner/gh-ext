@@ -41,14 +41,14 @@ export function pendingCountLabel(pending: {
   const { commentCount, countIsComplete } = pending;
 
   if (countIsComplete) {
-    if (commentCount === 0) return 'No comments queued yet';
-    return `${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} queued`;
+    if (commentCount === 0) return 'Nothing queued yet — nothing has been posted';
+    return `${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} not posted yet`;
   }
 
   if (commentCount === 0) {
-    return 'This review was already open on GitHub, so how many comments it holds is unknown';
+    return 'This review was already open on GitHub. Nothing on it has been posted, and how much it holds is unknown';
   }
-  return `At least ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} — ${commentCount} queued here, plus anything already on this review`;
+  return `At least ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} not posted yet — ${commentCount} queued here, plus anything already on this review`;
 }
 
 const APPROVE_BLOCKED = 'GitHub does not allow approving your own pull request.';

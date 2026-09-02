@@ -156,16 +156,18 @@ export function Composer({
     );
   }
 
-  const target =
-    session.pending.kind === 'pending'
-      ? 'This will be added to your pending review.'
-      : 'This will post immediately as a single comment.';
+  const queued = session.pending.kind === 'pending';
+  const target = queued
+    ? 'Queued on your pending review — not posted until you submit it.'
+    : 'Posts immediately, as a single comment.';
 
   return (
     <section className="composer" data-composer={path}>
       <header className="composer-head">
         <span className="composer-position">{positionLabel(anchor)}</span>
-        <span className="composer-target">{target}</span>
+        <span className={`composer-target${queued ? ' composer-target-queued' : ''}`}>
+          {target}
+        </span>
       </header>
 
       <textarea
@@ -213,7 +215,7 @@ export function Composer({
             void submit();
           }}
         >
-          {posting ? 'Posting…' : 'Comment'}
+          {posting ? 'Posting…' : queued ? 'Add to review' : 'Comment'}
         </button>
       </div>
     </section>

@@ -235,10 +235,26 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
   expect(sent?.['path']).toBe('src/app.ts');
   expect(sent?.['body']).toBe('Posted from the browser test.');
 
+  // And it is actually published, which is the whole point.
+  //
+  // `addPullRequestReviewThread` has no standalone mode: on its own it leaves
+  // the comment queued inside a PENDING review that nobody else can see. So
+  // the review is opened, written to, and submitted in one go — and this
+  // asserts the third round trip really happens, in a real browser, because
+  // the version that did not looked identical on screen.
+  const mutations = api.operations.filter((name) => name !== 'PullRequestReview');
+  expect(mutations).toEqual(['StartReview', 'AddThread', 'SubmitReview']);
+  expect(api.variables[api.operations.indexOf('SubmitReview')]?.['event']).toBe(
+    'COMMENT',
+  );
+
   // And it comes back onto the page as a thread rather than vanishing.
   await expect(
     page.getByText('Posted from the browser test.').last(),
   ).toBeVisible();
+
+  // Nothing is left queued: no pending-review bar, no "not posted" chip.
+  await expect(page.getByText(/not posted yet/i)).toHaveCount(0);
 });
 
 test('the keyboard map works against real key events', async ({
