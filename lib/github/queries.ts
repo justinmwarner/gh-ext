@@ -66,6 +66,11 @@ export const PULL_REQUEST_QUERY = `query PullRequestReview($owner: String!, $rep
       baseRefName headRefName headRefOid
       permalink
       author { login avatarUrl }
+      # GitHub rejects an approval of your own pull request. Comparing
+      # author.login against the viewer would need the viewer's login, which
+      # this query does not otherwise want; the schema answers the question
+      # directly. Executed against the live schema on 2026-09-01.
+      viewerDidAuthor
       reviewDecision
       viewerLatestReview { id state commit { oid } }
       latestReviews(first: 20) {

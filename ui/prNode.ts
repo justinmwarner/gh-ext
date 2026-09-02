@@ -76,6 +76,22 @@ export function prPermalink(node: PullRequestNode): string | null {
   return safeGitHubUrl(node['permalink']);
 }
 
+/**
+ * Whether the viewer wrote this pull request.
+ *
+ * GitHub rejects an approval of your own work, so the submit bar disables
+ * Approve rather than letting the mutation come back a 422. Read from
+ * `viewerDidAuthor` rather than by comparing logins, because the query has the
+ * author's login and not the viewer's.
+ *
+ * Strictly `=== true`: an older cached node predating that field in the query
+ * has it undefined, and guessing "yes" there would disable a control the
+ * reviewer is entitled to.
+ */
+export function prViewerIsAuthor(node: PullRequestNode): boolean {
+  return node['viewerDidAuthor'] === true;
+}
+
 function readPerson(value: unknown): { login: string; avatarUrl: string | null } | null {
   if (!isRecord(value)) return null;
   const login = readString(value['login']);

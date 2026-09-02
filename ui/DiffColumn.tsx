@@ -55,6 +55,18 @@ export interface DiffOrigin {
   truncated: boolean;
 }
 
+/**
+ * A request from the Overview to bring one thread into view.
+ *
+ * `token` rather than a bare id: two jumps to the same thread are two requests,
+ * and the second has to act. Nothing here can be derived from `current`, whose
+ * whole design is to *stop* repeating itself.
+ */
+export interface ThreadJump {
+  threadId: string;
+  token: number;
+}
+
 export interface DiffColumnProps {
   files: readonly ReviewFile[];
   diff: DiffOrigin;
@@ -62,6 +74,8 @@ export interface DiffColumnProps {
   current: CurrentFile;
   /** A different file reached the top of the column. */
   onScrollTo: (path: string) => void;
+  /** The Overview asked for a thread. Null until it has. */
+  jump?: ThreadJump | null;
 }
 
 const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata> = {
@@ -98,7 +112,23 @@ const anchorSignature = (thread: {
 }): string =>
   `${thread.id}#${thread.line ?? 'x'}#${thread.diffSide}#${thread.subjectType}#${thread.isOutdated}`;
 
-export function DiffColumn({ files, diff, current, onScrollTo }: DiffColumnProps) {
+/**
+ * How many frames to keep looking for a thread the column was asked to reach.
+ *
+ * The file has to be scrolled to, virtualized in and rendered before the
+ * thread's element exists, and none of that is synchronous. A handful of frames
+ * covers it; giving up quietly after that is correct, because the file scroll
+ * has already happened and that is most of the answer.
+ */
+const JUMP_FRAMES = 8;
+
+export function DiffColumn({
+  files,
+  diff,
+  current,
+  onScrollTo,
+  jump = null,
+}: DiffColumnProps) {
   const session = useReviewSession();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
@@ -299,6 +329,60 @@ export function DiffColumn({ files, diff, current, onScrollTo }: DiffColumnProps
     if (!acts || target === null) return;
     viewer.current?.scrollTo({ type: 'item', id: target, align: 'start' });
   }, [acts, target]);
+
+  /**
+   * The second half of a jump from the Overview.
+   *
+   * The file scroll above puts the card on screen; this finds the thread inside
+   * it. Both halves are needed and only the first is reliable — a thread may be
+   * in a collapsed file, inside the closed per-file section, or on a file this
+   * column has no card for at all. So the element is looked for over a few
+   * frames and, if it never turns up, nothing further happens: the reviewer is
+   * on the right file, which is what the list could honestly promise.
+   */
+  const jumpId = jump?.threadId ?? null;
+  const jumpToken = jump?.token ?? 0;
+  useEffect(() => {
+    if (jumpId === null) return;
+
+    let frame = 0;
+    let attempts = 0;
+
+    const reach = () => {
+      const container = scroller.current;
+      const found =
+        container === null
+          ? undefined
+          : // Matched by attribute value rather than by selector: thread ids
+            // are opaque server strings and are not escaped for CSS here.
+            [...container.querySelectorAll('[data-thread]')].find(
+              (node) => node.getAttribute('data-thread') === jumpId,
+            );
+
+      if (found !== undefined) {
+        // Resolved threads and every listed one sit inside a closed <details>,
+        // where scrolling to them would land on a summary line.
+        let box = found.closest('details');
+        while (box !== null) {
+          box.open = true;
+          box = box.parentElement?.closest('details') ?? null;
+        }
+        // Absent in jsdom, and not worth a polyfill for a scroll.
+        if (typeof found.scrollIntoView === 'function') {
+          found.scrollIntoView({ block: 'center' });
+        }
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < JUMP_FRAMES) frame = requestAnimationFrame(reach);
+    };
+
+    frame = requestAnimationFrame(reach);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [jumpId, jumpToken]);
 
   return (
     <main className="column" aria-label="Diff">

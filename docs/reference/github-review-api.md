@@ -218,6 +218,24 @@ event: PullRequestReviewEvent!     # COMMENT | APPROVE | REQUEST_CHANGES | DISMI
 body: String
 ```
 
+### Discard a pending review — `deletePullRequestReview`
+
+```
+pullRequestReviewId: ID!
+```
+
+Added 2026-09-01, after the state machine's `discarded` transition turned out to
+have no producer. Clearing only local state would leave the `PENDING` review and
+every comment queued on it sitting on GitHub, so the next visit would silently
+resume a review the reviewer believes they abandoned.
+
+This is the one destructive mutation in the extension. It deletes queued review
+comments that exist nowhere else. The UI requires an explicit second
+confirmation before calling it.
+
+Validated against the live schema with a fabricated review id: returns
+`NOT_FOUND` only, so the document is schema-valid.
+
 ### Viewed state — `markFileAsViewed` / `unmarkFileAsViewed`
 
 ```

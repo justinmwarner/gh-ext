@@ -490,3 +490,428 @@ code {
   text-align: center;
   color: light-dark(#59636e, #9198a1);
 }
+
+/* --------------------------------------------------------------- threads */
+
+/* Threads are slotted into the diff's shadow rows through `<slot>`, so they
+   are ordinary light DOM and ordinary page CSS reaches them. They are also
+   rendered in the per-file section below the card header, and the same rules
+   have to serve both places. */
+
+.thread {
+  margin: 4px 0;
+  padding: 8px 10px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#ffffff, #151b23);
+}
+
+.thread-head,
+.thread-resolved > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.thread-resolved {
+  margin: 4px 0;
+  padding: 6px 10px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.thread-resolved > summary {
+  cursor: pointer;
+}
+
+.thread-flag {
+  padding: 0 6px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.thread-comments {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.comment + .comment {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.comment-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.comment-author {
+  font-weight: 600;
+  color: light-dark(#1f2328, #e6edf3);
+}
+
+/* Bodies are Markdown rendered as plain text — this project has no Markdown
+   renderer and takes no dependency for one. `pre-wrap` at least keeps the
+   author's own line breaks, which is most of what is lost otherwise. */
+.comment-text {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.suggestion {
+  margin: 8px 0 0;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.suggestion-label {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: light-dark(#f6f8fa, #212830);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.suggestion-code {
+  margin: 0;
+  padding: 8px;
+  overflow-x: auto;
+  background: light-dark(#eaffea, #12261e);
+}
+
+.suggestion-apply {
+  display: inline-block;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.thread-more,
+.unanchored-reason {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.thread-error,
+.composer-error {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid light-dark(#cf222e, #f85149);
+  color: light-dark(#cf222e, #ff7b72);
+  font-size: 12px;
+}
+
+.thread-actions {
+  margin-top: 8px;
+}
+
+.thread-reply {
+  display: flex;
+  gap: var(--gap);
+  align-items: flex-end;
+  margin-top: 8px;
+}
+
+.thread-reply-input,
+.composer-input {
+  flex: 1;
+  min-height: 4.5rem;
+  padding: 6px 8px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#ffffff, #0d1117);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+.thread-reply-input:disabled {
+  background: light-dark(#f6f8fa, #212830);
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------- threads the diff cannot show */
+
+/* Load-bearing, not decoration. An annotation on a line outside a rendered
+   hunk is assigned to no slot and drawn nowhere, with no error, so a thread
+   that is not listed here is one the reviewer never learns about. */
+.unanchored {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+}
+
+.unanchored > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.unanchored-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- composer */
+
+.composer {
+  margin: 4px 0;
+  padding: 8px 10px;
+  border: 1px solid light-dark(#0969da, #4493f8);
+  border-radius: 6px;
+  background: light-dark(#ffffff, #151b23);
+}
+
+.composer-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.composer-input {
+  display: block;
+  width: 100%;
+}
+
+.composer-actions {
+  display: flex;
+  gap: var(--gap);
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* -------------------------------------------------------------- overview */
+
+/* The Overview is capped and scrolls on its own (see `.overview` above), so a
+   long description cannot push the file tree off the bottom of the rail. */
+
+.overview-body {
+  font-size: 13px;
+}
+
+.overview-section {
+  margin-top: 10px;
+}
+
+.overview-section h2 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.overview-text {
+  margin: 0 0 6px;
+  /* The description is plain text with its markup removed, so long tokens and
+     what used to be code fences have to be allowed to wrap. */
+  overflow-wrap: anywhere;
+}
+
+.overview-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.checks-list,
+.reviewer-states,
+.jump-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid light-dark(#eef1f4, #262c36);
+}
+
+.check-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.check-detail {
+  flex: 0 1 auto;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.reviewer-state {
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.reviewer-state.reviewer-good {
+  color: light-dark(#1a7f37, #3fb950);
+}
+
+.reviewer-state.reviewer-bad {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.jump-entry {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.jump-entry:hover {
+  background: light-dark(#eef1f4, #262c36);
+}
+
+.jump-path {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.jump-position,
+.jump-excerpt,
+.jump-absent {
+  display: block;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+  overflow-wrap: anywhere;
+}
+
+/* A thread whose file has no card in the column. Listed rather than dropped,
+   and marked so the reviewer is not left wondering why nothing moved. */
+.jump-absent {
+  color: light-dark(#9a6700, #d29922);
+}
+
+/* --------------------------------------------------- pending review footer */
+
+/* Only on screen while a review is pending. It is the one surface that says
+   queued comments exist at all, so it sits above the column rather than inside
+   it and cannot be scrolled away from. */
+
+.review-footer {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.review-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-count {
+  flex: 0 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.review-summary-input {
+  flex: 1 1 220px;
+  min-width: 160px;
+  height: 32px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#ffffff, #0d1117);
+  resize: vertical;
+}
+
+.review-footer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.button.danger {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.review-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.review-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 13px;
+  border: 1px solid light-dark(#d29922, #9e6a03);
+  border-radius: 6px;
+}
+
+.review-confirm p {
+  flex: 1 1 240px;
+  margin: 0;
+}
+
+.review-error,
+.topbar-error,
+.viewed-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: light-dark(#cf222e, #f85149);
+}
+
+/* The top bar is one fixed-height row, so a start-review failure is clipped
+   rather than allowed to reflow it. The full text is still in the DOM, so a
+   screen reader reads all of it, and it is repeated in the title. */
+.topbar-error {
+  max-width: 320px;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The card header is a flex row; a failed viewed mutation takes its own line
+   rather than squeezing the path and the counts. */
+.viewed-error {
+  flex-basis: 100%;
+}

@@ -19,7 +19,12 @@ describe('pending review state machine', () => {
     let s = reduce(initialState(), { type: 'review-started', reviewId: 'R_1' });
     s = reduce(s, { type: 'comment-added' });
     s = reduce(s, { type: 'comment-added' });
-    expect(s).toEqual({ kind: 'pending', reviewId: 'R_1', commentCount: 2 });
+    expect(s).toEqual({
+      kind: 'pending',
+      reviewId: 'R_1',
+      commentCount: 2,
+      countIsComplete: true,
+    });
   });
 
   it('ignores comment-added while browsing', () => {
@@ -42,6 +47,18 @@ describe('pending review state machine', () => {
     s = reduce(s, { type: 'comment-added' });
     expect(reduce(s, { type: 'review-started', reviewId: 'R_2' })).toEqual(s);
   });
+
+  it('knows the count is complete for a review it opened itself', () => {
+    // Nothing was queued before this session started one, so zero really is
+    // zero and the footer may say so.
+    const s = reduce(initialState(), { type: 'review-started', reviewId: 'R_1' });
+    expect(s).toEqual({
+      kind: 'pending',
+      reviewId: 'R_1',
+      commentCount: 0,
+      countIsComplete: true,
+    });
+  });
 });
 
 describe('resuming a review started elsewhere', () => {
@@ -51,7 +68,46 @@ describe('resuming a review started elsewhere', () => {
     // alongside an open pending review orphans them.
     expect(
       reduce(initialState(), { type: 'review-resumed', reviewId: 'R_9', commentCount: 3 })
-    ).toEqual({ kind: 'pending', reviewId: 'R_9', commentCount: 3 });
+    ).toEqual({
+      kind: 'pending',
+      reviewId: 'R_9',
+      commentCount: 3,
+      countIsComplete: false,
+    });
+  });
+
+  it('does not claim to know how many comments a resumed review holds', () => {
+    // PULL_REQUEST_QUERY carries no comment count for an already-open PENDING
+    // review, so the caller resumes with zero. Reporting that as a confident
+    // "0 comments" would invite the reviewer to submit a review they believe
+    // is empty and is not.
+    const s = reduce(initialState(), {
+      type: 'review-resumed',
+      reviewId: 'R_9',
+      commentCount: 0,
+    });
+    expect(s).toEqual({
+      kind: 'pending',
+      reviewId: 'R_9',
+      commentCount: 0,
+      countIsComplete: false,
+    });
+  });
+
+  it('still cannot claim completeness after this session queues a comment', () => {
+    // One comment queued here does not reveal what was queued before.
+    let s = reduce(initialState(), {
+      type: 'review-resumed',
+      reviewId: 'R_9',
+      commentCount: 0,
+    });
+    s = reduce(s, { type: 'comment-added' });
+    expect(s).toEqual({
+      kind: 'pending',
+      reviewId: 'R_9',
+      commentCount: 1,
+      countIsComplete: false,
+    });
   });
 
   it('targets the resumed review for new comments', () => {

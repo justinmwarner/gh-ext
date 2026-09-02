@@ -251,13 +251,19 @@ describe('DiffColumn', () => {
     expect(screen.getByRole('checkbox', { name: /b\.ts/ })).toBeDefined();
   });
 
-  it('does not move the viewed state, because nothing writes it yet', () => {
+  it('moves the viewed state optimistically, now that it writes it', () => {
+    // The mutation itself, and the rollback when it fails, are covered in
+    // ui/viewedState.test.tsx. This only pins that the box is live here.
     mount([file({ path: 'a.ts', viewedState: 'UNVIEWED' })]);
 
     const box = within(card('a.ts')).getByRole('checkbox') as HTMLInputElement;
-    fireEvent.click(box);
+    expect(box.readOnly).toBe(false);
 
-    expect(box.checked).toBe(false);
+    act(() => {
+      fireEvent.click(box);
+    });
+
+    expect(box.checked).toBe(true);
   });
 
   it('collapses and re-expands a file from its header', () => {

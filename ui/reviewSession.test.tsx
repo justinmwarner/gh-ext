@@ -98,6 +98,10 @@ describe('initialPendingReview', () => {
       kind: 'pending',
       reviewId: 'PRR_pending',
       commentCount: 0,
+      // The query carries no comment count for a review that was already open,
+      // so the zero above counts this session only and must not be presented
+      // as the whole truth.
+      countIsComplete: false,
     });
   });
 

@@ -15,6 +15,7 @@ import type { FileViewedState } from '@/lib/github/types';
 import { UnanchoredThreads } from './UnanchoredThreads';
 import { fileBody } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
+import { useReviewSession, viewedKey } from './reviewSession';
 import type { ListedThread } from './reviewThreads';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
@@ -29,8 +30,10 @@ const MINUS = '−';
  * version. It is a third state, and it is drawn as one — indeterminate, with
  * the reason spelled out beside it.
  *
- * Read-only for now. The mutation is a later task, and a checkbox that moves
- * without persisting is worse than one that does not move.
+ * This is GitHub's own viewed state, not a local one: a tick here shows up on
+ * github.com, and one made there arrives in the payload. Optimistic, and a
+ * failure puts back exactly what was displaced — including `DISMISSED`, which
+ * rolling back to `UNVIEWED` would quietly erase.
  */
 function ViewedCheckbox({
   path,
@@ -39,26 +42,42 @@ function ViewedCheckbox({
   path: string;
   state: FileViewedState;
 }) {
-  const dismissed = state === 'DISMISSED';
+  const session = useReviewSession();
+  // The optimistic layer wins where it has an entry; everywhere else the
+  // payload's value stands.
+  const current = session.viewed.get(path) ?? state;
+  const dismissed = current === 'DISMISSED';
+  const inFlight = session.viewedInFlight.has(path);
+  const failure = session.failures.get(viewedKey(path));
 
   return (
-    <label className="viewed" data-viewed-state={state}>
-      <input
-        type="checkbox"
-        checked={state === 'VIEWED'}
-        ref={(node) => {
-          // `indeterminate` is a DOM property with no HTML attribute, so it
-          // cannot be set from JSX.
-          if (node !== null) node.indeterminate = dismissed;
-        }}
-        readOnly
-        aria-readonly="true"
-        aria-label={`Mark ${path} as viewed`}
-        title="Marking files viewed is not wired up yet"
-      />
-      <span>Viewed</span>
-      {dismissed && <span className="viewed-note">changed since</span>}
-    </label>
+    <>
+      <label className="viewed" data-viewed-state={current}>
+        <input
+          type="checkbox"
+          checked={current === 'VIEWED'}
+          ref={(node) => {
+            // `indeterminate` is a DOM property with no HTML attribute, so it
+            // cannot be set from JSX.
+            if (node !== null) node.indeterminate = dismissed;
+          }}
+          disabled={inFlight}
+          aria-label={`Mark ${path} as viewed`}
+          onChange={(event) => {
+            // `current`, not `state`: what goes back on failure is what the
+            // reviewer was actually looking at.
+            void session.setViewed(path, event.target.checked, current);
+          }}
+        />
+        <span>Viewed</span>
+        {dismissed && <span className="viewed-note">changed since</span>}
+      </label>
+      {failure !== undefined && (
+        <p className="viewed-error" role="alert">
+          {failure}
+        </p>
+      )}
+    </>
   );
 }
 

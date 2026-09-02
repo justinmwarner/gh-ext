@@ -29,10 +29,20 @@ import {
 import {
   ADD_REPLY,
   ADD_THREAD,
+  DELETE_REVIEW,
+  MARK_VIEWED,
   RESOLVE_THREAD,
+  START_REVIEW,
+  SUBMIT_REVIEW,
+  UNMARK_VIEWED,
   UNRESOLVE_THREAD,
 } from '@/lib/github/mutations';
-import type { ReviewComment, ReviewThread } from '@/lib/github/types';
+import type {
+  FileViewedState,
+  ReviewComment,
+  ReviewEvent,
+  ReviewThread,
+} from '@/lib/github/types';
 import { type JsonValue, type PrRef, type PullRequestNode, message } from '@/lib/messages';
 import type { DraftStore } from '@/lib/review/drafts';
 import {
@@ -47,6 +57,28 @@ import { draftStore } from './draftStore';
 
 /** The failure key for a comment that has no thread to hang off yet. */
 export const NEW_THREAD = 'new-thread';
+
+/**
+ * Failure keys for the review itself.
+ *
+ * Two, not one, because the two controls are never on screen together: the
+ * footer only exists while a review is pending, so a failure to *open* one has
+ * nowhere to appear except the top bar.
+ */
+export const REVIEW_START = 'review-start';
+export const REVIEW_SUBMIT = 'review-submit';
+
+/** The failure key for one file's viewed checkbox. */
+export const viewedKey = (path: string): string => `viewed:${path}`;
+
+/**
+ * The events a reviewer can submit.
+ *
+ * `DISMISS` is a member of `PullRequestReviewEvent` but is not a reviewer
+ * action — it is how an author or maintainer dismisses somebody else's review —
+ * so it is excluded here rather than offered and then explained.
+ */
+export type SubmitEvent = Exclude<ReviewEvent, 'DISMISS'>;
 
 export interface NewThreadInput {
   path: string;
@@ -63,13 +95,33 @@ export interface ReviewSessionValue {
   byId: ReadonlyMap<string, ReviewThread>;
   pending: PendingReviewState;
   drafts: DraftStore;
-  /** Keyed by thread id, or `NEW_THREAD` for the composer. */
+  /**
+   * Keyed by thread id, by `NEW_THREAD` for the composer, by `REVIEW_START` /
+   * `REVIEW_SUBMIT` for the review itself, and by `viewedKey(path)`.
+   */
   failures: ReadonlyMap<string, string>;
   /** Reply bodies still in flight, keyed by thread id. */
   sending: ReadonlyMap<string, string>;
+  /**
+   * Viewed states this session has changed, keyed by path.
+   *
+   * An override layer rather than a copy: a path with no entry is still
+   * whatever the payload said, so nothing has to be seeded or kept in step.
+   */
+  viewed: ReadonlyMap<string, FileViewedState>;
+  /** Paths whose viewed mutation has not answered yet. */
+  viewedInFlight: ReadonlySet<string>;
   setResolved(threadId: string, resolved: boolean): Promise<void>;
   reply(threadId: string, body: string): Promise<boolean>;
   postThread(input: NewThreadInput): Promise<boolean>;
+  /** Open a PENDING review for later comments to attach to. */
+  startReview(): Promise<boolean>;
+  /** Submit the pending review. False leaves it pending, untouched. */
+  submitReview(event: SubmitEvent, body: string): Promise<boolean>;
+  /** Delete the pending review, on GitHub as well as here. */
+  discardReview(): Promise<boolean>;
+  /** `from` is what to restore if GitHub refuses. */
+  setViewed(path: string, viewed: boolean, from: FileViewedState): Promise<void>;
   clearFailure(key: string): void;
 }
 
@@ -215,6 +267,12 @@ export function ReviewSessionProvider({
     () => new Map(),
   );
   const [sending, setSending] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [viewed, setViewedStates] = useState<ReadonlyMap<string, FileViewedState>>(
+    () => new Map(),
+  );
+  const [viewedInFlight, setViewedInFlight] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [pending, dispatch] = useReducer(reduce, pullRequest, initialPendingReview);
 
   // A refreshed payload replaces the threads outright. Comparing the prop
@@ -379,6 +437,150 @@ export function ReviewSessionProvider({
     [clearFailure, fail, mutate, prId],
   );
 
+  /**
+   * Open a PENDING review.
+   *
+   * `START_REVIEW` omits `event`, and that omission is the whole mechanism:
+   * `addPullRequestReview` with an event submits a review on the spot instead
+   * of leaving one open for comments to attach to.
+   */
+  const startReview = useCallback(async (): Promise<boolean> => {
+    // A second review would orphan the first, along with everything queued on
+    // it. The machine refuses the transition; this refuses the request.
+    if (pendingNow.current.kind === 'pending') return true;
+
+    clearFailure(REVIEW_START);
+    const response = await mutate(START_REVIEW, { pullRequestId: prId });
+
+    if (!response.ok) {
+      fail(REVIEW_START, `Starting a review failed: ${response.error.message}`);
+      return false;
+    }
+
+    const review = field(response.data.data, 'addPullRequestReview', 'pullRequestReview');
+    const reviewId = isRecord(review) ? review['id'] : undefined;
+    if (typeof reviewId !== 'string' || reviewId === '') {
+      // Entering Pending without an id would send every later comment to
+      // `pullRequestReviewId: undefined` and post it standalone instead.
+      fail(
+        REVIEW_START,
+        'GitHub accepted the request but returned no review id, so there is ' +
+          'nothing for comments to attach to. Try again.',
+      );
+      return false;
+    }
+
+    dispatch({ type: 'review-started', reviewId });
+    return true;
+  }, [clearFailure, fail, mutate, prId]);
+
+  /**
+   * Submit the pending review.
+   *
+   * A failure here keeps the review exactly as it was. The queued comments
+   * exist only inside that PENDING review; returning to Browse because the
+   * network blinked would leave the reviewer believing their review went out,
+   * with no way to get back to it from this page.
+   */
+  const submitReview = useCallback(
+    async (event: SubmitEvent, body: string): Promise<boolean> => {
+      const state = pendingNow.current;
+      if (state.kind !== 'pending') return false;
+
+      clearFailure(REVIEW_SUBMIT);
+      const summary = body.trim();
+      const response = await mutate(SUBMIT_REVIEW, {
+        pullRequestReviewId: state.reviewId,
+        event,
+        // Left out rather than sent empty: `body` is optional, and an empty
+        // summary is not a summary.
+        ...(summary === '' ? {} : { body: summary }),
+      });
+
+      if (!response.ok) {
+        fail(
+          REVIEW_SUBMIT,
+          `Submitting this review failed: ${response.error.message} ` +
+            'The review is still pending and none of its comments were discarded.',
+        );
+        return false;
+      }
+
+      dispatch({ type: 'submitted' });
+      return true;
+    },
+    [clearFailure, fail, mutate],
+  );
+
+  /**
+   * Throw the pending review away.
+   *
+   * Deleted on the server too. Clearing only the local state would leave the
+   * PENDING review and every comment on it sitting on GitHub, so the next visit
+   * would resume a review the reviewer believes they abandoned — and their next
+   * comment would join it.
+   */
+  const discardReview = useCallback(async (): Promise<boolean> => {
+    const state = pendingNow.current;
+    if (state.kind !== 'pending') return false;
+
+    clearFailure(REVIEW_SUBMIT);
+    const response = await mutate(DELETE_REVIEW, {
+      pullRequestReviewId: state.reviewId,
+    });
+
+    if (!response.ok) {
+      fail(REVIEW_SUBMIT, `Discarding this review failed: ${response.error.message}`);
+      return false;
+    }
+
+    dispatch({ type: 'discarded' });
+    return true;
+  }, [clearFailure, fail, mutate]);
+
+  /**
+   * Mark a file viewed, or take the mark back.
+   *
+   * This is GitHub's own viewed state, not a local one: a file ticked here is
+   * ticked on github.com, and one ticked there arrives ticked in the payload.
+   *
+   * Optimistic, and `from` is what goes back on failure — the value that was
+   * displaced, which is not always `UNVIEWED`. Rolling a `DISMISSED` file back
+   * to unviewed would throw away the "this changed after you looked at it"
+   * signal the reviewer started with.
+   */
+  const setViewed = useCallback(
+    async (path: string, next: boolean, from: FileViewedState): Promise<void> => {
+      const key = viewedKey(path);
+      clearFailure(key);
+      setViewedStates((current) =>
+        new Map(current).set(path, next ? 'VIEWED' : 'UNVIEWED'),
+      );
+      setViewedInFlight((current) => new Set(current).add(path));
+
+      const response = await mutate(next ? MARK_VIEWED : UNMARK_VIEWED, {
+        pullRequestId: prId,
+        path,
+      });
+
+      setViewedInFlight((current) => {
+        const rest = new Set(current);
+        rest.delete(path);
+        return rest;
+      });
+
+      if (!response.ok) {
+        setViewedStates((current) => new Map(current).set(path, from));
+        fail(
+          key,
+          `${next ? 'Marking' : 'Unmarking'} ${path} as viewed failed: ` +
+            `${response.error.message}`,
+        );
+      }
+    },
+    [clearFailure, fail, mutate, prId],
+  );
+
   const byPath = useMemo(() => {
     const map = new Map<string, ReviewThread[]>();
     for (const thread of live) {
@@ -405,9 +607,15 @@ export function ReviewSessionProvider({
       drafts,
       failures,
       sending,
+      viewed,
+      viewedInFlight,
       setResolved,
       reply,
       postThread,
+      startReview,
+      submitReview,
+      discardReview,
+      setViewed,
       clearFailure,
     }),
     [
@@ -420,9 +628,15 @@ export function ReviewSessionProvider({
       drafts,
       failures,
       sending,
+      viewed,
+      viewedInFlight,
       setResolved,
       reply,
       postThread,
+      startReview,
+      submitReview,
+      discardReview,
+      setViewed,
       clearFailure,
     ],
   );

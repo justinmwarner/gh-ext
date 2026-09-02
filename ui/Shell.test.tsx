@@ -6,10 +6,25 @@
  * somewhere to land rather than a layout to invent.
  */
 
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Shell } from './Shell';
-import { fileFixture, prPayload, prPayloadWithFiles } from './prPayload.fixture';
+import { request } from './background';
+import {
+  fileFixture,
+  prPayload,
+  prPayloadWithFiles,
+  reviewThread,
+} from './prPayload.fixture';
+
+vi.mock('./background', () => ({ request: vi.fn() }));
+
+const requestMock = request as unknown as Mock;
+
+beforeEach(() => {
+  requestMock.mockReset();
+});
 
 describe('Shell', () => {
   it('renders the top bar, the left rail and the main column', () => {
@@ -108,5 +123,96 @@ describe('Shell', () => {
     const separator = screen.getByRole('separator');
     expect(separator.getAttribute('aria-orientation')).toBe('vertical');
     expect(separator.getAttribute('tabindex')).toBe('0');
+  });
+});
+
+describe('the pending-review footer', () => {
+  it('is absent while browsing', () => {
+    render(<Shell payload={prPayload()} />);
+
+    expect(screen.queryByRole('contentinfo')).toBeNull();
+  });
+
+  it('appears once the top bar starts a review', async () => {
+    const user = userEvent.setup();
+    requestMock.mockResolvedValue({
+      ok: true,
+      data: { data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_1' } } } },
+    });
+    render(<Shell payload={prPayload()} />);
+
+    await user.click(screen.getByRole('button', { name: /start a review/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('contentinfo')).toBeDefined();
+    });
+    expect(screen.getByRole('contentinfo').textContent).toMatch(/no comments queued/i);
+  });
+
+  it('is already there for a review GitHub still has open', () => {
+    render(
+      <Shell
+        payload={prPayload({
+          pullRequest: {
+            ...prPayload().pullRequest,
+            viewerLatestReview: { id: 'PRR_open', state: 'PENDING' },
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('contentinfo')).toBeDefined();
+  });
+});
+
+describe('the unresolved thread jump list', () => {
+  it('lists a thread whose file has no card in the column', () => {
+    // The per-file unanchorable section is rendered by `CodeView`'s custom
+    // header, so it exists only for files the column has drawn. A pull request
+    // whose `files` connection was capped still has threads on the files that
+    // were dropped, and this list is the only place they can appear.
+    render(
+      <Shell
+        payload={{
+          ...prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })]),
+          threads: [reviewThread({ path: 'lib/dropped.ts', line: 3 })],
+          truncated: { files: true, threads: false },
+        }}
+      />,
+    );
+
+    // The column does draw cards — so the absence below is the file missing,
+    // not the column failing to render in jsdom.
+    const column = screen.getByRole('main');
+    expect(column.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
+
+    // Nothing in the diff column mentions the file or the thread at all: no
+    // card, no per-file section, and no annotation.
+    expect(column.querySelector('[data-file-card="lib/dropped.ts"]')).toBeNull();
+    expect(column.querySelector('[data-unanchored="lib/dropped.ts"]')).toBeNull();
+    expect(
+      column.querySelector('[data-thread="PRRT_lib/dropped.ts:3"]'),
+    ).toBeNull();
+
+    const list = screen.getByRole('list', { name: /unresolved/i });
+    expect(screen.getByRole('complementary').contains(list)).toBe(true);
+    expect(list.textContent).toContain('lib/dropped.ts');
+  });
+
+  it('lists threads on files the reviewer has not scrolled to', () => {
+    render(
+      <Shell
+        payload={{
+          ...prPayloadWithFiles([
+            fileFixture({ path: 'src/app.ts' }),
+            fileFixture({ path: 'src/deep/last.ts' }),
+          ]),
+          threads: [reviewThread({ path: 'src/deep/last.ts', line: 2 })],
+        }}
+      />,
+    );
+
+    const list = screen.getByRole('list', { name: /unresolved/i });
+    expect(list.textContent).toContain('src/deep/last.ts');
   });
 });

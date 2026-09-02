@@ -217,3 +217,74 @@ function lineText(
   }
   return null;
 }
+
+/**
+ * One entry in the Overview's unresolved-thread jump list.
+ *
+ * `inDiff` is the honest half. `files` is capped at a page limit and
+ * `reviewThreads` is followed separately, so a large pull request really can
+ * carry comments on files the column never received — and a thread listed with
+ * nowhere to jump to is still infinitely better than one that is not listed.
+ */
+export interface UnresolvedJump {
+  threadId: string;
+  path: string;
+  /** Where it sits, in the same words the thread header uses. */
+  position: string;
+  /** The first line of the opening comment, to recognize it by. */
+  excerpt: string;
+  /** False when no card in the diff column can be scrolled to. */
+  inDiff: boolean;
+}
+
+/** Long enough to recognize a comment, short enough for a rail entry. */
+const EXCERPT_LIMIT = 90;
+
+function excerptOf(thread: ReviewThread): string {
+  const first = thread.comments.nodes[0];
+  if (first === undefined) return '';
+
+  const line = first.body.split('\n').find((text) => text.trim() !== '')?.trim() ?? '';
+  return line.length > EXCERPT_LIMIT ? `${line.slice(0, EXCERPT_LIMIT - 1)}…` : line;
+}
+
+/**
+ * Every open thread, in reading order.
+ *
+ * This list is the **only** global index of threads in the UI. The per-file
+ * unanchorable section is rendered by `CodeView`'s custom header, so it exists
+ * only for the files the column has actually drawn — a thread on a file further
+ * down, or on one that never arrived, has no other surface at all. So nothing
+ * is filtered out for being unreachable; it is marked unreachable instead.
+ *
+ * Ordered by the column's own file order so the list reads top to bottom
+ * alongside the diff, with anything the column does not have appended after it.
+ */
+export function unresolvedJumps(
+  threads: readonly ReviewThread[],
+  paths: readonly string[],
+): UnresolvedJump[] {
+  const order = new Map(paths.map((path, index) => [path, index]));
+  // Sorts after every known file without depending on the list's length.
+  const UNPLACED = Number.MAX_SAFE_INTEGER;
+
+  return threads
+    .filter((thread) => !thread.isResolved)
+    .map((thread) => ({ thread, rank: order.get(thread.path) ?? UNPLACED }))
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.thread.path !== b.thread.path) {
+        return a.thread.path < b.thread.path ? -1 : 1;
+      }
+      // An outdated thread has no `line` at all, so it sorts to the end of its
+      // file rather than to the top as a zero would.
+      return (a.thread.line ?? Infinity) - (b.thread.line ?? Infinity);
+    })
+    .map(({ thread, rank }) => ({
+      threadId: thread.id,
+      path: thread.path,
+      position: threadPosition(thread),
+      excerpt: excerptOf(thread),
+      inDiff: rank !== UNPLACED,
+    }));
+}

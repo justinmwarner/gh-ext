@@ -119,6 +119,25 @@ export const SUBMIT_REVIEW = `mutation SubmitReview(
   }
 }`;
 
+/**
+ * Throw a pending review away, on the server as well as here.
+ *
+ * The state machine's `discarded` transition has to mean something. Clearing
+ * only the local state would leave the PENDING review — and every comment
+ * queued on it — sitting on GitHub, so the next visit would silently resume a
+ * review the reviewer believes they abandoned.
+ *
+ * Not covered by section 4 of the API reference. The document was executed
+ * against the live schema with a fabricated review id on 2026-09-01 and came
+ * back with `NOT_FOUND` only, which is a schema-valid document that resolved
+ * no node.
+ */
+export const DELETE_REVIEW = `mutation DeleteReview($pullRequestReviewId: ID!) {
+  deletePullRequestReview(input: { pullRequestReviewId: $pullRequestReviewId }) {
+    pullRequestReview { id state }
+  }
+}`;
+
 export const MARK_VIEWED = `mutation MarkViewed($pullRequestId: ID!, $path: String!) {
   markFileAsViewed(input: { pullRequestId: $pullRequestId, path: $path }) {
     pullRequest { id }

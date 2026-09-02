@@ -17,6 +17,7 @@ import {
   renderedLines,
   sourceLines,
   threadPosition,
+  unresolvedJumps,
 } from './reviewThreads';
 import { reviewThread } from './prPayload.fixture';
 
@@ -241,5 +242,92 @@ describe('sourceLines', () => {
 
   it('returns nothing for lines the patch does not carry', () => {
     expect(sourceLines(twoHunks(), 'RIGHT', 10, 12)).toEqual([]);
+  });
+});
+
+describe('unresolvedJumps', () => {
+  it('lists only unresolved threads', () => {
+    const jumps = unresolvedJumps(
+      [
+        reviewThread({ path: 'src/app.ts', line: 2 }),
+        reviewThread({ path: 'src/app.ts', line: 9, isResolved: true }),
+      ],
+      ['src/app.ts'],
+    );
+
+    expect(jumps.map((jump) => jump.threadId)).toEqual(['PRRT_src/app.ts:2']);
+  });
+
+  it('orders by the column, then by line within a file', () => {
+    const jumps = unresolvedJumps(
+      [
+        reviewThread({ path: 'src/app.ts', line: 9 }),
+        reviewThread({ path: 'README.md', line: 1 }),
+        reviewThread({ path: 'src/app.ts', line: 2 }),
+      ],
+      ['README.md', 'src/app.ts'],
+    );
+
+    expect(jumps.map((jump) => jump.threadId)).toEqual([
+      'PRRT_README.md:1',
+      'PRRT_src/app.ts:2',
+      'PRRT_src/app.ts:9',
+    ]);
+  });
+
+  it('keeps a thread whose file is not in the diff, and says so', () => {
+    // `files` is capped and threads are not, so a large pull request really can
+    // carry comments on files the column never received. Dropping them here
+    // would make them invisible: this list is the only global index of threads.
+    const jumps = unresolvedJumps(
+      [reviewThread({ path: 'lib/dropped.ts', line: 3 })],
+      ['src/app.ts'],
+    );
+
+    expect(jumps.length).toBe(1);
+    expect(jumps[0]?.path).toBe('lib/dropped.ts');
+    expect(jumps[0]?.inDiff).toBe(false);
+  });
+
+  it('puts files the column knows about first', () => {
+    const jumps = unresolvedJumps(
+      [
+        reviewThread({ path: 'zzz/absent.ts', line: 1 }),
+        reviewThread({ path: 'src/app.ts', line: 1 }),
+      ],
+      ['src/app.ts'],
+    );
+
+    expect(jumps.map((jump) => jump.path)).toEqual(['src/app.ts', 'zzz/absent.ts']);
+  });
+
+  it('carries something to recognize the thread by', () => {
+    const jumps = unresolvedJumps([reviewThread({ path: 'src/app.ts', line: 2 })], [
+      'src/app.ts',
+    ]);
+
+    expect(jumps[0]?.position).toBe('Line 2');
+    expect(jumps[0]?.excerpt).toContain('This allocates');
+  });
+
+  it('sorts an outdated thread with no line last within its file', () => {
+    const jumps = unresolvedJumps(
+      [
+        reviewThread({
+          path: 'src/app.ts',
+          line: null,
+          startLine: null,
+          originalLine: 4,
+          isOutdated: true,
+        }),
+        reviewThread({ path: 'src/app.ts', line: 9 }),
+      ],
+      ['src/app.ts'],
+    );
+
+    expect(jumps.map((jump) => jump.threadId)).toEqual([
+      'PRRT_src/app.ts:9',
+      'PRRT_src/app.ts:none',
+    ]);
   });
 });
