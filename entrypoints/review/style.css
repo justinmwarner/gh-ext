@@ -315,9 +315,17 @@ code {
   min-height: 0;
 }
 
+/* `overflow-y` is the load-bearing declaration here, not a nicety. `CodeView`
+   makes this element its scrollport: it binds its `scroll` listener to it,
+   virtualizes against its `clientHeight`, and calls `scrollTo` on it. Without a
+   scrolling overflow the content simply spills, the whole page scrolls
+   instead, that listener never fires — so virtualization never advances past
+   the first screen of files and the tree never follows the diff. Nothing in
+   jsdom can see this: it performs no layout, so nothing ever overflows. */
 .diff-view {
   flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
 }
 
 /* -------------------------------------------------------------- diff cards */

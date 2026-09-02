@@ -270,3 +270,30 @@ describe('GitHubClient without a token', () => {
     expect(fake.calls).toHaveLength(0);
   });
 });
+
+describe('how the transport is invoked', () => {
+  it('calls fetch as a bare function rather than as a method of the client', async () => {
+    // Found in a real browser, invisible to every other test in this file.
+    //
+    // The default transport is the global `fetch`, and `this.fetchImpl(url)`
+    // invokes it with the client as its receiver. `fetch` refuses any receiver
+    // but its own global: in the service worker — where every request in this
+    // extension is actually made — that is
+    // "Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation",
+    // and the extension cannot reach GitHub at all.
+    //
+    // Every other test here injects its own plain function, which does not care
+    // what `this` is, so the whole suite passed against a client that could not
+    // make a single request.
+    let receiver: unknown = 'never called';
+    const spy = function (this: unknown): Promise<Response> {
+      receiver = this;
+      return Promise.resolve(new Response('diff --git a/a b/a'));
+    };
+
+    const client = new GitHubClient(tokens('t0ken'), spy as unknown as typeof fetch);
+    await client.fetchDiff('acme', 'widgets', 42);
+
+    expect(receiver).toBeUndefined();
+  });
+});

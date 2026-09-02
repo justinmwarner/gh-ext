@@ -3,3 +3,7 @@ dist/
 .output/
 .wxt/
 *.log
+
+# Playwright
+test-results/
+playwright-report/

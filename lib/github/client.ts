@@ -33,10 +33,28 @@ export interface RateLimitStatus {
 export class GitHubClient {
   private lastRateLimit: RateLimitStatus | null = null;
 
+  /**
+   * The transport, wrapped so it is never called as a method of this object.
+   *
+   * Not a parameter property, and the wrapper is not decoration. `fetch` is a
+   * global function that refuses any receiver but its own global, and
+   * `this.fetchImpl(url, init)` hands it this client — which in the background
+   * service worker, where every request in this extension is actually made,
+   * fails with "Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal
+   * invocation" before a single byte leaves. The arrow drops the receiver and
+   * calls it plainly, which is what `fetch` requires.
+   *
+   * Invisible to a test that injects its own transport, because an ordinary
+   * function does not care what `this` is. Found in a real browser.
+   */
+  private readonly fetchImpl: typeof fetch;
+
   constructor(
     private readonly tokens: TokenProvider,
-    private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+    fetchImpl: typeof fetch = fetch,
+  ) {
+    this.fetchImpl = (input, init) => fetchImpl(input, init);
+  }
 
   getRateLimit(): RateLimitStatus | null {
     return this.lastRateLimit;
