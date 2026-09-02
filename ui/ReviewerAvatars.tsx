@@ -6,7 +6,21 @@
  * mouse can reach.
  */
 
-import type { Reviewer } from './prNode';
+import type { Reviewer, ReviewerKind } from './prNode';
+
+/**
+ * How the name is qualified.
+ *
+ * A team slug and a bot login look exactly like a username at a glance, and the
+ * avatar row is the only place a reviewer sees either — so the kind is said out
+ * loud rather than left to be inferred from a missing avatar.
+ */
+const KINDS: Record<ReviewerKind, string> = {
+  user: '',
+  team: ' (team)',
+  bot: ' (bot)',
+  unknown: '',
+};
 
 const VERDICTS: Record<string, string> = {
   APPROVED: 'approved',
@@ -17,8 +31,9 @@ const VERDICTS: Record<string, string> = {
 };
 
 function label(reviewer: Reviewer): string {
-  if (reviewer.state === null) return `${reviewer.login} — review requested`;
-  return `${reviewer.login} — ${VERDICTS[reviewer.state] ?? reviewer.state.toLowerCase()}`;
+  const name = `${reviewer.login}${KINDS[reviewer.kind]}`;
+  if (reviewer.state === null) return `${name} — review requested`;
+  return `${name} — ${VERDICTS[reviewer.state] ?? reviewer.state.toLowerCase()}`;
 }
 
 function tone(reviewer: Reviewer): string {
@@ -33,7 +48,11 @@ export function ReviewerAvatars({ reviewers }: { reviewers: Reviewer[] }) {
   return (
     <ul className="reviewers">
       {reviewers.map((reviewer) => (
-        <li key={reviewer.login} className={`reviewer reviewer-${tone(reviewer)}`}>
+        <li
+          // A team slug may equal a user login; the kind keeps the keys apart.
+          key={`${reviewer.kind}:${reviewer.login}`}
+          className={`reviewer reviewer-${tone(reviewer)}`}
+        >
           {reviewer.avatarUrl === null ? (
             // A reviewer with no avatar URL still has to be nameable.
             <span className="avatar avatar-empty" role="img" aria-label={label(reviewer)}>

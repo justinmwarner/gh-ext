@@ -22,8 +22,11 @@ export type PrCacheRef = PrRef & { headSha: string };
  * - `diff` — the parsed unified diff, or the files-endpoint fallback.
  * - `threads` — review threads and their comments. Mutable.
  * - `checks` — the head commit's status check rollup. Mutable.
+ * - `truncated` — which paginated lists hit the page cap. Derived from `pr`
+ *   and `threads`, and cached with them so a payload served entirely from
+ *   storage still admits what it is missing.
  */
-export type CacheSlot = 'pr' | 'diff' | 'threads' | 'checks';
+export type CacheSlot = 'pr' | 'diff' | 'threads' | 'checks' | 'truncated';
 
 /**
  * Which slots cannot change for a given head SHA.
@@ -39,6 +42,7 @@ const IMMUTABLE: Record<CacheSlot, boolean> = {
   diff: true,
   threads: false,
   checks: false,
+  truncated: false,
 };
 
 /**

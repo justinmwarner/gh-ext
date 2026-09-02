@@ -10,6 +10,8 @@ import { DiffColumn } from './DiffColumn';
 import { RailResizer } from './RailResizer';
 import { SideRail } from './SideRail';
 import { TopBar } from './TopBar';
+import { TruncationNotice } from './TruncationNotice';
+import { prPermalink } from './prNode';
 import { useRailWidth } from './useRailWidth';
 
 export function Shell({ payload }: { payload: PrPayload }) {
@@ -18,6 +20,11 @@ export function Shell({ payload }: { payload: PrPayload }) {
   return (
     <div className="shell">
       <TopBar payload={payload} />
+      <TruncationNotice
+        truncated={payload.truncated}
+        pr={payload.ref}
+        href={prPermalink(payload.pullRequest)}
+      />
       <div className="shell-body">
         <SideRail width={rail.width} />
         <RailResizer {...rail} />

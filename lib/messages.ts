@@ -66,6 +66,22 @@ export type DiffPayload =
   | { source: 'unified'; files: ParsedDiffFile[]; truncated: false }
   | { source: 'files-api'; files: FallbackDiffFile[]; truncated: boolean };
 
+/**
+ * Which of the payload's paginated lists stopped short.
+ *
+ * `files` and `reviewThreads` are followed to the end of their cursors, but not
+ * past a hard page cap — a connection that keeps promising more must not be
+ * able to spin the worker. When the cap engages the list really is incomplete,
+ * and the reviewer has to be told: the difference between "this pull request
+ * has no more comments" and "we dropped them" is not one they can infer.
+ *
+ * Both false on a normal pull request, which is the overwhelming majority.
+ */
+export interface PrTruncation {
+  files: boolean;
+  threads: boolean;
+}
+
 /** Everything the review page needs for a first paint. */
 export interface PrPayload {
   ref: PrRef;
@@ -75,6 +91,8 @@ export interface PrPayload {
   threads: ReviewThread[];
   checks: CheckRollup | null;
   diff: DiffPayload;
+  /** Lists that hit the page cap. Never omitted, so a consumer cannot forget. */
+  truncated: PrTruncation;
 }
 
 export interface PrefetchAck {
@@ -197,6 +215,23 @@ export interface ProtocolError {
    * `rate-limit`, and null even then when GitHub sent no usable reset header.
    */
   resetAt: number | null;
+}
+
+/**
+ * A failure raised by the worker itself, already classified for the wire.
+ *
+ * The only class in this module. It lives here rather than in the worker
+ * because `ProtocolErrorKind` does: the pure modules the worker delegates to
+ * have to be able to say "not found" without importing an entrypoint, and
+ * `toProtocolError` has to be able to recognise it.
+ */
+export class ProtocolFailure extends Error {
+  constructor(
+    readonly protocolKind: ProtocolErrorKind,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 export type Ok<T> = { ok: true; data: T };

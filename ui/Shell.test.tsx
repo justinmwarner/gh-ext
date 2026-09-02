@@ -30,6 +30,27 @@ describe('Shell', () => {
     expect(overview.closest('details')).not.toBeNull();
   });
 
+  it('says when a list was cut short, and offers the way out', () => {
+    // The worst outcome is a reviewer who cannot tell "no more comments" from
+    // "we dropped them", so a capped list is announced rather than absorbed.
+    render(
+      <Shell payload={prPayload({ truncated: { files: true, threads: true } })} />,
+    );
+
+    const notice = screen.getByRole('alert');
+    expect(notice.textContent).toMatch(/files/i);
+    expect(notice.textContent).toMatch(/comment|thread/i);
+    expect(
+      screen.getAllByRole('link', { name: /open in github/i }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('says nothing about truncation for an ordinary pull request', () => {
+    render(<Shell payload={prPayload()} />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('gives the rail a resize handle the keyboard can reach', () => {
     render(<Shell payload={prPayload()} />);
 

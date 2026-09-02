@@ -293,6 +293,22 @@ code {
   border-radius: 6px;
 }
 
+/* A capped list is not a failure, so this warns rather than alarms — but it
+   sits above the fold with the escape hatch in it, because the page below it
+   is genuinely incomplete. */
+.truncation-notice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 16px 12px;
+  border-left-color: light-dark(#bf8700, #d29922);
+}
+
+.truncation-notice .button {
+  flex: none;
+}
+
 /* ------------------------------------------------------------ full pages */
 
 .fullpage {

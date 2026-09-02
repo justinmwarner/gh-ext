@@ -9,7 +9,7 @@ function thread(over: Partial<ReviewThread> = {}): ReviewThread {
     originalLine: 10, originalStartLine: null,
     diffSide: 'RIGHT', startDiffSide: null, subjectType: 'LINE',
     viewerCanReply: true, viewerCanResolve: true, viewerCanUnresolve: true,
-    comments: [], ...over,
+    comments: { totalCount: 0, nodes: [] }, ...over,
   };
 }
 

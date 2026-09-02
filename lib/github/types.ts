@@ -15,6 +15,21 @@ export interface ReviewComment {
   url: string;
 }
 
+/**
+ * A thread's comments, as the connection GraphQL actually returns.
+ *
+ * Not a bare array: `comments(first: 50)` is not paginated — a thread with more
+ * than fifty replies is vanishingly rare next to a pull request with more than
+ * a hundred files, and one more round trip per thread is not worth it. But the
+ * fifty-first has to be *detectable*, so `totalCount` travels with the nodes
+ * and `totalCount > nodes.length` means the rest are on GitHub.
+ */
+export interface ReviewCommentConnection {
+  /** Every comment on the thread, including any beyond the page returned. */
+  totalCount: number;
+  nodes: ReviewComment[];
+}
+
 export interface ReviewThread {
   id: string;
   isResolved: boolean;
@@ -33,7 +48,7 @@ export interface ReviewThread {
   viewerCanReply: boolean;
   viewerCanResolve: boolean;
   viewerCanUnresolve: boolean;
-  comments: ReviewComment[];
+  comments: ReviewCommentConnection;
 }
 
 export interface PullRequestFile {

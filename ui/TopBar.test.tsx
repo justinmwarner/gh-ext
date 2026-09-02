@@ -64,6 +64,43 @@ describe('TopBar', () => {
     expect(screen.getByRole('img', { name: /kim/ })).toBeDefined();
   });
 
+  it('names a team and a bot reviewer as such, not as usernames', () => {
+    // A pull request whose only pending reviewer is a team used to render no
+    // avatars at all, which reads as "nobody has been asked to review".
+    render(
+      <TopBar
+        payload={prPayload({
+          pullRequest: pullRequestNode({
+            latestReviews: { nodes: [] },
+            reviewRequests: {
+              nodes: [
+                {
+                  requestedReviewer: {
+                    __typename: 'Team',
+                    name: 'Platform Infrastructure',
+                    slug: 'platform-infra',
+                  },
+                },
+                {
+                  requestedReviewer: {
+                    __typename: 'Bot',
+                    login: 'copilot-pull-request-reviewer',
+                    avatarUrl: 'https://avatars.example/copilot',
+                  },
+                },
+              ],
+            },
+          }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: /platform-infra \(team\)/ })).toBeDefined();
+    expect(
+      screen.getByRole('img', { name: /copilot-pull-request-reviewer \(bot\)/ }),
+    ).toBeDefined();
+  });
+
   it('links to the pull request on github.com', () => {
     render(<TopBar payload={prPayload()} />);
 
