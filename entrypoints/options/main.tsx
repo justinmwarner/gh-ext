@@ -138,6 +138,83 @@ function App() {
     <main>
       <h1>Fast GitHub Review</h1>
 
+      <ol className="setup">
+        <li>
+          Open{' '}
+          <a
+            href="https://github.com/settings/personal-access-tokens/new"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            github.com/settings/personal-access-tokens/new
+          </a>
+          .
+        </li>
+        <li>
+          Give it a name you will recognise later, such as{' '}
+          <strong>Fast GitHub Review</strong>, and set an expiry. GitHub will not
+          show you the token again after you leave that page.
+        </li>
+        <li>
+          Under <strong>Repository access</strong>, choose the repositories you
+          review. <strong>Only select repositories</strong> is the safer choice;{' '}
+          <strong>All repositories</strong> is less work but grants far more.
+        </li>
+        <li>
+          Under <strong>Permissions &rarr; Repository permissions</strong>, set
+          exactly these four and leave every other one at <em>No access</em>:
+          <table className="perms">
+            <thead>
+              <tr>
+                <th scope="col">Permission</th>
+                <th scope="col">Access</th>
+                <th scope="col">Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Pull requests</td>
+                <td>
+                  <strong>Read and write</strong>
+                </td>
+                <td>Read the review, and post comments, resolves and approvals</td>
+              </tr>
+              <tr>
+                <td>Contents</td>
+                <td>Read-only</td>
+                <td>Fetch the diff, and whole files when you expand context</td>
+              </tr>
+              <tr>
+                <td>Commit statuses</td>
+                <td>Read-only</td>
+                <td>Show the status checks</td>
+              </tr>
+              <tr>
+                <td>Metadata</td>
+                <td>Read-only</td>
+                <td>Required by GitHub whenever any other permission is set</td>
+              </tr>
+            </tbody>
+          </table>
+        </li>
+        <li>
+          Click <strong>Generate token</strong> and copy it. It starts with{' '}
+          <code>github_pat_</code>.
+        </li>
+        <li>
+          Paste it below, press <strong>Save token</strong>, then{' '}
+          <strong>Validate saved token</strong>. A valid token answers with your
+          GitHub username.
+        </li>
+      </ol>
+
+      <p className="hint">
+        If your repositories belong to an organisation, an owner may have to
+        approve the token before it works. GitHub shows it as{' '}
+        <em>Pending owner approval</em> on the token page, and until it is
+        approved this extension will report the pull request as out of reach.
+      </p>
+
       <label htmlFor="token">GitHub fine-grained personal access token</label>
       <input
         id="token"
@@ -149,8 +226,8 @@ function App() {
         onChange={(event) => setToken(event.target.value)}
       />
       <p className="hint">
-        Needs read access to the repositories you review, plus write access to
-        pull requests to leave comments and submit reviews.
+        Saving replaces whatever is stored now. Saving an empty box clears the
+        token, which is how you sign out.
       </p>
 
       <div className="actions">

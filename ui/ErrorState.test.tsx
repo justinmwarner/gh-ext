@@ -79,3 +79,44 @@ describe('ErrorState', () => {
     },
   );
 });
+
+describe('offering the token as the culprit', () => {
+  const checkToken = () => screen.queryByRole('button', { name: /check your token/i });
+
+  const show = (kind: 'rate-limit' | 'not-found' | 'unknown', message: string) =>
+    render(<ErrorState pr={pr} error={{ kind, message, resetAt: null }} />);
+
+  it('offers it for a pull request that is out of reach', () => {
+    // A fine-grained token that simply does not grant the repository comes back
+    // as a plain not-found, so this page is where that reviewer lands.
+    show('not-found', 'No pull request acme/widgets#42');
+    expect(checkToken()).not.toBeNull();
+  });
+
+  it('does not offer it when rate limited', () => {
+    // A new token would not refill the quota. Waiting is the only remedy, and
+    // a button here would send the reviewer somewhere useless.
+    show('rate-limit', 'GitHub rate limit exceeded');
+    expect(checkToken()).toBeNull();
+  });
+
+  it.each([
+    'Resource not accessible by personal access token',
+    'Your token has not been granted the required scopes',
+    'You must grant SAML SSO authorization for this organization',
+    'Forbidden',
+  ])('offers it for a permission-shaped failure: %s', (message) => {
+    show('unknown', message);
+    expect(checkToken()).not.toBeNull();
+  });
+
+  it('does not offer it for a failure that has nothing to do with the token', () => {
+    show('unknown', 'Unexpected end of JSON input');
+    expect(checkToken()).toBeNull();
+  });
+
+  it('always offers the escape hatch, whatever the failure', () => {
+    show('unknown', 'Unexpected end of JSON input');
+    expect(screen.getByRole('link', { name: /github/i })).not.toBeNull();
+  });
+});

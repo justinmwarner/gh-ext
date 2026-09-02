@@ -55,6 +55,28 @@
         opacity: 0.6;
         cursor: default;
       }
+      /* The setup walkthrough. Numbers matter here — this is a sequence
+         someone follows on another site with this page beside it. */
+      ol.setup {
+        margin: 0 0 1.5rem;
+        padding-left: 1.25rem;
+        line-height: 1.6;
+      }
+      ol.setup li { margin-bottom: 0.6rem; }
+      ol.setup a { color: inherit; }
+      table.perms {
+        border-collapse: collapse;
+        margin: 0.6rem 0 0.2rem;
+        font-size: 0.9em;
+      }
+      table.perms th,
+      table.perms td {
+        text-align: left;
+        padding: 0.25rem 0.9rem 0.25rem 0;
+        border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        vertical-align: top;
+      }
+      table.perms th { font-weight: 600; opacity: 0.7; }
       .hint {
         color: #59636e;
         margin: 0.35rem 0 0;
