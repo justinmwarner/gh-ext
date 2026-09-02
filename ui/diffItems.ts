@@ -133,34 +133,147 @@ export function fileDiffFor(file: ReviewFile): FileDiffMetadata {
 }
 
 /**
+ * A number that changes exactly when a file's parsed diff does.
+ *
+ * The column memoizes each file's thread layout, and the obvious cache key —
+ * the threads themselves — is not enough. Switching to "changes since my last
+ * review" hands the same path a *different patch* while every thread field
+ * stays identical, so a memo keyed on threads alone keeps the old
+ * anchored-or-listed verdict. A thread whose line is no longer inside any hunk
+ * would then still be handed to Pierre as an annotation, and Pierre drops an
+ * annotation outside a rendered hunk in silence: the comment disappears with no
+ * error anywhere.
+ *
+ * A revision number rather than the object itself so it composes into the
+ * string signature the layout cache already builds, and a `WeakMap` so a diff
+ * that is collected takes its number with it.
+ */
+const diffRevisions = new WeakMap<FileDiffMetadata, number>();
+let nextDiffRevision = 0;
+
+export function fileDiffRevision(file: ReviewFile): number {
+  const parsed = fileDiffFor(file);
+  const seen = diffRevisions.get(parsed);
+  if (seen !== undefined) return seen;
+
+  nextDiffRevision += 1;
+  diffRevisions.set(parsed, nextDiffRevision);
+  return nextDiffRevision;
+}
+
+/**
+ * A number identifying one *set* of parsed diffs.
+ *
+ * `CodeView` reuses the record it holds for an item id and, in practice, keeps
+ * the code it first rendered for it: handing the same path a different
+ * `fileDiff` updates the item and leaves the old rows on screen (verified
+ * against 1.3.6 — see the test that pins it). Replacing the whole diff is
+ * exactly what "changes since my last review" does, so the viewer is remounted
+ * under a new key instead, which is the library's own advice for changing what
+ * a viewer holds.
+ *
+ * Keyed on the array so this is O(1) and idempotent: the file list is memoized
+ * upstream, so a re-render that changed nothing produces the same number and
+ * nothing is remounted.
+ */
+const listRevisions = new WeakMap<object, number>();
+let nextListRevision = 0;
+
+export function diffGeneration(files: readonly ReviewFile[]): number {
+  const seen = listRevisions.get(files);
+  if (seen !== undefined) return seen;
+
+  nextListRevision += 1;
+  listRevisions.set(files, nextListRevision);
+  return nextListRevision;
+}
+
+/** One hunk's first line, on the side the hunk actually shows. */
+export interface HunkStop {
+  path: string;
+  side: 'additions' | 'deletions';
+  line: number;
+}
+
+/**
+ * The top of every hunk in the column, in reading order.
+ *
+ * What `J` and `K` move between. Read off the parsed hunk headers rather than
+ * measured, so it is known before anything is on screen, and flattened across
+ * files so hunk navigation runs off the end of one file into the next — which
+ * is how a reviewer reads a pull request.
+ *
+ * A pure addition hunk has no deletion lines to land on and vice versa, so the
+ * side is chosen per hunk rather than fixed.
+ */
+export function hunkStops(files: readonly ReviewFile[]): HunkStop[] {
+  const stops: HunkStop[] = [];
+
+  for (const file of files) {
+    for (const hunk of fileDiffFor(file).hunks) {
+      if (hunk.additionCount > 0) {
+        stops.push({ path: file.path, side: 'additions', line: hunk.additionStart });
+      } else if (hunk.deletionCount > 0) {
+        stops.push({ path: file.path, side: 'deletions', line: hunk.deletionStart });
+      }
+    }
+  }
+
+  return stops;
+}
+
+/**
  * `version` tells `CodeView` a controlled item changed.
  *
  * Without it the viewer keeps the record it already measured and the collapse
  * toggle moves our state and nothing else. It is derived rather than counted so
  * that re-deriving the list — which happens on every render — is idempotent.
  *
- * The annotations half is derived from the array's *identity*, not its
- * contents. The column memoizes an annotation array per file and only rebuilds
- * it when something that affects anchoring moved, so identity is exactly the
- * question "did these annotations change" — and asking it this way keeps a
- * resolve on one file from re-rendering every other file's diff.
+ * It is derived from **both** halves of what an item draws: the parsed diff and
+ * the annotations over it. The diff half is not theoretical — switching to
+ * "changes since my last review" replaces the patch for a path the viewer
+ * already has an item for, and a version that only watched the annotations
+ * would leave the old code on screen under the new file list.
+ *
+ * Both halves are read from object *identity*, not contents. Both are memoized
+ * upstream and only rebuilt when something real moved, so identity is exactly
+ * the question "did this change" — and asking it this way keeps a resolve on
+ * one file from re-rendering every other file's diff.
  */
-const annotationRevisions = new WeakMap<object, number>();
+const pairRevisions = new WeakMap<object, WeakMap<object, number>>();
 let nextRevision = 0;
 
-const revisionOf = (annotations: readonly unknown[] | undefined): number => {
-  if (annotations === undefined || annotations.length === 0) return 0;
-  const seen = annotationRevisions.get(annotations);
+/** Stands in for "this item has no annotations", which has no array to key on. */
+const NO_ANNOTATIONS_KEY: object = {};
+
+const revisionOf = (
+  fileDiff: object,
+  annotations: readonly unknown[] | undefined,
+): number => {
+  const key =
+    annotations === undefined || annotations.length === 0
+      ? NO_ANNOTATIONS_KEY
+      : annotations;
+
+  let byAnnotations = pairRevisions.get(fileDiff);
+  if (byAnnotations === undefined) {
+    byAnnotations = new WeakMap();
+    pairRevisions.set(fileDiff, byAnnotations);
+  }
+
+  const seen = byAnnotations.get(key);
   if (seen !== undefined) return seen;
+
   nextRevision += 1;
-  annotationRevisions.set(annotations, nextRevision);
+  byAnnotations.set(key, nextRevision);
   return nextRevision;
 };
 
 const versionOf = (
+  fileDiff: object,
   collapsed: boolean,
   annotations: readonly unknown[] | undefined,
-): number => revisionOf(annotations) * 2 + (collapsed ? 1 : 0);
+): number => revisionOf(fileDiff, annotations) * 2 + (collapsed ? 1 : 0);
 
 export function codeViewItems(
   files: readonly ReviewFile[],
@@ -173,14 +286,15 @@ export function codeViewItems(
     const collapsed =
       fileBody(file).kind !== 'diff' || collapsedPaths.has(file.path);
     const annotations = annotationsByPath.get(file.path);
+    const fileDiff = fileDiffFor(file);
 
     return {
       id: file.path,
       type: 'diff',
-      fileDiff: fileDiffFor(file),
+      fileDiff,
       collapsed,
       ...(annotations !== undefined ? { annotations } : {}),
-      version: versionOf(collapsed, annotations),
+      version: versionOf(fileDiff, collapsed, annotations),
     };
   });
 }

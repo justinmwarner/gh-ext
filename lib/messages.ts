@@ -95,6 +95,19 @@ export interface PrPayload {
   truncated: PrTruncation;
 }
 
+/**
+ * A narrowed diff: everything between two commits of one pull request.
+ *
+ * Always the unified arm. The compare endpoint either produces a diff or fails
+ * — there is no files-endpoint fallback for it — so a caller that got one of
+ * these has real patches for every file in it.
+ */
+export interface CompareDiff {
+  base: string;
+  head: string;
+  files: ParsedDiffFile[];
+}
+
 export interface PrefetchAck {
   /**
    * False when a prefetch for this pull request was already running, so the
@@ -169,6 +182,24 @@ export interface ProtocolMap {
       pr?: PrRef;
     };
     response: MutationResult;
+  };
+
+  /**
+   * Review page → worker: the diff between two commits of this pull request.
+   *
+   * "Changes since my last review", as `base...head`. The fetch belongs here
+   * rather than on the page for the same reason every other one does: the
+   * worker holds the token, and the review page never calls `fetch`.
+   *
+   * `base` is the head commit of the reviewer's previous review, read from
+   * `viewerLatestReview.commit.oid`; `head` is the pull request's current head.
+   * The body comes back in the same unified format the full diff does, so the
+   * files are the same `ParsedDiffFile` shape and everything downstream — the
+   * parser, the file list, thread anchoring — is unchanged.
+   */
+  'compare-diff': {
+    request: { pr: PrRef; base: string; head: string };
+    response: CompareDiff;
   };
 
   /** Options page → worker: does the stored token work, and who is it? */
@@ -255,6 +286,7 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   'open-review': true,
   'get-pr': true,
   mutate: true,
+  'compare-diff': true,
   'validate-token': true,
   'get-rate-limit': true,
 };

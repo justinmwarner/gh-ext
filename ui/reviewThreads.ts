@@ -260,13 +260,42 @@ function excerptOf(thread: ReviewThread): string {
  * Ordered by the column's own file order so the list reads top to bottom
  * alongside the diff, with anything the column does not have appended after it.
  */
+/** Sorts after every known file without depending on the list's length. */
+const UNPLACED = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Every thread in reading order, each with whether the column can reach it.
+ *
+ * The order `n` and `p` step through, and the order the Overview's jump list
+ * reads in — one function, because two orderings of the same threads would put
+ * the keyboard and the list out of step with each other after the first
+ * outdated comment.
+ */
+export function orderedThreads(
+  threads: readonly ReviewThread[],
+  paths: readonly string[],
+): { thread: ReviewThread; inDiff: boolean }[] {
+  const order = new Map(paths.map((path, index) => [path, index]));
+
+  return threads
+    .map((thread) => ({ thread, rank: order.get(thread.path) ?? UNPLACED }))
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.thread.path !== b.thread.path) {
+        return a.thread.path < b.thread.path ? -1 : 1;
+      }
+      // An outdated thread has no `line` at all, so it sorts to the end of its
+      // file rather than to the top as a zero would.
+      return (a.thread.line ?? Infinity) - (b.thread.line ?? Infinity);
+    })
+    .map(({ thread, rank }) => ({ thread, inDiff: rank !== UNPLACED }));
+}
+
 export function unresolvedJumps(
   threads: readonly ReviewThread[],
   paths: readonly string[],
 ): UnresolvedJump[] {
   const order = new Map(paths.map((path, index) => [path, index]));
-  // Sorts after every known file without depending on the list's length.
-  const UNPLACED = Number.MAX_SAFE_INTEGER;
 
   return threads
     .filter((thread) => !thread.isResolved)

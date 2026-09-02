@@ -92,6 +92,21 @@ export function prViewerIsAuthor(node: PullRequestNode): boolean {
   return node['viewerDidAuthor'] === true;
 }
 
+/**
+ * The commit the viewer's own last review was left on, or null.
+ *
+ * The base of "changes since my last review". Null for a first-time reviewer —
+ * `viewerLatestReview` is null when they have never reviewed — and also for a
+ * review GitHub could not attach to a commit, which is the same situation as
+ * far as the toggle is concerned: there is no earlier point to compare from.
+ */
+export function prViewerReviewedAt(node: PullRequestNode): string | null {
+  const review = node['viewerLatestReview'];
+  if (!isRecord(review)) return null;
+  const commit = review['commit'];
+  return isRecord(commit) ? readString(commit['oid']) : null;
+}
+
 function readPerson(value: unknown): { login: string; avatarUrl: string | null } | null {
   if (!isRecord(value)) return null;
   const login = readString(value['login']);

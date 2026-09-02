@@ -27,17 +27,32 @@
  * anything outside them is demoted into the per-file section on the card.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { CodeView } from '@pierre/diffs/react';
 import type { CodeViewHandle, CodeViewReactOptions } from '@pierre/diffs/react';
 import type { DiffLineAnnotation, SelectedLineRange } from '@pierre/diffs';
 import type { DiffPayload } from '@/lib/messages';
+import type { AnnotationSide } from '@/lib/review/threads';
 import { Composer } from './Composer';
 import { FileCard } from './FileCard';
 import { ThreadCard } from './ThreadCard';
 import { type ComposerTarget, composerFor } from './composerAnchor';
 import { type CardTop, type CurrentFile, shouldScrollDiff, topmostFile } from './currentFile';
-import { codeViewItems, fileDiffFor } from './diffItems';
+import {
+  codeViewItems,
+  diffGeneration,
+  fileDiffFor,
+  fileDiffRevision,
+  hunkStops,
+} from './diffItems';
 import type { ReviewFile } from './reviewFiles';
 import { NEW_THREAD, useReviewSession } from './reviewSession';
 import {
@@ -67,6 +82,21 @@ export interface ThreadJump {
   token: number;
 }
 
+/**
+ * What the keyboard needs from the column and cannot express as a prop.
+ *
+ * Three things, and each is about something only this component holds: the
+ * parsed hunks, the viewer's scroll, and Pierre's own line selection.
+ */
+export interface DiffColumnHandle {
+  /** Move to the next hunk (`1`) or the previous one (`-1`), across files. */
+  goToHunk(direction: 1 | -1): void;
+  /** Bring one line into view. What a search result jumps to. */
+  goToLine(path: string, side: AnnotationSide, line: number): void;
+  /** Open the composer on whatever the reviewer has selected in the gutter. */
+  commentOnSelection(): void;
+}
+
 export interface DiffColumnProps {
   files: readonly ReviewFile[];
   diff: DiffOrigin;
@@ -76,6 +106,7 @@ export interface DiffColumnProps {
   onScrollTo: (path: string) => void;
   /** The Overview asked for a thread. Null until it has. */
   jump?: ThreadJump | null;
+  ref?: Ref<DiffColumnHandle>;
 }
 
 const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata> = {
@@ -128,6 +159,7 @@ export function DiffColumn({
   current,
   onScrollTo,
   jump = null,
+  ref,
 }: DiffColumnProps) {
   const session = useReviewSession();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -145,18 +177,24 @@ export function DiffColumn({
   const composerMetadata = useRef<ComposerMetadata>({ kind: 'composer' });
 
   /**
-   * Layouts, recomputed per file only when that file's threads moved.
+   * Layouts, recomputed per file only when that file's threads moved — or when
+   * the diff under them did.
    *
    * Rebuilding every file's annotation array whenever any thread changes would
    * hand `CodeView` a new array for five hundred untouched files and re-render
-   * all of them. The signature is exactly the fields anchoring reads.
+   * all of them. So the signature is exactly the fields anchoring reads, and
+   * anchoring reads two things, not one: the thread, and the hunks it has to
+   * fall inside. `fileDiffRevision` is the second half. Without it, switching
+   * to "changes since my last review" leaves every thread with the verdict it
+   * got against the *full* diff — and one whose line is no longer in any hunk
+   * stays an annotation Pierre silently declines to draw.
    */
   const cache = useRef(new Map<string, { signature: string; layout: FileThreadLayout }>());
   const layouts = useMemo(() => {
     const built = new Map<string, FileThreadLayout>();
     for (const file of files) {
       const threads = session.byPath.get(file.path) ?? [];
-      const signature = threads.map(anchorSignature).join('|');
+      const signature = `${fileDiffRevision(file)}#${threads.map(anchorSignature).join('|')}`;
       const cached = cache.current.get(file.path);
       if (cached !== undefined && cached.signature === signature) {
         built.set(file.path, cached.layout);
@@ -247,6 +285,85 @@ export function DiffColumn({
     session.clearFailure(NEW_THREAD);
     setComposer(null);
   }, [session]);
+
+  /**
+   * Hunk navigation, as an index into every hunk in the column.
+   *
+   * Flattened across files so `J` runs off the end of one file into the next,
+   * which is how a pull request is read. The cursor is re-anchored whenever it
+   * has drifted away from the file the reviewer is actually on — they may have
+   * arrived by `j`, by the tree, or by scrolling — so `J` always means "the
+   * next hunk from here" rather than "the next hunk from wherever I last was".
+   */
+  const stops = useMemo(() => hunkStops(files), [files]);
+  const hunkCursor = useRef(-1);
+  const currentPath = useRef(current.path);
+  currentPath.current = current.path;
+
+  useEffect(() => {
+    // A new file list invalidates every index into the old one.
+    hunkCursor.current = -1;
+  }, [stops]);
+
+  useImperativeHandle(
+    ref,
+    (): DiffColumnHandle => ({
+      goToHunk(direction) {
+        if (stops.length === 0) return;
+
+        const path = currentPath.current;
+        const cursor = hunkCursor.current;
+        const anchored =
+          cursor >= 0 && (path === null || stops[cursor]?.path === path);
+
+        let next: number;
+        if (anchored) {
+          next = Math.min(Math.max(cursor + direction, 0), stops.length - 1);
+        } else {
+          // Land on the current file's first hunk rather than stepping from a
+          // position that has nothing to do with where the reviewer is.
+          const first = stops.findIndex((stop) => stop.path === path);
+          next = first === -1 ? (direction > 0 ? 0 : stops.length - 1) : first;
+        }
+
+        hunkCursor.current = next;
+        const stop = stops[next];
+        if (stop === undefined) return;
+        viewer.current?.scrollTo({
+          type: 'line',
+          id: stop.path,
+          lineNumber: stop.line,
+          side: stop.side,
+          align: 'start',
+        });
+      },
+
+      goToLine(path, side, line) {
+        viewer.current?.scrollTo({
+          type: 'line',
+          id: path,
+          lineNumber: line,
+          side,
+          align: 'center',
+        });
+      },
+
+      commentOnSelection() {
+        const selection = viewer.current?.getSelectedLines() ?? null;
+        if (selection === null) {
+          setComposer(null);
+          setUnplaceable(
+            'Nothing is selected, so there is no line to comment on. Select ' +
+              'one or more lines in the number gutter first, or use the "+" ' +
+              'that appears there.',
+          );
+          return;
+        }
+        openComposer.current(selection.id, selection.range);
+      },
+    }),
+    [stops],
+  );
 
   const options = useMemo<CodeViewReactOptions<AnnotationMetadata>>(
     () => ({
@@ -405,6 +522,13 @@ export function DiffColumn({
         <p className="placeholder">No changed files.</p>
       ) : (
         <CodeView<AnnotationMetadata>
+          // Remounted when the file list is replaced wholesale — a refreshed
+          // payload, or the switch to "changes since my last review". CodeView
+          // keeps the code it first rendered for an item id, so a new patch
+          // under an existing path would otherwise leave the old diff on
+          // screen under the new headers. Stable across every other render,
+          // because the generation is derived from the list's identity.
+          key={diffGeneration(files)}
           ref={viewer}
           disableWorkerPool
           containerRef={scroller}

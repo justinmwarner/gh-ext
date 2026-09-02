@@ -56,7 +56,49 @@ function StartReviewButton() {
   );
 }
 
-export function TopBar({ payload }: { payload: PrPayload }) {
+const NEVER_REVIEWED =
+  'You have not reviewed this pull request yet, so there is no earlier commit ' +
+  'to compare against.';
+
+export interface CompareToggleProps {
+  /** Whether the column is showing the narrowed diff. */
+  active: boolean;
+  /** False for a first-time reviewer: there is nothing to compare from. */
+  available: boolean;
+  busy: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * Narrow the column to what has landed since the viewer's own last review.
+ *
+ * Disabled rather than hidden when there is no prior review. A control that
+ * appears and disappears with the pull request is one the reviewer has to
+ * rediscover; a disabled one with the reason on it explains itself.
+ */
+function CompareToggle({ active, available, busy, onToggle }: CompareToggleProps) {
+  return (
+    <button
+      type="button"
+      className="button"
+      aria-pressed={active}
+      disabled={!available || busy}
+      title={available ? undefined : NEVER_REVIEWED}
+      onClick={onToggle}
+    >
+      {busy ? 'Comparing…' : 'Since my last review'}
+    </button>
+  );
+}
+
+export interface TopBarProps {
+  payload: PrPayload;
+  compare: CompareToggleProps;
+  /** Why the comparison could not be shown. Null when nothing went wrong. */
+  compareError?: string | null;
+}
+
+export function TopBar({ payload, compare, compareError = null }: TopBarProps) {
   const node = payload.pullRequest;
   const { base, head } = prBranches(node);
 
@@ -83,9 +125,16 @@ export function TopBar({ payload }: { payload: PrPayload }) {
       </div>
 
       <div className="topbar-actions">
+        <CompareToggle {...compare} />
         <OpenInGitHub pr={payload.ref} href={prPermalink(node)} />
         <StartReviewButton />
       </div>
+
+      {compareError !== null && (
+        <p className="topbar-error" role="alert">
+          {`That comparison could not be loaded: ${compareError} Showing the whole pull request.`}
+        </p>
+      )}
     </header>
   );
 }

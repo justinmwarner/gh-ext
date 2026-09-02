@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { codeViewItems, fileBody, hasHunks } from './diffItems';
+import { codeViewItems, fileBody, hasHunks, hunkStops } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
 
 const PATCH = `diff --git a/src/app.ts b/src/app.ts
@@ -240,5 +240,58 @@ describe('codeViewItems', () => {
 
     if (item?.type !== 'diff') throw new Error('expected a diff item');
     expect(item.fileDiff.prevName).toBe('src/old.ts');
+  });
+});
+
+describe('hunkStops', () => {
+  const twoHunks = [
+    'diff --git a/a.ts b/a.ts',
+    '--- a/a.ts',
+    '+++ b/a.ts',
+    '@@ -1,3 +1,3 @@',
+    ' one',
+    '-before',
+    '+after',
+    ' three',
+    '@@ -20,3 +20,3 @@',
+    ' twenty',
+    '-old',
+    '+new',
+    ' twentytwo',
+  ].join('\n');
+
+  const pureDeletion = [
+    'diff --git a/b.ts b/b.ts',
+    '--- a/b.ts',
+    '+++ b/b.ts',
+    '@@ -5,2 +4,0 @@',
+    '-gone',
+    '-also gone',
+  ].join('\n');
+
+  it('names the first line of every hunk, in reading order', () => {
+    const stops = hunkStops([
+      file({ path: 'a.ts', patch: twoHunks }),
+      file({ path: 'b.ts', patch: twoHunks }),
+    ]);
+
+    expect(stops).toEqual([
+      { path: 'a.ts', side: 'additions', line: 1 },
+      { path: 'a.ts', side: 'additions', line: 20 },
+      { path: 'b.ts', side: 'additions', line: 1 },
+      { path: 'b.ts', side: 'additions', line: 20 },
+    ]);
+  });
+
+  it('lands on the deletion side for a hunk that only removes lines', () => {
+    // There is no addition line to scroll to. Naming one would scroll to a row
+    // that is not there.
+    expect(hunkStops([file({ path: 'b.ts', patch: pureDeletion })])).toEqual([
+      { path: 'b.ts', side: 'deletions', line: 5 },
+    ]);
+  });
+
+  it('has nothing to offer for a file with no patch', () => {
+    expect(hunkStops([file({ path: 'logo.png', patch: '', isBinary: true })])).toEqual([]);
   });
 });

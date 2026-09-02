@@ -64,6 +64,31 @@ export class GitHubClient {
     return res.text();
   }
 
+  /**
+   * The diff between two commits, in the same unified format as `fetchDiff`.
+   *
+   * This is how "changes since my last review" is answered: `base` is the head
+   * commit of the reviewer's previous review and `head` is the current head, so
+   * the body is exactly the part of the pull request they have not seen.
+   *
+   * Refs are encoded because a ref is not always a SHA — a branch name may
+   * carry a slash, which would otherwise open a path segment of its own. The
+   * `...` between them is the compare syntax and is deliberately left alone.
+   */
+  async fetchCompare(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+  ): Promise<string> {
+    const range = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const res = await this.request(
+      `https://api.github.com/repos/${owner}/${repo}/compare/${range}`,
+      { headers: { accept: 'application/vnd.github.diff' } },
+    );
+    return res.text();
+  }
+
   private async request(url: string, init: RequestInit): Promise<Response> {
     const token = await this.tokens.getToken();
     if (!token) throw new AuthError('No GitHub token configured');

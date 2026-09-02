@@ -26,6 +26,7 @@
 import { useState } from 'react';
 import type { PendingReviewState } from '@/lib/review/pending-review';
 import { REVIEW_SUBMIT, type SubmitEvent, useReviewSession } from './reviewSession';
+import { useShortcutTarget } from './shortcutTargets';
 
 /**
  * What is queued, said only as far as it is known.
@@ -72,12 +73,10 @@ export function ReviewFooter({ viewerIsAuthor }: { viewerIsAuthor: boolean }) {
 
   const pending: PendingReviewState = session.pending;
   const failure = session.failures.get(REVIEW_SUBMIT);
-
-  // Nothing is queued, so there is nothing to submit and no bar to show.
-  if (pending.kind !== 'pending') return null;
+  const open = pending.kind === 'pending';
 
   const submit = (event: SubmitEvent) => {
-    if (busy) return;
+    if (busy || !open) return;
     setBusy(true);
     void session.submitReview(event, summary).finally(() => {
       // The component unmounts on success, so this only ever runs after a
@@ -85,6 +84,22 @@ export function ReviewFooter({ viewerIsAuthor }: { viewerIsAuthor: boolean }) {
       setBusy(false);
     });
   };
+
+  /**
+   * `Shift+Mod+Enter` submits the review, as a plain COMMENT.
+   *
+   * Not APPROVE. An approval is a statement about someone else's work and is
+   * not a thing to do by muscle memory — and GitHub rejects one on your own
+   * pull request outright. The three buttons are still where a verdict is
+   * chosen; this is the keyboard's version of the neutral one.
+   *
+   * Claimed only while a review is actually pending, so with nothing queued
+   * the chord is left to the browser.
+   */
+  useShortcutTarget('submit-review', open && !busy ? () => submit('COMMENT') : null);
+
+  // Nothing is queued, so there is nothing to submit and no bar to show.
+  if (!open) return null;
 
   const discard = () => {
     if (busy) return;

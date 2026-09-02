@@ -541,6 +541,160 @@ describe('review threads in the column', () => {
   });
 });
 
+describe('what CodeView does with a new patch for an item it already has', () => {
+  it('keeps the code it first rendered, which is why the viewer is remounted', async () => {
+    // Not a test of this codebase. `CodeView` reconciles controlled items by
+    // id and reuses the record, and reusing it keeps the rows it already drew
+    // even though the item now carries a different `fileDiff` and a bumped
+    // `version`. Verified against @pierre/diffs 1.3.6.
+    //
+    // "Changes since my last review" replaces the patch for paths the column
+    // already has cards for, so if this were not true the reviewer would be
+    // shown the *old* diff under the new file list — silently. `DiffColumn`
+    // remounts the viewer under `diffGeneration` because of it. If this ever
+    // starts passing a new patch through, the remount is dead weight; while it
+    // holds, removing the remount shows the wrong code.
+    const rowsOf = (root: ShadowRoot): string[] =>
+      [...root.querySelectorAll('[data-column-number]')].map(
+        (node) => `${node.getAttribute('data-line-type')}:${node.getAttribute('data-column-number')}`,
+      );
+
+    const itemsFor = (patch: string, version: number): CodeViewItem<{ id: string }>[] => {
+      const parsed = parsePatchFiles(patch)[0]?.files[0];
+      if (parsed === undefined) throw new Error('the fixture patch did not parse');
+      return [{ id: 'a.ts', type: 'diff', fileDiff: parsed, version }];
+    };
+
+    const { container, rerender } = render(
+      <CodeView<{ id: string }>
+        items={itemsFor(gappedPatch('a.ts'), 1)}
+        disableWorkerPool
+        options={{ diffStyle: 'unified' }}
+      />,
+    );
+
+    const host = container.querySelector('diffs-container');
+    if (!(host instanceof HTMLElement) || host.shadowRoot === null) {
+      throw new Error('no shadow root rendered');
+    }
+    const root = host.shadowRoot;
+
+    await waitFor(() => {
+      expect(rowsOf(root).length).toBeGreaterThan(0);
+    });
+    const before = rowsOf(root);
+    expect(before).toContain('context:1');
+
+    // A different patch for the same id, with a version that says so.
+    rerender(
+      <CodeView<{ id: string }>
+        items={itemsFor(
+          [
+            'diff --git a/a.ts b/a.ts',
+            '--- a/a.ts',
+            '+++ b/a.ts',
+            '@@ -20,3 +20,3 @@',
+            ' twenty',
+            '-old',
+            '+new',
+            ' twentytwo',
+          ].join('\n'),
+          2,
+        )}
+        disableWorkerPool
+        options={{ diffStyle: 'unified' }}
+      />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(rowsOf(root)).toEqual(before);
+  });
+});
+
+describe('switching the diff out from under the threads', () => {
+  // "Changes since my last review" replaces the patch for a path the column
+  // already has a card for. The rendered hunk ranges change, so a thread's
+  // anchored/listed classification has to be recomputed — and the layout memo
+  // is keyed on the thread fields, which have not moved at all.
+
+  const narrowed = (path: string): string =>
+    [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      '@@ -20,3 +20,3 @@',
+      ' twenty',
+      '-old',
+      '+new',
+      ' twentytwo',
+    ].join('\n');
+
+  const tree = (files: readonly ReviewFile[], threads: readonly ReviewThread[]) => (
+    <ReviewSessionProvider
+      pullRequest={pullRequestNode()}
+      prRef={PR_REF}
+      threads={threads}
+      drafts={new DraftStore(memoryStore())}
+    >
+      <DiffColumn
+        files={files}
+        diff={UNIFIED}
+        current={NO_FILE}
+        onScrollTo={() => {}}
+      />
+    </ReviewSessionProvider>
+  );
+
+  it('lists a thread that the narrowed diff no longer draws', async () => {
+    // Not lost: the reviewer is never told a comment exists and then not shown
+    // it. Losing review feedback is the worst thing this application can do.
+    const threads = [reviewThread({ path: 'src/app.ts', line: 2 })];
+    const wide = [file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })];
+
+    const { rerender } = render(tree(wide, threads));
+
+    await waitFor(() => {
+      expect(annotationIsVisible('src/app.ts', 'additions', 2)).toBe(true);
+    });
+    expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
+
+    // Same path, same threads, different patch: line 2 is outside every hunk.
+    rerender(tree([file({ path: 'src/app.ts', patch: narrowed('src/app.ts') })], threads));
+
+    await waitFor(() => {
+      expect(section('src/app.ts')).toBeDefined();
+    });
+    expect(
+      section('src/app.ts').querySelector('[data-listed-reason="out-of-hunk"]'),
+    ).not.toBeNull();
+    expect(
+      within(section('src/app.ts')).getByText('This allocates on every call.'),
+    ).toBeDefined();
+  });
+
+  it('anchors it again when the wide diff comes back', async () => {
+    const threads = [reviewThread({ path: 'src/app.ts', line: 2 })];
+    const { rerender } = render(
+      tree([file({ path: 'src/app.ts', patch: narrowed('src/app.ts') })], threads),
+    );
+
+    await waitFor(() => {
+      expect(section('src/app.ts')).toBeDefined();
+    });
+
+    rerender(
+      tree([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], threads),
+    );
+
+    await waitFor(() => {
+      expect(annotationIsVisible('src/app.ts', 'additions', 2)).toBe(true);
+    });
+    expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
+  });
+});
+
 describe('acting on a thread from inside the diff', () => {
   it('resolves it without disturbing the annotation it lives in', async () => {
     // The annotation array is memoized on what affects anchoring, which

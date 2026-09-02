@@ -24,6 +24,25 @@ afterEach(cleanup);
  * real implementation would have nothing truthful to report; anything that
  * depends on measured layout is out of reach here and is not asserted on.
  */
+/**
+ * `Element.prototype.scrollTo`, which jsdom also does not implement.
+ *
+ * `CodeView` calls it while reconciling its virtual scroll, so any test that
+ * moves the review — a keyboard jump, a thread jump from the rail — throws
+ * inside the library before it reaches anything worth asserting.
+ *
+ * Inert for the same reason as the observer above: jsdom reports every element
+ * as zero-sized, so there is no honest scrolling to simulate, and nothing here
+ * asserts on scroll position.
+ */
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'function') {
+  Object.defineProperty(Element.prototype, 'scrollTo', {
+    value: () => {},
+    writable: true,
+    configurable: true,
+  });
+}
+
 if (!('ResizeObserver' in globalThis)) {
   class InertResizeObserver implements ResizeObserver {
     observe(): void {}

@@ -20,6 +20,7 @@ import { useState } from 'react';
 import type { ReviewComment, ReviewThread } from '@/lib/github/types';
 import { threadPosition } from './reviewThreads';
 import { useReviewSession } from './reviewSession';
+import { useShortcutTarget } from './shortcutTargets';
 import { splitBody } from './suggestion';
 
 /** The instant, machine-readable; the words, however the reader's OS says them. */
@@ -72,28 +73,54 @@ function Comment({ comment }: { comment: ReviewComment }) {
 function ReplyBox({ thread }: { thread: ReviewThread }) {
   const session = useReviewSession();
   const [body, setBody] = useState('');
+  const [focused, setFocused] = useState(false);
   const inFlight = session.sending.has(thread.id);
   const empty = body.trim() === '';
+
+  const send = () => {
+    if (empty || inFlight) return;
+    void session.reply(thread.id, body).then((posted) => {
+      // Only clear on success. Throwing away what someone wrote because
+      // the network blinked is not a recoverable mistake.
+      if (posted) setBody('');
+    });
+  };
+
+  /**
+   * `Mod+Enter` posts *this* reply — but only while the cursor is in it.
+   *
+   * Claimed on focus rather than on mount, and that is the whole point. A
+   * composer may be open on some other file at the same time, and it claims the
+   * same chord; without the focus condition, pressing it here would post that
+   * comment instead. Whichever box the reviewer is actually typing in claims
+   * last, and the last claim wins.
+   */
+  useShortcutTarget(
+    'submit-comment',
+    focused && thread.viewerCanReply && !empty && !inFlight ? send : null,
+  );
 
   return (
     <form
       className="thread-reply"
       onSubmit={(event) => {
         event.preventDefault();
-        if (empty || inFlight) return;
-        void session.reply(thread.id, body).then((posted) => {
-          // Only clear on success. Throwing away what someone wrote because
-          // the network blinked is not a recoverable mistake.
-          if (posted) setBody('');
-        });
+        send();
       }}
     >
       <textarea
         className="thread-reply-input"
+        // How `r` finds this box. A thread is rendered by this one component
+        // in three places — anchored in the diff, listed in the per-file
+        // section, and inside a closed <details> — so an attribute is the only
+        // handle that works from all of them.
+        data-reply-for={thread.id}
         aria-label={`Reply to the thread on ${thread.path}`}
         value={body}
         disabled={!thread.viewerCanReply}
         onChange={(event) => setBody(event.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         placeholder={
           thread.viewerCanReply ? 'Reply…' : 'You cannot reply to this thread.'
         }

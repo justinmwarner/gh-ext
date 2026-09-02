@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { DraftLocation } from '@/lib/review/drafts';
 import type { CommentAnchor } from '@/lib/review/selection';
 import { NEW_THREAD, useReviewSession } from './reviewSession';
+import { useShortcutTarget } from './shortcutTargets';
 import { suggestionBlock } from './suggestion';
 
 /** Long enough not to write on every keystroke, short enough to beat a tab close. */
@@ -105,6 +106,43 @@ export function Composer({
     };
   }, [key, body]);
 
+  const empty = body.trim() === '';
+  const usable = anchor !== null && rejection === null && location !== null;
+
+  const submit = async (): Promise<void> => {
+    // `usable` is a boolean rather than a type predicate, so the two nulls are
+    // named again here — for the compiler, and for anyone reading this alone.
+    if (empty || posting || rejection !== null || anchor === null || location === null) {
+      return;
+    }
+    setPosting(true);
+    // Written before the request, so a failure anywhere after this point still
+    // leaves the text on disk.
+    await session.drafts.save(location, body);
+    const posted = await session.postThread({ path, body, anchor });
+    setPosting(false);
+    if (!posted) return;
+    await session.drafts.clear(location);
+    onClose();
+  };
+
+  /**
+   * `Mod+Enter` posts this comment.
+   *
+   * The one shortcut that deliberately fires while the reviewer is typing —
+   * it exists to submit from inside the box, and a chord holding the platform
+   * modifier cannot be typed by accident. Claimed only while there is
+   * something postable, so the key falls back to the browser otherwise.
+   */
+  useShortcutTarget(
+    'submit-comment',
+    usable && !empty && !posting
+      ? () => {
+          void submit();
+        }
+      : null,
+  );
+
   if (anchor === null || rejection !== null) {
     return (
       <section className="composer composer-rejected" data-composer={path}>
@@ -118,24 +156,10 @@ export function Composer({
     );
   }
 
-  const empty = body.trim() === '';
   const target =
     session.pending.kind === 'pending'
       ? 'This will be added to your pending review.'
       : 'This will post immediately as a single comment.';
-
-  const submit = async (): Promise<void> => {
-    if (empty || posting || location === null) return;
-    setPosting(true);
-    // Written before the request, so a failure anywhere after this point still
-    // leaves the text on disk.
-    await session.drafts.save(location, body);
-    const posted = await session.postThread({ path, body, anchor });
-    setPosting(false);
-    if (!posted) return;
-    await session.drafts.clear(location);
-    onClose();
-  };
 
   return (
     <section className="composer" data-composer={path}>

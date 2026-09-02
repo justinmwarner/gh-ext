@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isRenderedLine,
   layoutThreads,
+  orderedThreads,
   renderedLines,
   sourceLines,
   threadPosition,
@@ -329,5 +330,64 @@ describe('unresolvedJumps', () => {
       'PRRT_src/app.ts:9',
       'PRRT_src/app.ts:none',
     ]);
+  });
+});
+
+describe('orderedThreads', () => {
+  it('reads in the column’s file order, then by line', () => {
+    // The order `n` and `p` step through. It has to be the column's order, not
+    // the payload's, or the keyboard walks the review out of sequence.
+    const ordered = orderedThreads(
+      [
+        reviewThread({ path: 'b.ts', line: 5 }),
+        reviewThread({ path: 'a.ts', line: 9 }),
+        reviewThread({ path: 'a.ts', line: 2 }),
+      ],
+      ['a.ts', 'b.ts'],
+    );
+
+    expect(ordered.map(({ thread }) => thread.id)).toEqual([
+      'PRRT_a.ts:2',
+      'PRRT_a.ts:9',
+      'PRRT_b.ts:5',
+    ]);
+  });
+
+  it('keeps a resolved thread, because `n` walks all of them', () => {
+    const ordered = orderedThreads(
+      [reviewThread({ path: 'a.ts', line: 2, isResolved: true })],
+      ['a.ts'],
+    );
+
+    expect(ordered).toHaveLength(1);
+  });
+
+  it('puts a thread on a file the column never got last, and says so', () => {
+    const ordered = orderedThreads(
+      [
+        reviewThread({ path: 'dropped.ts', line: 1 }),
+        reviewThread({ path: 'a.ts', line: 2 }),
+      ],
+      ['a.ts'],
+    );
+
+    expect(ordered.map(({ thread, inDiff }) => [thread.path, inDiff])).toEqual([
+      ['a.ts', true],
+      ['dropped.ts', false],
+    ]);
+  });
+
+  it('sorts an outdated thread to the end of its file rather than the top', () => {
+    // It has no `line` at all. Treating that as zero would put every stale
+    // comment first.
+    const ordered = orderedThreads(
+      [
+        reviewThread({ path: 'a.ts', line: null, isOutdated: true, id: 'stale' }),
+        reviewThread({ path: 'a.ts', line: 2 }),
+      ],
+      ['a.ts'],
+    );
+
+    expect(ordered.map(({ thread }) => thread.id)).toEqual(['PRRT_a.ts:2', 'stale']);
   });
 });

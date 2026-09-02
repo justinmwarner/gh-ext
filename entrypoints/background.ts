@@ -26,9 +26,11 @@ import {
   readHeadSha,
 } from '@/lib/github/assembly';
 import { AuthError, GitHubClient, RateLimitError } from '@/lib/github/client';
+import { parseUnifiedDiff } from '@/lib/github/diff';
 import { reviewHash } from '@/lib/github/pr-url';
 import { ChromeTokenProvider, chromeKeyValueStore } from '@/lib/github/token-provider';
 import {
+  type CompareDiff,
   type Err,
   type JsonValue,
   type Message,
@@ -170,6 +172,34 @@ export default defineBackground({
       return { data };
     }
 
+    /**
+     * The diff between two commits, for "changes since my last review".
+     *
+     * Here rather than on the review page because every network call is here:
+     * the page has no token and cannot get one. The body is parsed with the
+     * same `parseUnifiedDiff` the full diff goes through, so the file shape the
+     * page receives is identical either way.
+     *
+     * Deliberately uncached. A compare is keyed on a pair of commits rather
+     * than on the head alone, the reviewer asks for it by pressing a toggle
+     * rather than on load, and the page holds the answer for as long as it is
+     * showing it.
+     */
+    async function compareDiff(
+      pr: PrRef,
+      base: string,
+      head: string,
+    ): Promise<CompareDiff> {
+      if (base === '' || head === '') {
+        throw new ProtocolFailure(
+          'bad-request',
+          'A comparison needs two commits, and one of them was missing.',
+        );
+      }
+      const raw = await client.fetchCompare(pr.owner, pr.repo, base, head);
+      return { base, head, files: parseUnifiedDiff(raw) };
+    }
+
     async function validateToken(): Promise<TokenValidation> {
       const data = await client.graphql<{ viewer: { login: string } }>(VIEWER_QUERY, {});
       return { login: data.viewer.login };
@@ -208,6 +238,10 @@ export default defineBackground({
           case 'mutate':
             return ok<'mutate'>(
               await mutate(message.document, message.variables, message.pr),
+            );
+          case 'compare-diff':
+            return ok<'compare-diff'>(
+              await compareDiff(message.pr, message.base, message.head),
             );
           case 'validate-token':
             return ok<'validate-token'>(await validateToken());

@@ -108,6 +108,37 @@ describe('GitHubClient.fetchDiff', () => {
   });
 });
 
+describe('GitHubClient.fetchCompare', () => {
+  it('asks the compare endpoint for a diff between two commits', async () => {
+    // "Changes since my last review" is exactly `thatSha...headSha`, and the
+    // body is the same unified diff `parseUnifiedDiff` already handles.
+    const diff = ['diff --git a/a.ts b/a.ts', '@@ -1 +1 @@', '-a', '+b'].join('\n');
+    const fake = recordingFetch(() => new Response(diff, { status: 200 }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await expect(client.fetchCompare('octo', 'repo', 'base1', 'head2')).resolves.toBe(
+      diff,
+    );
+
+    expect(fake.calls[0]?.url).toBe(
+      'https://api.github.com/repos/octo/repo/compare/base1...head2',
+    );
+    expect(headersOf(fake.calls[0]).get('accept')).toBe('application/vnd.github.diff');
+    expect(headersOf(fake.calls[0]).get('authorization')).toBe('Bearer t');
+  });
+
+  it('escapes a ref that is a branch name with a slash in it', async () => {
+    const fake = recordingFetch(() => new Response('', { status: 200 }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await client.fetchCompare('octo', 'repo', 'release/1.0', 'main');
+
+    expect(fake.calls[0]?.url).toBe(
+      'https://api.github.com/repos/octo/repo/compare/release%2F1.0...main',
+    );
+  });
+});
+
 describe('GitHubClient error classification', () => {
   it('rejects a 401 with AuthError so the UI can show its setup state', async () => {
     const fake = recordingFetch(() => new Response('{}', { status: 401 }));

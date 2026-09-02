@@ -30,6 +30,7 @@ describe('isMessage', () => {
       message('mutate', { document: 'mutation {}', variables: {} }),
       message('validate-token', {}),
       message('get-rate-limit', {}),
+      message('compare-diff', { pr, base: 'abc', head: 'def' }),
     ];
     for (const m of all) expect(isMessage(m)).toBe(true);
   });

@@ -36,7 +36,10 @@ const tree = (payload: PrPayload) => (
     threads={payload.threads}
     drafts={new DraftStore(memoryStore())}
   >
-    <TopBar payload={payload} />
+    <TopBar
+      payload={payload}
+      compare={{ active: false, available: false, busy: false, onToggle: () => {} }}
+    />
   </ReviewSessionProvider>
 );
 
@@ -180,7 +183,9 @@ describe('starting a review', () => {
       }),
     );
 
-    const button = screen.getByRole('button', { name: /review/i }) as HTMLButtonElement;
+    const button = screen.getByRole('button', {
+      name: /review pending/i,
+    }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.title).toMatch(/already/i);
   });
