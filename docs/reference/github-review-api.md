@@ -341,3 +341,58 @@ The payload field names were separately introspected and are confirmed:
 Re-run this probe after editing any mutation. It is the only check that catches
 a wrong payload field before it reaches a user, because GitHub reports such a
 mistake as HTTP 200 with an `errors` array rather than as a failure.
+
+## 8. A GraphQL response is not pass or fail
+
+Observed against a live fine-grained token on 2026-09-02, on
+`justinmwarner/the-sous-chef-recipe-viewer#201`.
+
+A token that grants the repository but not one permission inside it does **not**
+produce an HTTP error, and does not produce an empty response. GitHub answers:
+
+- **HTTP 200**
+- `data` fully populated — the pull request, its files, its threads, all correct
+- the denied field nulled out
+- an `errors` array alongside it
+
+The errors are raised **per denied object**, not per field and not per query. A
+pull request whose head commit has seven check runs, read with a token lacking
+the **Checks** permission, returns *seven* copies of:
+
+```json
+{
+  "type": "FORBIDDEN",
+  "path": ["repository","pullRequest","commits","nodes",0,"commit",
+           "statusCheckRollup","contexts","nodes", 3],
+  "message": "Resource not accessible by personal access token"
+}
+```
+
+Two consequences, both learned the hard way:
+
+1. **Treating a non-empty `errors` array as fatal throws away a complete pull
+   request.** It cost a whole review page over a missing status-check widget.
+   `GitHubClient.graphql` now takes an optional `onPartial`; supplying one opts
+   into keeping the data. Reads opt in. **Mutations must not** — a mutation
+   answering `{ data: { addPullRequestReviewThread: null }, errors: [...] }` has
+   not posted the comment, and returning that as a success loses the reviewer's
+   writing while telling them it was saved.
+
+2. **`e.message` alone is not a diagnosis.** Joining seven identical sentences
+   says nothing about what was refused. `e.path` is the entire diagnosis and
+   must survive into whatever the user reads. `lib/github/graphql-errors.ts`
+   groups by message *and* path, generalizing list indices (`nodes.3` →
+   `nodes.N`) so the seven collapse into one fact with a count.
+
+### Permissions the batched read query actually needs
+
+`statusCheckRollup.contexts` is a union of `CheckRun` and `StatusContext`, and
+these are **two separate grants**:
+
+| Union member | Fine-grained permission |
+|---|---|
+| `CheckRun`, `checkSuite.app` | **Checks**: Read |
+| `StatusContext` | **Commit statuses**: Read |
+
+A token with only one of them renders a partial check list; a token with
+neither renders none. Neither case is fatal any more, but both are reported.

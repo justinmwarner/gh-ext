@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AuthError, GitHubClient, RateLimitError, type TokenProvider } from './client';
+import type { DeniedField } from './graphql-errors';
 
 interface RecordedCall {
   url: string;
@@ -295,5 +296,116 @@ describe('how the transport is invoked', () => {
     await client.fetchDiff('acme', 'widgets', 42);
 
     expect(receiver).toBeUndefined();
+  });
+});
+
+/**
+ * A partly-denied read.
+ *
+ * The failure this covers, in full: a fine-grained token grants the repository
+ * but not the Checks permission, so GitHub resolves the entire pull request,
+ * nulls out the seven check runs it will not show, and answers 200 with `data`
+ * *and* an `errors` array. Throwing there threw away a complete pull request
+ * over a missing status-check widget, and the review page — every part of which
+ * is written to tolerate a nulled field — never got to see any of it.
+ *
+ * The tolerance is opt-in, because it must not reach mutations. A mutation that
+ * comes back `{ data: { addPullRequestReviewThread: null }, errors: [...] }` has
+ * not posted the comment, and returning that data as if it had would lose the
+ * reviewer's writing while telling them it was saved.
+ */
+describe('GitHubClient.graphql on a partly-denied response', () => {
+  const CHECKS_DENIED = {
+    data: { repository: { pullRequest: { id: 'PR_1', title: 'Add a thing' } } },
+    errors: Array.from({ length: 7 }, (_, index) => ({
+      type: 'FORBIDDEN',
+      path: ['repository', 'pullRequest', 'commits', 'nodes', 0, 'commit', 'statusCheckRollup', 'contexts', 'nodes', index],
+      message: 'Resource not accessible by personal access token',
+    })),
+  };
+
+  it('returns the data when the caller offered to handle the denials', async () => {
+    const fake = recordingFetch(() => jsonResponse(CHECKS_DENIED));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const data = await client.graphql('q', {}, () => {});
+
+    expect(data).toEqual(CHECKS_DENIED.data);
+  });
+
+  it('hands the denials over, grouped, with the path intact', async () => {
+    const fake = recordingFetch(() => jsonResponse(CHECKS_DENIED));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const seen: DeniedField[][] = [];
+    await client.graphql('q', {}, (denied) => seen.push(denied));
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual([
+      {
+        message: 'Resource not accessible by personal access token',
+        path: 'repository.pullRequest.commits.nodes.N.commit.statusCheckRollup.contexts.nodes.N',
+        count: 7,
+      },
+    ]);
+  });
+
+  it('does not call the handler when nothing was denied', async () => {
+    const fake = recordingFetch(() => jsonResponse({ data: { repository: { id: 'R_1' } } }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    let called = false;
+    await client.graphql('q', {}, () => {
+      called = true;
+    });
+
+    expect(called).toBe(false);
+  });
+
+  it('still rejects when no handler was offered, so a failed mutation cannot look like a success', async () => {
+    const fake = recordingFetch(() =>
+      jsonResponse({
+        data: { addPullRequestReviewThread: null },
+        errors: [{ message: 'Resource not accessible by personal access token' }],
+      }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await expect(client.graphql('mutation M { x }', {})).rejects.toThrow(
+      'Resource not accessible by personal access token',
+    );
+  });
+
+  it('rejects even with a handler when there is no data at all', async () => {
+    // Nothing resolved. There is nothing to tolerate, and returning null here
+    // would push the failure into whatever reads the payload next.
+    const fake = recordingFetch(() =>
+      jsonResponse({
+        data: null,
+        errors: [{ message: 'Could not resolve to a Repository', path: ['repository'] }],
+      }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    let called = false;
+    const err = await client
+      .graphql('q', {}, () => {
+        called = true;
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(called).toBe(false);
+  });
+
+  it('names the path in the thrown message', async () => {
+    // Seven copies of one sentence was the whole of the old diagnosis.
+    const fake = recordingFetch(() => jsonResponse({ ...CHECKS_DENIED, data: null }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = await client.graphql('q', {}).catch((e: unknown) => e);
+
+    expect(String(err)).toContain('statusCheckRollup');
+    expect(String(err)).toContain('7 fields');
   });
 });

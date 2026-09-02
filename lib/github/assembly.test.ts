@@ -18,6 +18,7 @@ import {
   payloadFromCache,
 } from './assembly';
 import { GitHubClient, type TokenProvider } from './client';
+import type { DeniedField } from './graphql-errors';
 import { MAX_PAGES } from './pagination';
 
 const PR = { owner: 'acme', repo: 'widgets', number: 42 };
@@ -130,16 +131,23 @@ interface StubOptions {
   graphqlError?: Error;
   diff?: string;
   diffError?: Error;
+  /** Fields GitHub refused, reported the way the real client reports them. */
+  denied?: DeniedField[];
 }
 
 /** A `GitHubPort` that answers from fixtures and records what it was asked. */
 function stubGitHub(options: StubOptions = {}) {
   const calls: string[] = [];
   const port: GitHubPort = {
-    async graphql<T>(document: string, variables: Record<string, unknown>): Promise<T> {
+    async graphql<T>(
+      document: string,
+      variables: Record<string, unknown>,
+      onPartial?: (denied: DeniedField[]) => void,
+    ): Promise<T> {
       const operation = operationOf(document);
       calls.push(`graphql:${operation}`);
       if (options.graphqlError) throw options.graphqlError;
+      if (options.denied && options.denied.length > 0) onPartial?.(options.denied);
       if (operation === 'files') {
         return options.filesPage?.(String(variables['after'])) as T;
       }
@@ -425,5 +433,73 @@ describe('assemblePullRequest — pagination', () => {
 
     const cached = await payloadFromCache(ports, PR);
     expect(cached?.truncated).toEqual({ files: true, threads: false });
+  });
+});
+
+/**
+ * A pull request GitHub only partly answered.
+ *
+ * The real case: a fine-grained token grants the repository but not the Checks
+ * permission, so the seven check runs come back null with one error each while
+ * the pull request itself, its files, its threads and its diff are all present
+ * and correct. Every consumer below this point already copes with a nulled
+ * `statusCheckRollup` — `checksSummary(null)` has a branch for it — so the
+ * payload must be assembled, not abandoned.
+ *
+ * What it must not do is stay quiet about it. `checks: null` renders as "No
+ * checks", and telling a reviewer a pull request has no CI when the truth is
+ * that they are not allowed to see it is worse than the crash was.
+ */
+describe('a partly-denied response', () => {
+  const CHECKS_DENIED: DeniedField[] = [
+    {
+      message: 'Resource not accessible by personal access token',
+      path: 'repository.pullRequest.commits.nodes.N.commit.statusCheckRollup.contexts.nodes.N',
+      count: 7,
+    },
+  ];
+
+  it('assembles the pull request anyway', async () => {
+    const github = stubGitHub({ denied: CHECKS_DENIED });
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.pullRequest.title).toBe('Cache the diff on head SHA');
+    expect(payload.diff.files).toHaveLength(1);
+    expect(payload.threads).toHaveLength(1);
+  });
+
+  it('carries what was refused into the payload', async () => {
+    const github = stubGitHub({ denied: CHECKS_DENIED });
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.denied).toEqual(CHECKS_DENIED);
+  });
+
+  it('reports nothing denied on an ordinary read', async () => {
+    const github = stubGitHub();
+    const { ports } = testPorts(github.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.denied).toEqual([]);
+  });
+
+  it('still remembers what was refused when the payload is served from cache', async () => {
+    // A cached payload that forgot the denial would render "No checks" on the
+    // second visit, which is the same lie arriving a minute later.
+    const store = memoryStore();
+    const github = stubGitHub({ denied: CHECKS_DENIED });
+    const { ports, flushWrites } = testPorts(github.port, store);
+
+    await assemblePullRequest(ports, PR);
+    await flushWrites();
+
+    const cached = await payloadFromCache(ports, PR);
+
+    expect(cached?.denied).toEqual(CHECKS_DENIED);
   });
 });

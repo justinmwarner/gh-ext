@@ -162,7 +162,7 @@ function App() {
         </li>
         <li>
           Under <strong>Permissions &rarr; Repository permissions</strong>, set
-          exactly these four and leave every other one at <em>No access</em>:
+          exactly these five and leave every other one at <em>No access</em>:
           <table className="perms">
             <thead>
               <tr>
@@ -187,7 +187,16 @@ function App() {
               <tr>
                 <td>Commit statuses</td>
                 <td>Read-only</td>
-                <td>Show the status checks</td>
+                <td>Show the older-style commit statuses</td>
+              </tr>
+              <tr>
+                <td>Checks</td>
+                <td>Read-only</td>
+                <td>
+                  Show GitHub Actions runs. Without it GitHub refuses every
+                  check run individually and the page can only say the checks
+                  are hidden
+                </td>
               </tr>
               <tr>
                 <td>Metadata</td>

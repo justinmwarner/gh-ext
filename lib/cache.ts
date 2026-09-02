@@ -25,8 +25,12 @@ export type PrCacheRef = PrRef & { headSha: string };
  * - `truncated` — which paginated lists hit the page cap. Derived from `pr`
  *   and `threads`, and cached with them so a payload served entirely from
  *   storage still admits what it is missing.
+ * - `denied` — the fields GitHub refused to resolve. Cached for the same
+ *   reason `truncated` is: a payload served from storage that had forgotten
+ *   the refusal would render "No checks" over checks the token simply cannot
+ *   see, which is the lie this slot exists to prevent.
  */
-export type CacheSlot = 'pr' | 'diff' | 'threads' | 'checks' | 'truncated';
+export type CacheSlot = 'pr' | 'diff' | 'threads' | 'checks' | 'truncated' | 'denied';
 
 /**
  * Which slots cannot change for a given head SHA.
@@ -43,6 +47,9 @@ const IMMUTABLE: Record<CacheSlot, boolean> = {
   threads: false,
   checks: false,
   truncated: false,
+  // A permission can be granted while the page is open, and the reviewer will
+  // expect the notice to go away when it is.
+  denied: false,
 };
 
 /**

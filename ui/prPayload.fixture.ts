@@ -64,6 +64,7 @@ export function prPayload(overrides: Partial<PrPayload> = {}): PrPayload {
     checks: { state: 'SUCCESS' },
     diff: { source: 'unified', files: [], truncated: false },
     truncated: { files: false, threads: false },
+    denied: [],
     ...overrides,
   };
 }

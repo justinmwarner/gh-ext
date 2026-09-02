@@ -14,6 +14,7 @@
 
 import type { BlobResult } from './github/blobs';
 import type { ParsedDiffFile } from './github/diff';
+import type { DeniedField } from './github/graphql-errors';
 import type { FallbackDiffFile } from './github/files-fallback';
 import type { ReviewThread } from './github/types';
 
@@ -94,6 +95,20 @@ export interface PrPayload {
   diff: DiffPayload;
   /** Lists that hit the page cap. Never omitted, so a consumer cannot forget. */
   truncated: PrTruncation;
+  /**
+   * Fields GitHub refused to resolve. Empty on a normal read.
+   *
+   * A GraphQL response is not pass or fail: a token that grants the repository
+   * but not, say, the Checks permission gets the whole pull request back with
+   * the check runs nulled out and one error per denial. Everything downstream
+   * copes with the null — but `checks: null` renders as "No checks", and a
+   * reviewer told a pull request has no CI when the truth is that they may not
+   * see it has been misinformed rather than merely underserved.
+   *
+   * So the refusal travels with the payload it damaged. Never omitted, for the
+   * same reason `truncated` is not.
+   */
+  denied: DeniedField[];
 }
 
 /**

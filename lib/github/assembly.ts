@@ -22,6 +22,7 @@ import {
 } from '../messages';
 import type { KeyValueStore } from '../review/drafts';
 import { AuthError, RateLimitError } from './client';
+import { type DeniedField, mergeDenied } from './graphql-errors';
 import { parseUnifiedDiff } from './diff';
 import { fetchFilesFallback } from './files-fallback';
 import { type Connection, type Paged, collectConnection } from './pagination';
@@ -39,7 +40,17 @@ import type { PullRequestFile, ReviewThread } from './types';
  * straight through and a test passes a client built over a fake `fetch`.
  */
 export interface GitHubPort {
-  graphql<T>(document: string, variables: Record<string, unknown>): Promise<T>;
+  /**
+   * `onPartial` is how the assembler tells the client it can cope with a
+   * response GitHub only partly resolved. Without it a single denied field —
+   * a token that grants the repository but not the Checks permission is the
+   * common case — throws away a complete pull request.
+   */
+  graphql<T>(
+    document: string,
+    variables: Record<string, unknown>,
+    onPartial?: (denied: DeniedField[]) => void,
+  ): Promise<T>;
   fetchDiff(owner: string, repo: string, number: number): Promise<string>;
 }
 
@@ -122,17 +133,27 @@ export async function payloadFromCache(
   if (headSha === null) return null;
 
   const ref: PrCacheRef = { ...pr, headSha };
-  const [node, diff, threads, checks, truncated] = await Promise.all([
+  const [node, diff, threads, checks, truncated, denied] = await Promise.all([
     ports.cache.get<PrPayload['pullRequest']>('pr', ref),
     ports.cache.get<PrPayload['diff']>('diff', ref),
     ports.cache.get<ReviewThread[]>('threads', ref),
     ports.cache.get<CheckRollup | null>('checks', ref),
     ports.cache.get<PrTruncation>('truncated', ref),
+    ports.cache.get<DeniedField[]>('denied', ref),
   ]);
 
   // All of it or none. A partial payload would render a review page with
   // silently missing threads — or, without the flags, one that cannot say so.
-  if (!node.hit || !diff.hit || !threads.hit || !checks.hit || !truncated.hit) {
+  // `denied` is in the list for that second reason: a cached payload that had
+  // forgotten a refusal would quietly go back to claiming there are no checks.
+  if (
+    !node.hit ||
+    !diff.hit ||
+    !threads.hit ||
+    !checks.hit ||
+    !truncated.hit ||
+    !denied.hit
+  ) {
     return null;
   }
 
@@ -144,6 +165,7 @@ export async function payloadFromCache(
     checks: checks.value,
     diff: diff.value,
     truncated: truncated.value,
+    denied: denied.value,
   };
 }
 
@@ -202,10 +224,30 @@ async function fetchDiffPayload(ports: AssemblyPorts, pr: PrRef): Promise<DiffPa
   }
 }
 
+/**
+ * Somewhere to put what GitHub refused, across every round trip of one read.
+ *
+ * Handed to each `graphql` call. Its presence is also what tells the client the
+ * caller can survive a partly-resolved response at all — without it, one denied
+ * field throws away the whole pull request.
+ */
+function deniedCollector() {
+  const groups: DeniedField[][] = [];
+  return {
+    collect: (denied: DeniedField[]) => {
+      groups.push(denied);
+    },
+    result: () => mergeDenied(groups),
+  };
+}
+
+type Collect = (denied: DeniedField[]) => void;
+
 function collectFiles(
   ports: AssemblyPorts,
   pr: PrRef,
   first: Connection<PullRequestFile> | null | undefined,
+  onPartial: Collect,
 ): Promise<Paged<PullRequestFile>> {
   return collectConnection(
     first,
@@ -213,6 +255,7 @@ function collectFiles(
       const data = await ports.github.graphql<PageQueryData<PullRequestFile>>(
         FILES_PAGE_QUERY,
         { owner: pr.owner, repo: pr.repo, number: pr.number, after },
+        onPartial,
       );
       return data?.repository?.pullRequest?.files;
     },
@@ -224,6 +267,7 @@ function collectThreads(
   ports: AssemblyPorts,
   pr: PrRef,
   first: Connection<ReviewThread> | null | undefined,
+  onPartial: Collect,
 ): Promise<Paged<ReviewThread>> {
   return collectConnection(
     first,
@@ -231,6 +275,7 @@ function collectThreads(
       const data = await ports.github.graphql<PageQueryData<ReviewThread>>(
         REVIEW_THREADS_PAGE_QUERY,
         { owner: pr.owner, repo: pr.repo, number: pr.number, after },
+        onPartial,
       );
       return data?.repository?.pullRequest?.reviewThreads;
     },
@@ -283,11 +328,17 @@ export async function assemblePullRequest(
   // only the coordinates the caller already has — `headRefOid` is a cache key,
   // not a request parameter — so running them in series spent the whole cold
   // start budget on two network latencies before anything could render.
-  const queryPromise = ports.github.graphql<PullRequestQueryData>(PULL_REQUEST_QUERY, {
-    owner: pr.owner,
-    repo: pr.repo,
-    number: pr.number,
-  });
+  // Offering to handle denials is what makes a partly-resolved response
+  // survivable: a token that grants the repository but not the Checks
+  // permission gets the whole pull request back with the check runs nulled and
+  // one error per denial, and refusing that response threw all of it away.
+  const denials = deniedCollector();
+
+  const queryPromise = ports.github.graphql<PullRequestQueryData>(
+    PULL_REQUEST_QUERY,
+    { owner: pr.owner, repo: pr.repo, number: pr.number },
+    denials.collect,
+  );
   // Settled, not awaited. A diff failure must not be reported ahead of a
   // missing pull request — "no such PR" is the useful answer and a diff error
   // would bury it — and must not sit unhandled while the query is inspected.
@@ -309,8 +360,8 @@ export async function assemblePullRequest(
   // they need not wait on the diff that is still in flight beside them.
   const pagesPromise = settle(
     Promise.all([
-      collectFiles(ports, pr, node.files),
-      collectThreads(ports, pr, node.reviewThreads),
+      collectFiles(ports, pr, node.files, denials.collect),
+      collectThreads(ports, pr, node.reviewThreads, denials.collect),
     ]),
   );
 
@@ -337,6 +388,10 @@ export async function assemblePullRequest(
   };
   const checks = node.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null;
 
+  // Read after every round trip has reported, so a denial raised only while
+  // walking the second page of threads is in it too.
+  const denied = denials.result();
+
   // Nothing is written until every part of the payload is in hand, so a
   // failure halfway through leaves the cache as it was rather than half filled
   // with a pull request whose diff or thread tail never arrived.
@@ -348,6 +403,7 @@ export async function assemblePullRequest(
   ports.cacheWrite(ports.cache.set('threads', ref, threads.nodes));
   ports.cacheWrite(ports.cache.set('checks', ref, checks));
   ports.cacheWrite(ports.cache.set('truncated', ref, truncated));
+  ports.cacheWrite(ports.cache.set('denied', ref, denied));
 
   return {
     ref: pr,
@@ -357,5 +413,6 @@ export async function assemblePullRequest(
     checks,
     diff,
     truncated,
+    denied,
   };
 }

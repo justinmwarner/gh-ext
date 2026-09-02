@@ -43,12 +43,19 @@ Open the extension's **Options** page and paste a
 
 Required permissions:
 
-| Permission | Access |
-|---|---|
-| Pull requests | Read and write |
-| Contents | Read |
-| Checks | Read |
-| Metadata | Read |
+| Permission | Access | Why |
+|---|---|---|
+| Pull requests | Read and write | The review itself: threads, replies, resolves, approvals |
+| Contents | Read | The diff, and whole files when you expand context |
+| Checks | Read | GitHub Actions runs (`CheckRun`) |
+| Commit statuses | Read | The older-style commit statuses (`StatusContext`) |
+| Metadata | Read | Required by GitHub whenever any other permission is set |
+
+`statusCheckRollup.contexts` is a union of both check types, so **Checks** and
+**Commit statuses** are separate grants and a token needs both to show a
+complete list. Missing either one is not fatal — GitHub refuses those nodes
+individually and the review page renders with a banner saying the checks are
+hidden — but the checks will be incomplete or absent until it is granted.
 
 **The token is stored per machine and is not synced.** That is deliberate —
 `chrome.storage.sync` would replicate a credential across every browser signed

@@ -1,3 +1,5 @@
+import { type DeniedField, describeDenied, normalizeErrors } from './graphql-errors';
+
 export interface TokenProvider {
   getToken(): Promise<string | null>;
 }
@@ -60,17 +62,47 @@ export class GitHubClient {
     return this.lastRateLimit;
   }
 
-  async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  /**
+   * Run a document.
+   *
+   * A GraphQL response is not pass or fail, and treating it as one is how a
+   * whole review page was lost to a missing status-check widget. GitHub answers
+   * HTTP 200 with `data` populated *and* an `errors` array whenever it resolved
+   * most of a query but not all of it — the usual cause being a fine-grained
+   * token that grants the repository and not one field inside it. The denied
+   * field comes back null; everything else is complete and correct.
+   *
+   * `onPartial` is how a caller says it can cope with that. Supply one and a
+   * response that still carries data is returned, with the denials handed over
+   * so they can be shown rather than swallowed. Supply nothing and any error is
+   * fatal, exactly as before.
+   *
+   * That default is not timidity, it is the only safe rule for mutations. A
+   * mutation answering `{ data: { addPullRequestReviewThread: null }, errors:
+   * [...] }` has not posted the comment, and returning that data as a success
+   * would destroy the reviewer's writing while telling them it was saved. Reads
+   * opt in; mutations must not.
+   */
+  async graphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    onPartial?: (denied: DeniedField[]) => void,
+  ): Promise<T> {
     const res = await this.request('https://api.github.com/graphql', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query, variables }),
     });
     const json = await res.json();
-    // A GraphQL error arrives with HTTP 200. Checking res.ok is not enough.
-    if (json.errors?.length) {
-      throw new Error(json.errors.map((e: { message: string }) => e.message).join('; '));
-    }
+    const denied = normalizeErrors(json.errors);
+
+    // Nothing resolved, so there is nothing to tolerate. Returning null here
+    // would only move the failure to whoever reads the payload next, where it
+    // would arrive stripped of any explanation.
+    const fatal = denied.length > 0 && (onPartial === undefined || json.data == null);
+    if (fatal) throw new Error(describeDenied(denied));
+
+    if (denied.length > 0) onPartial?.(denied);
     return json.data as T;
   }
 

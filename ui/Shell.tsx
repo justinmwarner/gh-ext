@@ -27,6 +27,7 @@ import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
 import { SideRail } from './SideRail';
 import { TopBar } from './TopBar';
+import { DeniedNotice } from './DeniedNotice';
 import { TruncationNotice } from './TruncationNotice';
 import { type CurrentFile, NO_FILE, fromScroll, fromTree } from './currentFile';
 import { pullRequestUrl } from './githubUrl';
@@ -269,6 +270,11 @@ function ReviewSurface({ payload }: { payload: PrPayload }) {
       />
       <TruncationNotice
         truncated={payload.truncated}
+        pr={payload.ref}
+        href={prPermalink(payload.pullRequest)}
+      />
+      <DeniedNotice
+        denied={payload.denied}
         pr={payload.ref}
         href={prPermalink(payload.pullRequest)}
       />

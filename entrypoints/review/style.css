@@ -463,6 +463,46 @@ code {
   flex: none;
 }
 
+/* GitHub answered, but refused part of the answer. The review below is real;
+   one region of it is missing rather than empty, and the only thing that can
+   change that is the token — hence the settings button beside the escape
+   hatch. Same shape as the truncation banner, since it says the same kind of
+   thing: trust what is here, and know what is not. */
+.denied-notice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0 16px 12px;
+  border-left-color: light-dark(#bf8700, #d29922);
+}
+
+.denied-notice p {
+  margin: 0 0 4px;
+}
+
+.denied-notice p:last-child {
+  margin-bottom: 0;
+}
+
+.denied-notice .detail {
+  display: flex;
+  flex-direction: column;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  /* GitHub's own words, kept quiet: they are for pasting into a bug report,
+     not for reading first. */
+  color: light-dark(#59636e, #9198a1);
+  overflow-wrap: anywhere;
+}
+
+.denied-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+}
+
 /* ------------------------------------------------------------ full pages */
 
 .fullpage {

@@ -11,3 +11,7 @@ playwright-report/
 # Never commit a packing key
 *.pem
 .extension-key*
+
+# Local Claude Code settings. Machine-specific, and not something a public
+# repository should carry.
+.claude/settings.local.json
