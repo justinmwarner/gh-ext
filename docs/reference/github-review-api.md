@@ -80,21 +80,37 @@ decoration must handle — a rename is not a modify.
 Executed successfully as written. This is the single query the service worker
 issues on prefetch.
 
+**This block is copied from `lib/github/queries.ts` and re-executed against live
+GitHub on 2026-09-01.** It has since gained `baseRefOid` (needed to fetch the
+base-side blob when expanding context), `viewerDidAuthor` (to disable Approve on
+your own pull request), all five `RequestedReviewer` union members, and shared
+fragments. If you change the query, re-copy it here and re-execute it — a stale
+reference is worse than none, because this document claims to supersede recall.
+
 ```graphql
 query PullRequestReview($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       id number title bodyHTML state isDraft merged
-      baseRefName headRefName headRefOid
+      # baseRefOid as well as headRefOid: expanding unchanged context needs the
+      # whole file on *both* sides, and a blob is read at a commit. Added
+      # 2026-09-01 for Task 26; it is the base-side counterpart of the field
+      # beside it and is a non-null GitObjectID on PullRequest.
+      baseRefName headRefName baseRefOid headRefOid
       permalink
       author { login avatarUrl }
+      # GitHub rejects an approval of your own pull request. Comparing
+      # author.login against the viewer would need the viewer's login, which
+      # this query does not otherwise want; the schema answers the question
+      # directly. Executed against the live schema on 2026-09-01.
+      viewerDidAuthor
       reviewDecision
       viewerLatestReview { id state commit { oid } }
       latestReviews(first: 20) {
         nodes { author { login avatarUrl } state commit { oid } }
       }
       reviewRequests(first: 20) {
-        nodes { requestedReviewer { __typename ... on User { login avatarUrl } } }
+        nodes { requestedReviewer { ...RequestedReviewerFields } }
       }
       commits(last: 1) {
         nodes { commit {
@@ -120,23 +136,37 @@ query PullRequestReview($owner: String!, $repo: String!, $number: Int!) {
       files(first: 100) {
         totalCount
         pageInfo { hasNextPage endCursor }
-        nodes { path additions deletions changeType viewerViewedState }
+        nodes { ...FileFields }
       }
       reviewThreads(first: 100) {
+        totalCount
         pageInfo { hasNextPage endCursor }
-        nodes {
-          id isResolved isOutdated isCollapsed
-          path line startLine originalLine originalStartLine
-          diffSide startDiffSide subjectType
-          viewerCanReply viewerCanResolve viewerCanUnresolve
-          resolvedBy { login }
-          comments(first: 50) {
-            nodes { id author { login avatarUrl } body createdAt url }
-          }
-        }
+        nodes { ...ReviewThreadFields }
       }
     }
   }
+}
+fragment FileFields on PullRequestChangedFile {
+  path additions deletions changeType viewerViewedState
+}
+fragment ReviewThreadFields on PullRequestReviewThread {
+  id isResolved isOutdated isCollapsed
+  path line startLine originalLine originalStartLine
+  diffSide startDiffSide subjectType
+  viewerCanReply viewerCanResolve viewerCanUnresolve
+  resolvedBy { login }
+  comments(first: 50) {
+    totalCount
+    nodes { id author { login avatarUrl } body createdAt url }
+  }
+}
+fragment RequestedReviewerFields on RequestedReviewer {
+  __typename
+  ... on User { login avatarUrl }
+  ... on Bot { login avatarUrl }
+  ... on Mannequin { login avatarUrl }
+  ... on Team { name slug }
+  ... on EnterpriseTeam { name slug }
 }
 ```
 
