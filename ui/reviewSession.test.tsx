@@ -13,6 +13,7 @@ import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ADD_REPLY,
   ADD_THREAD,
+  MARK_VIEWED,
   RESOLVE_THREAD,
   START_REVIEW,
   SUBMIT_REVIEW,
@@ -89,7 +90,16 @@ function Harness() {
       >
         reply
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          void session.setViewed('src/app.ts', true, 'UNVIEWED');
+        }}
+      >
+        view
+      </button>
       <p data-testid="mode">{session.pending.kind}</p>
+      <p data-testid="resolving">{[...session.resolveInFlight].join(',')}</p>
       <p data-testid="complete">
         {session.pending.kind === 'pending' ? String(session.pending.countIsComplete) : ''}
       </p>
@@ -478,7 +488,9 @@ describe('comments queued on a review the reviewer opened', () => {
       expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
     });
 
-    answerByDocument({ [SUBMIT_REVIEW]: REFUSED });
+    // The re-read has to agree the review is still there, because that is what
+    // this scenario is: an ordinary refusal, not a review that has gone.
+    answerByDocument({ [SUBMIT_REVIEW]: REFUSED }, 'PRR_transient', 'PRR_transient');
     await userEvent.click(screen.getByRole('button', { name: 'submit' }));
 
     await waitFor(() => {
@@ -615,5 +627,141 @@ describe('joining a review GitHub already had open', () => {
     await waitFor(() => {
       expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
     });
+  });
+});
+
+describe('a pending review that went out somewhere else', () => {
+  /**
+   * The reviewer queues comments here, then submits that same review from
+   * GitHub's own tab. Everything this page believes about the review is now
+   * one version behind, and the id it holds names a review that is no longer
+   * PENDING — so GitHub refuses every further use of it.
+   */
+  const gone = {
+    ok: false,
+    error: {
+      kind: 'unknown',
+      message: 'Can not submit a review that is not pending.',
+      resetAt: null,
+    },
+  } as const;
+
+  it('returns to browsing rather than holding a review GitHub has closed', async () => {
+    // The re-read finds nothing open, which is the difference between "the
+    // network blinked" and "this review is gone".
+    answerByDocument({ [SUBMIT_REVIEW]: gone }, 'PRR_transient', null);
+    mount({ viewerLatestReview: { id: 'PRR_open', state: 'PENDING' } });
+    expect(screen.getByTestId('mode').textContent).toBe('pending');
+
+    await userEvent.click(screen.getByText('submit'));
+
+    await waitFor(() => expect(screen.getByTestId('mode').textContent).toBe('browse'));
+  });
+
+  it('says the review went out, rather than that it is still pending', async () => {
+    answerByDocument({ [SUBMIT_REVIEW]: gone }, 'PRR_transient', null);
+    mount({ viewerLatestReview: { id: 'PRR_open', state: 'PENDING' } });
+
+    await userEvent.click(screen.getByText('submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('failures').textContent).not.toMatch(/still pending/i),
+    );
+  });
+
+  it('stops marking queued threads as unposted once the review has gone', async () => {
+    answerByDocument({ [SUBMIT_REVIEW]: gone }, 'PRR_transient', null);
+    mount({ viewerLatestReview: { id: 'PRR_open', state: 'PENDING' } });
+
+    await userEvent.click(screen.getByText('post'));
+    await waitFor(() => expect(screen.getByTestId('unpublished').textContent).not.toBe(''));
+
+    await userEvent.click(screen.getByText('submit'));
+
+    await waitFor(() => expect(screen.getByTestId('unpublished').textContent).toBe(''));
+  });
+
+  it('keeps the review when the re-read could not be made at all', async () => {
+    // The dangerous direction. A network blink fails the submit and then fails
+    // the re-read too; reading that silence as "gone" would tell the reviewer
+    // their queued comments went out while they are still sitting unsent.
+    requestMock.mockImplementation((msg: { kind?: string }) =>
+      Promise.resolve(msg.kind === 'get-pr' ? REFUSED : gone),
+    );
+    mount({ viewerLatestReview: { id: 'PRR_open', state: 'PENDING' } });
+
+    await userEvent.click(screen.getByText('submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('failures').textContent).toMatch(/still pending/i),
+    );
+    expect(screen.getByTestId('mode').textContent).toBe('pending');
+  });
+
+  it('keeps the review when the re-read still finds it open', async () => {
+    // A refusal that is not about the review having gone — a network blink, a
+    // rate limit — must not throw away comments that are still queued.
+    answerByDocument({ [SUBMIT_REVIEW]: REFUSED }, 'PRR_transient', 'PRR_open');
+    mount({ viewerLatestReview: { id: 'PRR_open', state: 'PENDING' } });
+
+    await userEvent.click(screen.getByText('submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('failures').textContent).toMatch(/still pending/i),
+    );
+    expect(screen.getByTestId('mode').textContent).toBe('pending');
+  });
+});
+
+describe('two mutations racing on the same thing', () => {
+  /**
+   * A held key repeats, and a double-click is one event too many. Both entry
+   * points for these two toggles are optimistic, so the second call reads the
+   * *optimistic* value and sends the opposite mutation — and the rollback then
+   * restores a value that was never committed anywhere.
+   *
+   * The checkbox already refuses this by disabling itself. Nothing else did.
+   */
+  const never = () => new Promise<never>(() => {});
+
+  it('refuses a second resolve while the first is still in flight', async () => {
+    requestMock.mockImplementation((msg: { document?: string }) =>
+      msg.document === RESOLVE_THREAD ? never() : Promise.resolve({ ok: true, data: {} }),
+    );
+    mount();
+
+    await userEvent.click(screen.getByText('resolve'));
+    await userEvent.click(screen.getByText('resolve'));
+
+    expect(
+      requestMock.mock.calls.filter((call) => call[0]?.document === RESOLVE_THREAD),
+    ).toHaveLength(1);
+  });
+
+  it('reports which threads are mid-resolve, so the control can refuse too', async () => {
+    requestMock.mockImplementation((msg: { document?: string }) =>
+      msg.document === RESOLVE_THREAD ? never() : Promise.resolve({ ok: true, data: {} }),
+    );
+    mount();
+
+    await userEvent.click(screen.getByText('resolve'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('resolving').textContent).toContain('PRRT_src/app.ts:2'),
+    );
+  });
+
+  it('refuses a second viewed toggle while the first is still in flight', async () => {
+    requestMock.mockImplementation((msg: { document?: string }) =>
+      msg.document === MARK_VIEWED ? never() : Promise.resolve({ ok: true, data: {} }),
+    );
+    mount();
+
+    await userEvent.click(screen.getByText('view'));
+    await userEvent.click(screen.getByText('view'));
+
+    expect(requestMock.mock.calls.filter((call) => call[0]?.document !== undefined)).toHaveLength(
+      1,
+    );
   });
 });

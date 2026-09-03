@@ -397,3 +397,30 @@ describe('discarding', () => {
     expect(footer()).not.toBeNull();
   });
 });
+
+describe('the summary box between one review and the next', () => {
+  /**
+   * The footer is hidden by returning null, which does not unmount it — so its
+   * state outlives the review it was typed for. A summary left behind gets
+   * posted as the body of whatever review comes next.
+   */
+  it('starts empty for a second review', async () => {
+    requestMock.mockImplementation((msg: { document?: string }) =>
+      Promise.resolve(msg.document === START_REVIEW ? STARTED : { ok: true, data: {} }),
+    );
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start review' }));
+    const summary = await screen.findByLabelText(/review summary/i);
+    await userEvent.type(summary, 'Two small nits, otherwise good');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+
+    // The review went out and the footer hid itself. Opening another brings it
+    // back, and it must not still be holding the last review's words.
+    await waitFor(() => expect(footer()).toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: 'start review' }));
+
+    const reopened = await screen.findByLabelText(/review summary/i);
+    expect((reopened as HTMLTextAreaElement).value).toBe('');
+  });
+});

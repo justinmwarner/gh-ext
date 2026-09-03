@@ -144,6 +144,8 @@ export interface ReviewSessionValue {
   viewed: ReadonlyMap<string, FileViewedState>;
   /** Paths whose viewed mutation has not answered yet. */
   viewedInFlight: ReadonlySet<string>;
+  /** Threads whose resolve mutation has not answered yet. */
+  resolveInFlight: ReadonlySet<string>;
   setResolved(threadId: string, resolved: boolean): Promise<void>;
   reply(threadId: string, body: string): Promise<boolean>;
   postThread(input: NewThreadInput): Promise<boolean>;
@@ -337,6 +339,9 @@ export function ReviewSessionProvider({
   const [viewed, setViewedStates] = useState<ReadonlyMap<string, FileViewedState>>(
     () => new Map(),
   );
+  const [resolveInFlight, setResolveInFlight] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [viewedInFlight, setViewedInFlight] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -370,6 +375,13 @@ export function ReviewSessionProvider({
   liveNow.current = live;
   const pendingNow = useRef(pending);
   pendingNow.current = pending;
+  // Read inside the mutation callbacks, which run after the render that made
+  // them. The state itself would be a render behind, which is precisely the
+  // window a double-tap fits through.
+  const resolvingNow = useRef(resolveInFlight);
+  resolvingNow.current = resolveInFlight;
+  const viewingNow = useRef(viewedInFlight);
+  viewingNow.current = viewedInFlight;
 
   const prId = typeof pullRequest.id === 'string' ? pullRequest.id : '';
 
@@ -405,11 +417,24 @@ export function ReviewSessionProvider({
       const before = liveNow.current.find((thread) => thread.id === threadId);
       if (before === undefined) return;
 
+      // One at a time on a given thread. The second call would read the
+      // optimistic value, send the opposite mutation, and — if both failed —
+      // roll back to a state the server never held. Nothing orders the two
+      // requests either, so even both succeeding can settle the wrong way.
+      if (resolvingNow.current.has(threadId)) return;
+
       clearFailure(threadId);
       patchThread(threadId, { isResolved: resolved });
+      setResolveInFlight((current) => new Set(current).add(threadId));
 
       const response = await mutate(resolved ? RESOLVE_THREAD : UNRESOLVE_THREAD, {
         threadId,
+      });
+
+      setResolveInFlight((current) => {
+        const rest = new Set(current);
+        rest.delete(threadId);
+        return rest;
       });
 
       if (!response.ok) {
@@ -531,6 +556,29 @@ export function ReviewSessionProvider({
     const response = await request(message('get-pr', { pr: prRef, refresh: true }));
     return response.ok ? openReviewId(response.data?.pullRequest) : null;
   }, [prRef]);
+
+  /**
+   * Whether GitHub still has this exact review open.
+   *
+   * Three answers, not two, and the third is the whole point. `findOpenReview`
+   * collapses "nothing is open" and "the question could not be asked" into the
+   * same null, which is safe where it is used — a failed lookup there just
+   * means no review to join. Here it would be a lie in the dangerous
+   * direction: a network blink fails the submit *and* the re-read, and
+   * treating that as "gone" would tell the reviewer their queued comments went
+   * out when they are still sitting unsent.
+   *
+   * A different id counts as gone. That review was submitted and another was
+   * opened; the one this session holds is no longer there either way.
+   */
+  const reviewPresence = useCallback(
+    async (reviewId: string): Promise<'open' | 'gone' | 'unknown'> => {
+      const response = await request(message('get-pr', { pr: prRef, refresh: true }));
+      if (!response.ok) return 'unknown';
+      return openReviewId(response.data?.pullRequest) === reviewId ? 'open' : 'gone';
+    },
+    [prRef],
+  );
 
   /**
    * Get a review to write into — a new one, or the one already open.
@@ -764,6 +812,23 @@ export function ReviewSessionProvider({
       });
 
       if (!response.ok) {
+        // Ask whether the review still exists before promising it does. A
+        // reviewer with GitHub open in another tab can submit or discard the
+        // same review there, and every use of the id then fails — including
+        // this one. Saying "still pending" would be false, and staying in
+        // Pending would leave the footer up and route every later comment
+        // into a review that is gone, with a reload the only way out.
+        if ((await reviewPresence(state.reviewId)) === 'gone') {
+          dispatch({ type: 'submitted' });
+          setUnpublished(new Set());
+          fail(
+            REVIEW_SUBMIT,
+            'This review is no longer open on GitHub — it was submitted or ' +
+              'discarded somewhere else. Anything queued on it went with it.',
+          );
+          return false;
+        }
+
         fail(
           REVIEW_SUBMIT,
           `Submitting this review failed: ${response.error.message} ` +
@@ -778,7 +843,7 @@ export function ReviewSessionProvider({
       setUnpublished(new Set());
       return true;
     },
-    [clearFailure, fail, mutate],
+    [clearFailure, fail, mutate, reviewPresence],
   );
 
   /**
@@ -821,6 +886,10 @@ export function ReviewSessionProvider({
    */
   const setViewed = useCallback(
     async (path: string, next: boolean, from: FileViewedState): Promise<void> => {
+      // Guarded here rather than only on the checkbox, so the keyboard path
+      // and anything added later inherit it instead of rediscovering the race.
+      if (viewingNow.current.has(path)) return;
+
       const key = viewedKey(path);
       clearFailure(key);
       setViewedStates((current) =>
@@ -880,6 +949,7 @@ export function ReviewSessionProvider({
       sending,
       viewed,
       viewedInFlight,
+      resolveInFlight,
       setResolved,
       reply,
       postThread,
@@ -902,6 +972,7 @@ export function ReviewSessionProvider({
       sending,
       viewed,
       viewedInFlight,
+      resolveInFlight,
       setResolved,
       reply,
       postThread,

@@ -121,11 +121,23 @@ export function ReviewFooter({ viewerIsAuthor }: { viewerIsAuthor: boolean }) {
   const submit = (event: SubmitEvent) => {
     if (busy || !open) return;
     setBusy(true);
-    void session.submitReview(event, summary).finally(() => {
-      // The component unmounts on success, so this only ever runs after a
-      // failure — where the summary is deliberately kept, not cleared.
-      setBusy(false);
-    });
+    void session
+      .submitReview(event, summary)
+      .then((sent) => {
+        // Cleared on success only. This component is hidden by returning null
+        // rather than unmounted, so its state outlives the review it was typed
+        // for — and the next review the reviewer opens would come up holding
+        // the last one's words, ready to post them again. After a failure the
+        // summary is deliberately kept: the review is still pending and those
+        // words are still wanted.
+        if (sent) setSummary('');
+      })
+      // In a `finally` so a rejection cannot leave every button disabled with
+      // no way back. `submitReview` resolves on the paths it knows about, but
+      // this is the last chance to notice one it does not.
+      .finally(() => {
+        setBusy(false);
+      });
   };
 
   /**

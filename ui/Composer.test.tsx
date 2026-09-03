@@ -254,3 +254,40 @@ describe('Composer', () => {
     expect(screen.getByText(/pending review/i)).toBeDefined();
   });
 });
+
+describe('when extension storage refuses to write', () => {
+  /**
+   * Drafts are a convenience; posting the comment is the job. A storage
+   * failure must not take the post down with it, and above all must not leave
+   * the composer disabled on "Posting…" with the only way out being Cancel —
+   * which throws the text away.
+   */
+  const brokenStore = (): KeyValueStore => ({
+    get: () => Promise.resolve(null),
+    set: () => Promise.reject(new Error('QUOTA_BYTES quota exceeded')),
+    remove: () => Promise.reject(new Error('QUOTA_BYTES quota exceeded')),
+    keys: () => Promise.resolve([]),
+  });
+
+  it('still posts the comment', async () => {
+    answersPublish();
+    mount({}, { store: brokenStore() });
+    await userEvent.type(box(), 'a comment');
+
+    await userEvent.click(screen.getByRole('button', { name: /^comment$/i }));
+
+    await waitFor(() => expect(threadCall()).toBeGreaterThanOrEqual(0));
+  });
+
+  it('does not strand the composer on Posting', async () => {
+    answersPublish();
+    mount({}, { store: brokenStore() });
+    await userEvent.type(box(), 'a comment');
+
+    await userEvent.click(screen.getByRole('button', { name: /^comment$/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /posting/i })).toBeNull(),
+    );
+  });
+});

@@ -136,12 +136,16 @@ function ResolveButton({ thread }: { thread: ReviewThread }) {
   const session = useReviewSession();
   const next = !thread.isResolved;
   const allowed = next ? thread.viewerCanResolve : thread.viewerCanUnresolve;
+  // The session refuses a second one anyway; this is so the refusal is
+  // visible. A control that accepts a click and does nothing reads as broken,
+  // and the viewed checkbox next to it already says busy the same way.
+  const inFlight = session.resolveInFlight.has(thread.id);
 
   return (
     <button
       type="button"
-      className="thread-resolve"
-      disabled={!allowed}
+      className="button thread-resolve"
+      disabled={!allowed || inFlight}
       title={allowed ? undefined : 'You do not have permission to do this.'}
       onClick={() => {
         void session.setResolved(thread.id, next);

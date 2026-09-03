@@ -116,15 +116,30 @@ export function Composer({
       return;
     }
     setPosting(true);
-    // Written before the request, so a failure anywhere after this point still
-    // leaves the text on disk.
-    await session.drafts.save(location, body);
-    const posted = await session.postThread({ path, body, anchor });
-    setPosting(false);
-    if (!posted) return;
-    await session.drafts.clear(location);
-    onClose();
+    try {
+      // Written before the request, so a failure anywhere after this point
+      // still leaves the text on disk. Saving is a convenience and posting is
+      // the job, so a storage failure is swallowed rather than allowed to
+      // cancel the post — extension storage has a quota, and hitting it must
+      // not cost the reviewer the comment they just wrote.
+      await save(location, body);
+      const posted = await session.postThread({ path, body, anchor });
+      if (!posted) return;
+      await clear(location);
+      onClose();
+    } finally {
+      // In a `finally` because anything thrown above escapes into a `void`
+      // call with nobody to catch it, and the button would stay on "Posting…"
+      // for good — with Cancel, which discards the text, the only way out.
+      setPosting(false);
+    }
   };
+
+  /** Draft bookkeeping, which is never worth failing a post over. */
+  const save = (at: DraftLocation, text: string): Promise<void> =>
+    session.drafts.save(at, text).catch(() => undefined);
+  const clear = (at: DraftLocation): Promise<void> =>
+    session.drafts.clear(at).catch(() => undefined);
 
   /**
    * `Mod+Enter` posts this comment.
