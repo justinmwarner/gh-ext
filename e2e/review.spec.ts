@@ -436,3 +436,67 @@ test('dark mode renders', async ({ context, extensionId, api }) => {
     page.locator('diffs-container').first().locator('[data-column-number]').first(),
   ).toBeVisible();
 });
+
+test('a comment expanded into view survives narrowing the diff', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The bug this pins is silent: expanding context teaches the column that
+  // `src/beta.ts` line 10 is drawable, and that answer outlives the renderer
+  // it came from. Toggling "since my last review" tears `CodeView` down and
+  // rebuilds it collapsed, so the line is no longer on screen — but the column
+  // still believes it is, and hands Pierre an annotation for a row that does
+  // not exist. Pierre draws nothing and raises nothing, and the comment is in
+  // neither the diff nor the per-file list.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const listed = page.locator('[data-unanchored="src/beta.ts"]');
+  const card = page
+    .locator('diffs-container')
+    .filter({ has: page.locator('[data-file-card="src/beta.ts"]') });
+
+  // Expand, so the comment moves out of the list and into the diff.
+  const expander = card.locator('[data-expand-button]').first();
+  await expander.scrollIntoViewIfNeeded();
+  await expander.click();
+  await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
+  await expect(listed).toHaveCount(0);
+
+  // Narrow to what landed since the last review. That patch's only hunk covers
+  // lines 1-3, so line 10 is out of hunk again and the comment belongs back in
+  // the list.
+  await page.getByRole('button', { name: 'Since my last review' }).click();
+  await expect(page.getByRole('button', { name: 'Since my last review' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  // Prove the narrowing actually landed rather than assuming it: the compare
+  // endpoint was called, and the column now holds that patch's one file
+  // instead of the pull request's fourteen.
+  expect(api.urls.some((url) => url.includes('/compare/'))).toBe(true);
+  await expect(page.locator('[data-file-card="src/beta.ts"]')).toHaveCount(1);
+  await expect(page.locator('[data-file-card="src/app.ts"]')).toHaveCount(0);
+
+  // Line 10 is outside the narrowed patch's only hunk, and the expansion that
+  // once revealed it died with the renderer — so the comment belongs back in
+  // the per-file list, and has to be visible there.
+  await expect(listed).toHaveCount(1);
+  // Listed means reachable: the disclosure is closed until asked, which is how
+  // every out-of-hunk thread is offered, so opening it is the reader's step.
+  await listed.locator('summary').click();
+  await expect(listed.getByText('Out of hunk comment.')).toBeVisible();
+
+  // And back. The full diff returns collapsed, so the verdict is the same one
+  // the page reaches on a cold load: listed, not drawn.
+  await page.getByRole('button', { name: 'Since my last review' }).click();
+  await expect(page.getByRole('button', { name: 'Since my last review' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  // Drawn this time rather than listed, and that is right: the blobs are warm
+  // from the expansion above, so the column's standing request for the line is
+  // granted immediately. Either surface is correct — being on neither is not.
+  await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
+});

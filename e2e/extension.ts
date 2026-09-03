@@ -21,7 +21,9 @@ import { fileURLToPath } from 'node:url';
 import { type BrowserContext, type Route, test as base } from '@playwright/test';
 import {
   BASE_SHA,
+  COMPARE_DIFF,
   HEAD_SHA,
+  PRIOR_SHA,
   POSTED_THREAD,
   PR,
   PULL_REQUEST_NODE,
@@ -206,6 +208,17 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
       return;
     }
 
+    // "Changes since my last review". A different endpoint from the pull
+    // request's own diff, answering a narrower patch between two commits.
+    if (url.pathname === `/repos/${PR.owner}/${PR.repo}/compare/${PRIOR_SHA}...${HEAD_SHA}`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.github.diff',
+        body: COMPARE_DIFF,
+      });
+      return;
+    }
+
     const contents = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(url.pathname);
     if (contents !== null) {
       const path = decodeURIComponent(contents[1] ?? '');
@@ -296,4 +309,4 @@ export const reviewUrl = (extensionId: string): string =>
   `chrome-extension://${extensionId}/review.html#/pr/${PR.owner}/${PR.repo}/${PR.number}`;
 
 export { expect } from '@playwright/test';
-export { HEAD_SHA, BASE_SHA, PR };
+export { HEAD_SHA, BASE_SHA, PRIOR_SHA, PR };

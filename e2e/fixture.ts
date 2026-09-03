@@ -16,6 +16,13 @@
 export const PR = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 export const HEAD_SHA = 'f'.repeat(40);
 export const BASE_SHA = 'a'.repeat(40);
+/**
+ * The commit the viewer's own last review was left on.
+ *
+ * Distinct from both of the above: "changes since my last review" compares
+ * two commits that are each somewhere in the middle of the pull request.
+ */
+export const PRIOR_SHA = 'b'.repeat(40);
 
 /** In column order: this is the order the diff sends them, which the UI keeps. */
 export const FILES = [
@@ -171,7 +178,7 @@ export const PULL_REQUEST_NODE = {
   author: { login: 'rowan', avatarUrl: 'https://avatars.example/rowan' },
   viewerDidAuthor: false,
   reviewDecision: 'REVIEW_REQUIRED',
-  viewerLatestReview: null,
+  viewerLatestReview: { commit: { oid: PRIOR_SHA } },
   latestReviews: {
     nodes: [
       {
@@ -247,3 +254,24 @@ export const POSTED_THREAD = thread({
     nodes: [comment('c-posted', 'Posted from the browser test.')],
   },
 });
+
+
+/**
+ * What landed since that review: one file, and only its first hunk.
+ *
+ * Narrower than `UNIFIED_DIFF` on purpose. `src/beta.ts` line 10 is outside
+ * every hunk here just as it is in the full diff, so a thread anchored there
+ * has to be *listed* rather than drawn — which is exactly the verdict that
+ * goes stale when the reviewer expanded context before toggling.
+ */
+export const COMPARE_DIFF = [
+  'diff --git a/src/beta.ts b/src/beta.ts',
+  'index 2222222..3333333 100644',
+  '--- a/src/beta.ts',
+  '+++ b/src/beta.ts',
+  '@@ -1,3 +1,3 @@',
+  ' first line',
+  '-old src/beta.ts',
+  '+new src/beta.ts',
+  ' third line',
+].join('\n');

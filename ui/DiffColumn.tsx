@@ -208,11 +208,36 @@ export function DiffColumn({
    * answers accumulate here.
    *
    * Accumulating is sound because expansion only ever grows: `expandHunk` adds
-   * to the region and nothing shrinks it short of tearing the renderer down.
+   * to the region and nothing shrinks it short of tearing the renderer down —
+   * which is exactly what the remount below does, so these are cleared with it.
    */
   const revealed = useRef(new Map<string, Set<number>>());
   /** Lines already offered to `revealLine`, so a refusal is never retried. */
   const revealAttempted = useRef(new Set<string>());
+
+  /**
+   * Forget what the last renderer drew, because it no longer exists.
+   *
+   * `CodeView` is keyed on the generation, so a new file list tears the whole
+   * thing down and rebuilds it collapsed. These two refs outlive that, and a
+   * line the old renderer had expanded into view reads as still drawable —
+   * so a thread anchored there is emitted as an annotation for a row the new
+   * renderer has not got. Pierre keeps that annotation in the DOM but does not
+   * display it, and because the thread was not demoted it is left off the
+   * per-file list too: the comment is on neither surface, with nothing raised.
+   *
+   * Done during render rather than in an effect. The layouts memo below reads
+   * `revealed` in this same pass, and an effect would let it build one round
+   * of annotations from the dead renderer's answers first.
+   */
+  const generation = diffGeneration(files);
+  const lastGeneration = useRef(generation);
+  if (lastGeneration.current !== generation) {
+    lastGeneration.current = generation;
+    revealed.current.clear();
+    revealAttempted.current.clear();
+  }
+
   /** Bumped when a file hydrates or grows, which is what re-runs the layouts. */
   const [expansion, setExpansion] = useState(0);
 
@@ -701,7 +726,7 @@ export function DiffColumn({
           // under an existing path would otherwise leave the old diff on
           // screen under the new headers. Stable across every other render,
           // because the generation is derived from the list's identity.
-          key={diffGeneration(files)}
+          key={generation}
           ref={viewer}
           disableWorkerPool
           containerRef={scroller}
