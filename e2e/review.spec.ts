@@ -437,6 +437,32 @@ test('dark mode renders', async ({ context, extensionId, api }) => {
   expect(dark.shell).not.toBe(light.shell);
   expect(dark.text).not.toBe(light.text);
 
+  // And the two Pierre surfaces resolve to the same background as the page.
+  // They render into shadow roots, so this cannot be checked anywhere but a
+  // real browser — and left alone the seams show three colours meeting: the
+  // page at #0d1117, the tree at #141415 and the diff at pure black.
+  const seams = await page.evaluate(() => {
+    // The rendered colour, not the custom property: `getPropertyValue` on a
+    // custom property hands back the unresolved token text, which compares
+    // equal to nothing useful. Read inside the shadow root, because that is
+    // where the surface the reviewer actually sees is painted.
+    const bg = (element: Element | null) =>
+      element == null ? null : getComputedStyle(element).backgroundColor;
+    const diffHost = document.querySelector('diffs-container') as
+      | (Element & { shadowRoot?: ShadowRoot })
+      | null;
+    return {
+      page: bg(document.body),
+      // The two libraries paint at different depths: the diff on the first
+      // element inside its shadow root, the tree on the host itself.
+      diff: bg(diffHost?.shadowRoot?.firstElementChild ?? null),
+      tree: bg(document.querySelector('file-tree-container')),
+    };
+  });
+
+  expect(seams.diff).toBe(seams.page);
+  expect(seams.tree).toBe(seams.page);
+
   // The diff itself follows, inside Pierre's shadow root and its own theme.
   const diffBackground = await page
     .locator('diffs-container')

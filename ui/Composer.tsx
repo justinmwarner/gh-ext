@@ -164,7 +164,7 @@ export function Composer({
         <p role="alert" className="composer-error">
           {REJECTIONS[rejection ?? 'invalid-range']}
         </p>
-        <button type="button" onClick={onClose}>
+        <button type="button" className="button" onClick={onClose}>
           Close
         </button>
       </section>
@@ -202,6 +202,7 @@ export function Composer({
       <div className="composer-actions">
         <button
           type="button"
+          className="button"
           disabled={selectedLines.length === 0}
           title={
             selectedLines.length === 0
@@ -219,12 +220,12 @@ export function Composer({
         >
           Suggest a change
         </button>
-        <button type="button" onClick={onClose}>
+        <button type="button" className="button" onClick={onClose}>
           Cancel
         </button>
         <button
           type="button"
-          className="composer-post"
+          className="button primary composer-post"
           disabled={empty || posting}
           onClick={() => {
             void submit();

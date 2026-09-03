@@ -1437,8 +1437,41 @@ default, and you can override them with CSS variables (next section).
 
 ## E.5 CSS custom properties — fonts, sizes, colours
 
-Everything renders inside a shadow root with `:host` defaults, so page-level CSS variables
-inherit in. Real sample from the docs source (`Styling/constants.ts`, verbatim):
+Everything renders inside a shadow root with `:host` defaults.
+
+**Page-level values do not always reach in, and the colour tokens are the case where
+they do not.** `:host` *declares* `--diffs-bg`, `--diffs-fg` and around twenty more,
+and a declaration beats an inherited value — so setting `--diffs-bg` on `:root` is
+silently ignored. The inner slots are no better: `--diffs-bg` resolves to
+`light-dark(var(--diffs-light-bg, #fff), var(--diffs-dark-bg, #000))`, which reads as
+though `--diffs-light-bg` were a free hook, but `:host` declares those too — measured
+in Chrome, `--diffs-dark-bg` on the host is `#0a0a0a` (a `@pierre/theme` value) no
+matter what `:root` says.
+
+Two things do work, and both are verified against a real browser rather than the
+sheet:
+
+1. **Target the host element from the outer document.** `diffs-container { --diffs-bg:
+   … }` wins, because when declarations come from different tree scopes the outer one
+   takes precedence over `:host`. This is what `entrypoints/review/style.css` uses to
+   put the diff on the same background as the page, and `e2e/review.spec.ts` asserts
+   the two resolve equal — it fails against a build without it, reporting Pierre's
+   `rgb(10, 10, 10)` against the page's `rgb(13, 17, 23)`.
+2. **The `-override` tokens**, which genuinely are undeclared fallback slots:
+   `--diffs-addition-color-override`, `--diffs-deletion-color-override`,
+   `--diffs-modified-color-override`, `--diffs-bg-addition-override`,
+   `--diffs-bg-context-override`, `--diffs-overflow-override` and about fifteen more
+   (`grep -o -- "--diffs-[a-z-]*-override" node_modules/@pierre/diffs/dist/style.js`).
+
+Note also that neither package ships a `.css` file: the stylesheet is a JS string in
+`dist/style.js`, adopted into each shadow root via `adoptedStyleSheets`. Reading it
+means decoding that string, not opening a stylesheet.
+
+`@pierre/trees` is the same shape, except that it paints its background on the **host
+element itself** rather than inside the shadow root, and its `--trees-*-override`
+tokens are real hooks.
+
+Real sample from the docs source (`Styling/constants.ts`, verbatim):
 
 ```css
 :root {

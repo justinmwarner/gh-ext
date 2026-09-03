@@ -14,6 +14,56 @@
      the bar above it is, and CSS cannot ask. */
   --topbar-height: 52px;
   --gap: 8px;
+
+  /* One palette across all three surfaces.
+     ------------------------------------------------------------------
+     Both Pierre packages render into shadow roots, so page CSS cannot
+     reach them — but their colours are read through custom properties
+     whose outermost fallback slot the packages never declare, and an
+     undeclared property still inherits. Setting `--diffs-bg` directly
+     does nothing, because that one IS declared on `:host` and wins;
+     `--diffs-light-bg` is the slot inside it.
+
+     Left alone, the seams show three different backgrounds meeting:
+     this page at #0d1117, the file tree at #141415 and the diff at
+     pure black. Same for "added", which was three colours within
+     300px of each other, one of them teal. */
+  --page-bg: light-dark(#ffffff, #0d1117);
+  --page-fg: light-dark(#1f2328, #e6edf3);
+
+  /* Pushed into Pierre rather than pulled out of it: its own #0dbe4e
+     measures 2.47:1 on white, which is unreadable at the 12px these
+     counts are drawn at. Pierre derives its line tints from these with
+     `color-mix`, so the backgrounds stay subtle on their own. */
+  --diffs-addition-color-override: light-dark(#1a7f37, #3fb950);
+  --diffs-deletion-color-override: light-dark(#cf222e, #f85149);
+  --diffs-modified-color-override: light-dark(#0969da, #4493f8);
+
+  /* Native controls — the viewed checkbox, the palette's search input —
+     draw in the UA's own blue otherwise, which is a fifth blue on a page
+     that already has enough. */
+  accent-color: light-dark(#0969da, #4493f8);
+}
+
+/* The diff's own surface, matched to the page.
+   Targeted at the host element from outside rather than through the
+   `--diffs-light-bg` slot, because `:host` inside the shadow sheet
+   declares that slot itself and beats an inherited value. A rule in the
+   outer tree matching the host does win, which is what this relies on. */
+diffs-container {
+  --diffs-bg: var(--page-bg);
+  --diffs-fg: var(--page-fg);
+}
+
+/* Links had no rule at all, so every one of them rendered in Chrome's
+   default #0000EE, or lavender in dark mode. */
+a {
+  color: light-dark(#0969da, #4493f8);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }
 
 * {
@@ -56,7 +106,7 @@ code {
   cursor: pointer;
 }
 
-.button:hover {
+.button:not(:disabled):hover {
   background: light-dark(#eef1f4, #262c36);
 }
 
@@ -66,13 +116,23 @@ code {
   background: light-dark(#1f883d, #238636);
 }
 
-.button.primary:hover {
+.button.primary:not(:disabled):hover {
   background: light-dark(#1a7f37, #29903b);
 }
 
+/* Real disabled colours rather than a blanket opacity.
+   `opacity` composites the whole button, so the primary variant's white
+   label over its green fill lands at 2.0:1 — which is the state the
+   author of a pull request sees on Approve and Request changes every
+   time, i.e. the one place the page most needs to be legible about why
+   a control is off. `:hover` still applies to disabled controls in
+   Blink, hence the guards above: a dead button that lights up under the
+   cursor reads as one that should work. */
 .button:disabled {
-  opacity: 0.5;
   cursor: default;
+  color: light-dark(#8c959f, #6e7681);
+  border-color: light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #212830);
 }
 
 :focus-visible {
@@ -291,6 +351,21 @@ code {
   flex: 1 1 auto;
   min-width: 0;
   height: 100%;
+
+  /* The same palette, through the trees package's own hooks. Set here
+     rather than on `:root` because these names are specific to the tree
+     and belong with it. */
+  --trees-bg-override: light-dark(#ffffff, #0d1117);
+  --trees-border-color-override: light-dark(#d1d9e0, #3d444d);
+  --trees-accent-override: light-dark(#0969da, #4493f8);
+  --trees-status-added-override: light-dark(#1a7f37, #3fb950);
+  --trees-status-deleted-override: light-dark(#cf222e, #f85149);
+  --trees-status-modified-override: light-dark(#0969da, #4493f8);
+
+  /* The page's focus ring is 2px and outside the element; the tree's was
+     1px, inside, and a different blue, so tabbing across the seam changed
+     the ring's width, position and hue. */
+  --trees-focus-ring-color-override: light-dark(#0969da, #4493f8);
 }
 
 .rail-resizer {
@@ -1105,9 +1180,18 @@ code {
   cursor: pointer;
 }
 
-.search-result:hover,
+.search-result:hover {
+  background: light-dark(#f6f8fa, #212830);
+}
+
+/* Split from `:hover` deliberately. Sharing the rule meant moving the
+   mouse over the list destroyed the only indication of what Enter would
+   do — and at 1.065:1 against the panel there was barely an indication
+   to destroy. The outline is what Pierre uses for its own selected row. */
 .search-result.active {
-  background: light-dark(#f6f8fa, #21262d);
+  background: light-dark(#ddf4ff, #0c2d6b);
+  outline: 1px solid light-dark(#0969da, #4493f8);
+  outline-offset: -1px;
 }
 
 .search-result-path {

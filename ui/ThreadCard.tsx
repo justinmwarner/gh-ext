@@ -125,7 +125,11 @@ function ReplyBox({ thread }: { thread: ReviewThread }) {
           thread.viewerCanReply ? 'Reply…' : 'You cannot reply to this thread.'
         }
       />
-      <button type="submit" disabled={!thread.viewerCanReply || empty || inFlight}>
+      <button
+        type="submit"
+        className="button"
+        disabled={!thread.viewerCanReply || empty || inFlight}
+      >
         {inFlight ? 'Replying…' : 'Reply'}
       </button>
     </form>

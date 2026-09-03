@@ -7,11 +7,17 @@
     <title>Fast GitHub Review — Options</title>
     <style>
       body {
+        /* The review page declares the same pair, and both Pierre packages
+           theme themselves this way. Without it this is the one screen in the
+           extension that cannot follow the OS — and it is the first screen a
+           new reviewer sees, reached from a dark review page by a button, as a
+           full-window white flash. */
+        color-scheme: light dark;
         margin: 0;
         padding: 2rem;
         font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-        color: #1f2328;
-        background: #ffffff;
+        color: light-dark(#1f2328, #e6edf3);
+        background: light-dark(#ffffff, #0d1117);
       }
       main {
         max-width: 44rem;
@@ -35,7 +41,7 @@
         padding: 0.4rem 0.6rem;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 13px;
-        border: 1px solid #d1d9e0;
+        border: 1px solid light-dark(#d1d9e0, #3d444d);
         border-radius: 6px;
       }
       .actions {
@@ -46,13 +52,13 @@
       button {
         padding: 0.4rem 0.85rem;
         font: inherit;
-        border: 1px solid #d1d9e0;
+        border: 1px solid light-dark(#d1d9e0, #3d444d);
         border-radius: 6px;
-        background: #f6f8fa;
+        background: light-dark(#f6f8fa, #212830);
         cursor: pointer;
       }
       button:disabled {
-        opacity: 0.6;
+        opacity: 0.5;
         cursor: default;
       }
       /* The setup walkthrough. Numbers matter here — this is a sequence
@@ -78,11 +84,11 @@
       }
       table.perms th { font-weight: 600; opacity: 0.7; }
       .hint {
-        color: #59636e;
+        color: light-dark(#59636e, #9198a1);
         margin: 0.35rem 0 0;
       }
       .warning {
-        border: 1px solid #d1242f;
+        border: 1px solid light-dark(#cf222e, #f85149);
         border-left-width: 4px;
         border-radius: 6px;
         padding: 0.75rem 1rem;
@@ -90,7 +96,7 @@
       }
       .warning h2 {
         margin: 0 0 0.5rem;
-        color: #d1242f;
+        color: light-dark(#cf222e, #f85149);
       }
       .warning p {
         margin: 0 0 0.5rem;
@@ -103,10 +109,10 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       }
       .result.bad {
-        color: #d1242f;
+        color: light-dark(#cf222e, #f85149);
       }
       .result.good {
-        color: #1a7f37;
+        color: light-dark(#1a7f37, #3fb950);
       }
       dl {
         display: grid;
@@ -115,7 +121,7 @@
         margin: 0;
       }
       dt {
-        color: #59636e;
+        color: light-dark(#59636e, #9198a1);
       }
       dd {
         margin: 0;
@@ -123,7 +129,7 @@
       }
       code {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        background: #f6f8fa;
+        background: light-dark(#f6f8fa, #212830);
         padding: 0.05rem 0.3rem;
         border-radius: 4px;
       }
