@@ -27,6 +27,7 @@ const checksDenied: DeniedField[] = [
     message: 'Resource not accessible by personal access token',
     path: 'repository.pullRequest.commits.nodes.N.commit.statusCheckRollup.contexts.nodes.N',
     count: 7,
+    type: null,
   },
 ];
 
@@ -74,7 +75,7 @@ describe('DeniedNotice', () => {
     // alternative is a page silently missing something with no way to tell.
     render(
       <DeniedNotice
-        denied={[{ message: 'Nope', path: 'repository.pullRequest.mystery', count: 1 }]}
+        denied={[{ message: 'Nope', path: 'repository.pullRequest.mystery', count: 1, type: null }]}
         pr={pr}
       />,
     );
@@ -84,7 +85,7 @@ describe('DeniedNotice', () => {
   });
 
   it('survives a refusal GitHub sent no path for', () => {
-    render(<DeniedNotice denied={[{ message: 'Nope', path: null, count: 1 }]} pr={pr} />);
+    render(<DeniedNotice denied={[{ message: 'Nope', path: null, count: 1, type: null }]} pr={pr} />);
 
     expect(notice()?.textContent).toContain('Nope');
   });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AuthError, GitHubClient, RateLimitError, type TokenProvider } from './client';
+import {
+  AuthError,
+  GitHubClient,
+  HttpError,
+  RateLimitError,
+  type TokenProvider,
+} from './client';
 import type { DeniedField } from './graphql-errors';
 
 interface RecordedCall {
@@ -346,6 +352,7 @@ describe('GitHubClient.graphql on a partly-denied response', () => {
         message: 'Resource not accessible by personal access token',
         path: 'repository.pullRequest.commits.nodes.N.commit.statusCheckRollup.contexts.nodes.N',
         count: 7,
+        type: 'FORBIDDEN',
       },
     ]);
   });
@@ -407,5 +414,120 @@ describe('GitHubClient.graphql on a partly-denied response', () => {
 
     expect(String(err)).toContain('statusCheckRollup');
     expect(String(err)).toContain('7 fields');
+  });
+});
+
+describe('the rate limits that are not a 403', () => {
+  /**
+   * Only one shape was recognised: HTTP 403 with `x-ratelimit-remaining: 0`.
+   * Everything else fell through to a bare `Error`, which the worker cannot
+   * classify — so the reviewer got "Something went wrong" with no reset time,
+   * no advice to wait, and not even the "Check your token" button, over a
+   * problem that has nothing to do with their token.
+   */
+  it('reads a GraphQL RATE_LIMITED reply as a rate limit', async () => {
+    // The primary GraphQL quota is reported as HTTP 200 with a null `data`,
+    // so nothing about the response status says what happened.
+    const fake = recordingFetch(() =>
+      jsonResponse({
+        data: null,
+        errors: [
+          { type: 'RATE_LIMITED', message: 'API rate limit exceeded for user ID 1.' },
+        ],
+      }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await expect(client.graphql('query { viewer { login } }', {})).rejects.toBeInstanceOf(
+      RateLimitError,
+    );
+  });
+
+  it('reads HTTP 429 as a rate limit', async () => {
+    const fake = recordingFetch(() => new Response('{}', { status: 429 }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await expect(client.fetchDiff('acme', 'widgets', 42)).rejects.toBeInstanceOf(
+      RateLimitError,
+    );
+  });
+
+  it('takes the wait from Retry-After when there is no reset header', async () => {
+    // A secondary rate limit carries `Retry-After` in seconds and leaves
+    // `x-ratelimit-remaining` non-zero, so neither of the old signals fires.
+    const fake = recordingFetch(
+      () =>
+        new Response('{}', {
+          status: 403,
+          headers: { 'retry-after': '60', 'x-ratelimit-remaining': '4999' },
+        }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const error = await client.fetchDiff('acme', 'widgets', 42).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(RateLimitError);
+    const resetAt = (error as RateLimitError).resetAt;
+    expect(resetAt).not.toBeNull();
+    // Roughly a minute out; the exact instant depends on when the test ran.
+    const seconds = ((resetAt as Date).getTime() - Date.now()) / 1000;
+    expect(seconds).toBeGreaterThan(50);
+    expect(seconds).toBeLessThanOrEqual(61);
+  });
+
+  it('still prefers the reset header when both are present', async () => {
+    const fake = recordingFetch(
+      () =>
+        new Response('{}', {
+          status: 429,
+          headers: { 'retry-after': '60', 'x-ratelimit-reset': String(RESET_EPOCH) },
+        }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const error = await client.fetchDiff('acme', 'widgets', 42).catch((e: unknown) => e);
+
+    expect((error as RateLimitError).resetAt?.getTime()).toBe(RESET_EPOCH * 1000);
+  });
+
+  it('leaves an ordinary 403 as an ordinary failure', async () => {
+    // A permission denial is not a rate limit and the remedy is different:
+    // waiting will never fix it.
+    const fake = recordingFetch(() => new Response('{}', { status: 403 }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await expect(client.fetchDiff('acme', 'widgets', 42)).rejects.not.toBeInstanceOf(
+      RateLimitError,
+    );
+  });
+
+  it('does not mistake an ordinary GraphQL denial for a rate limit', async () => {
+    const fake = recordingFetch(() =>
+      jsonResponse({
+        data: null,
+        errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible.' }],
+      }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    await expect(client.graphql('query { viewer { login } }', {})).rejects.not.toBeInstanceOf(
+      RateLimitError,
+    );
+  });
+});
+
+describe('what a failed request tells its caller', () => {
+  it('carries the status, so a caller can tell 403 from 406', async () => {
+    // Without this the status survives only inside a message string, and
+    // `fetchDiffPayload` had no way to distinguish "this diff is too big to
+    // generate" — the one case worth retrying elsewhere — from a denial or a
+    // rate limit, so it retried all of them.
+    const fake = recordingFetch(() => new Response('{}', { status: 404 }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const error = await client.fetchDiff('acme', 'widgets', 42).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(HttpError);
+    expect((error as HttpError).status).toBe(404);
   });
 });

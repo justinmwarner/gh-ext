@@ -17,7 +17,7 @@ import {
   headPointerKey,
   payloadFromCache,
 } from './assembly';
-import { GitHubClient, type TokenProvider } from './client';
+import { GitHubClient, HttpError, type TokenProvider } from './client';
 import type { DeniedField } from './graphql-errors';
 import { MAX_PAGES } from './pagination';
 
@@ -476,6 +476,7 @@ describe('a partly-denied response', () => {
       message: 'Resource not accessible by personal access token',
       path: 'repository.pullRequest.commits.nodes.N.commit.statusCheckRollup.contexts.nodes.N',
       count: 7,
+      type: null,
     },
   ];
 
@@ -644,5 +645,107 @@ describe('handing cache writes to the caller', () => {
     await flushWrites();
 
     expect(await store.keys()).not.toEqual([]);
+  });
+});
+
+describe('when to retry the diff against the files endpoint', () => {
+  /**
+   * The fallback exists for one case: GitHub refusing to generate a unified
+   * diff because it is too large. Treating *every* failure that way meant a
+   * denial, a missing repository or a throttle each triggered up to thirty
+   * more requests at an endpoint already refusing — and the reviewer was shown
+   * the fallback's error, with the original status, and any SSO header that
+   * came with it, discarded.
+   */
+  const fellBack = (fetchCalls: string[]): boolean => fetchCalls.length > 0;
+
+  function portsWatchingFallback(diffError: Error) {
+    const { port } = stubGitHub({ diffError });
+    const { ports, store } = testPorts(port);
+    const fetchCalls: string[] = [];
+    ports.fetchImpl = async (input) => {
+      fetchCalls.push(String(input));
+      throw new Error('the files endpoint is refusing too');
+    };
+    return { ports, store, fetchCalls };
+  }
+
+  it('falls back when the diff was too large to generate', async () => {
+    const { ports, fetchCalls } = portsWatchingFallback(new HttpError(406));
+
+    await assemblePullRequest(ports, PR).catch(() => undefined);
+
+    expect(fellBack(fetchCalls)).toBe(true);
+  });
+
+  it('does not fall back on a permission denial', async () => {
+    const { ports, fetchCalls } = portsWatchingFallback(new HttpError(403));
+
+    await expect(assemblePullRequest(ports, PR)).rejects.toThrow(/403/);
+
+    expect(fellBack(fetchCalls)).toBe(false);
+  });
+
+  it('does not fall back on a repository it cannot see', async () => {
+    const { ports, fetchCalls } = portsWatchingFallback(new HttpError(404));
+
+    await expect(assemblePullRequest(ports, PR)).rejects.toThrow(/404/);
+
+    expect(fellBack(fetchCalls)).toBe(false);
+  });
+
+  it('does not add thirty more requests to a throttle', async () => {
+    const { ports, fetchCalls } = portsWatchingFallback(new HttpError(429));
+
+    await expect(assemblePullRequest(ports, PR)).rejects.toThrow(/429/);
+
+    expect(fellBack(fetchCalls)).toBe(false);
+  });
+
+  it('reports the original failure, not the one from the retry', async () => {
+    const { ports } = portsWatchingFallback(new HttpError(403));
+
+    await expect(assemblePullRequest(ports, PR)).rejects.not.toThrow(/the files endpoint is refusing too/);
+  });
+});
+
+describe('when the pull request does not come back', () => {
+  /**
+   * GitHub explains itself in the `errors` array even when it nulls the data,
+   * and that sentence is often the only text naming the actual remedy — SAML
+   * enforcement wants the token authorised for the organisation, a
+   * pending-approval token wants an owner to approve it. Neither is fixed by
+   * "check the repository name", which is what the reviewer was told.
+   */
+  it('repeats what GitHub said about the repository', async () => {
+    const { port } = stubGitHub({
+      pr: { repository: null },
+      denied: [
+        {
+          message:
+            'Resource protected by organization SAML enforcement. You must ' +
+            'grant your token access to this organization.',
+          path: 'repository',
+          count: 1,
+          type: 'FORBIDDEN',
+        },
+      ],
+    });
+    const { ports } = testPorts(port);
+
+    await expect(assemblePullRequest(ports, PR)).rejects.toThrow(/SAML enforcement/);
+  });
+
+  it('still says something useful when GitHub explained nothing', async () => {
+    const { port } = stubGitHub({ pr: { repository: { pullRequest: null } } });
+    const { ports } = testPorts(port);
+
+    const error = await assemblePullRequest(ports, PR).catch((e: unknown) => e);
+
+    expect((error as Error).message).toMatch(/No pull request/);
+    // And nothing after it. Quoting GitHub when GitHub said nothing produces
+    // "GitHub said: GitHub reported an error but described none", which reads
+    // as a second, unrelated failure.
+    expect((error as Error).message).not.toMatch(/GitHub said/);
   });
 });

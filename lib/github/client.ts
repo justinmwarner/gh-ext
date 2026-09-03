@@ -1,10 +1,30 @@
-import { type DeniedField, describeDenied, normalizeErrors } from './graphql-errors';
+import {
+  type DeniedField,
+  describeDenied,
+  isRateLimited,
+  normalizeErrors,
+} from './graphql-errors';
 
 export interface TokenProvider {
   getToken(): Promise<string | null>;
 }
 
 export class AuthError extends Error {}
+
+/**
+ * A request GitHub refused, with the status it refused with.
+ *
+ * The status is a field rather than only a sentence because callers act on it.
+ * `fetchDiffPayload` retries against a different endpoint when GitHub cannot
+ * generate a diff, and must not retry a denial, a missing repository or a
+ * throttle — three cases where the second request is guaranteed to fail too,
+ * and where reporting the *fallback's* error hides the real one.
+ */
+export class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`GitHub request failed: ${status}`);
+  }
+}
 
 export class RateLimitError extends Error {
   /**
@@ -20,10 +40,39 @@ export class RateLimitError extends Error {
   }
 }
 
-/** The reset time of this exact response, or null if it did not carry one. */
+/**
+ * The reset time of this exact response, or null if it did not carry one.
+ *
+ * Two headers, in this order. `x-ratelimit-reset` is an absolute instant and
+ * is what a primary limit sends. `Retry-After` is a relative number of seconds
+ * and is what a *secondary* limit sends — a different mechanism, with none of
+ * the `x-ratelimit-*` headers alongside it, so without reading it a secondary
+ * limit has no countdown at all.
+ */
 function parseResetAt(res: Response): Date | null {
   const reset = Number(res.headers.get('x-ratelimit-reset'));
-  return Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000) : null;
+  if (Number.isFinite(reset) && reset > 0) return new Date(reset * 1000);
+
+  const after = Number(res.headers.get('retry-after'));
+  return Number.isFinite(after) && after > 0 ? new Date(Date.now() + after * 1000) : null;
+}
+
+/**
+ * Whether this response is GitHub asking for the request to stop, not fail.
+ *
+ * Three shapes, because GitHub has three. The primary limit is a 403 with the
+ * remaining count at zero. A secondary limit is a 403 or 429 carrying
+ * `Retry-After` and leaves the remaining count untouched. And 429 on its own
+ * is the plain answer to too many requests. Missing any of them means the
+ * reviewer is told "Something went wrong" over a problem that fixes itself.
+ */
+function isRateLimitResponse(res: Response): boolean {
+  if (res.status === 429) return true;
+  if (res.status !== 403) return false;
+  return (
+    res.headers.get('x-ratelimit-remaining') === '0' ||
+    res.headers.get('retry-after') !== null
+  );
 }
 
 export interface RateLimitStatus {
@@ -99,6 +148,14 @@ export class GitHubClient {
     // Nothing resolved, so there is nothing to tolerate. Returning null here
     // would only move the failure to whoever reads the payload next, where it
     // would arrive stripped of any explanation.
+    // Before the general case, because a spent quota arrives as an ordinary
+    // HTTP 200 and would otherwise become a bare Error the worker cannot
+    // classify. Thrown even when `onPartial` was supplied: a rate limit is not
+    // a field the caller can do without, it is the whole read failing.
+    if (isRateLimited(denied)) {
+      throw new RateLimitError(describeDenied(denied), parseResetAt(res));
+    }
+
     const fatal = denied.length > 0 && (onPartial === undefined || json.data == null);
     if (fatal) throw new Error(describeDenied(denied));
 
@@ -151,14 +208,14 @@ export class GitHubClient {
     this.recordRateLimit(res);
 
     if (res.status === 401) throw new AuthError('GitHub rejected the token');
-    if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
+    if (isRateLimitResponse(res)) {
       // Read the reset time off this response, not off lastRateLimit. A 403
       // need not carry all three headers, so lastRateLimit may still be null
       // (a non-null assertion there turns a rate limit into a TypeError) or
       // may hold a stale reset time recorded by an earlier request.
       throw new RateLimitError('GitHub rate limit exceeded', parseResetAt(res));
     }
-    if (!res.ok) throw new Error(`GitHub request failed: ${res.status}`);
+    if (!res.ok) throw new HttpError(res.status);
     return res;
   }
 

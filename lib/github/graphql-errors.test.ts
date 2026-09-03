@@ -38,6 +38,9 @@ describe('normalizeErrors', () => {
     expect(denied[0]).toMatchObject({
       message: 'Resource not accessible by personal access token',
       count: 7,
+      // GitHub's own classification, kept because "wait" and "get a different
+      // token" are opposite remedies and the message does not distinguish them.
+      type: 'FORBIDDEN',
     });
   });
 
@@ -76,7 +79,7 @@ describe('normalizeErrors', () => {
   it('reports a path-less error rather than dropping it', () => {
     const denied = normalizeErrors([{ message: 'Something broke' }]);
 
-    expect(denied).toEqual([{ message: 'Something broke', path: null, count: 1 }]);
+    expect(denied).toEqual([{ message: 'Something broke', path: null, count: 1, type: null }]);
   });
 
   it('survives anything that is not an error array', () => {
@@ -129,6 +132,7 @@ describe('mergeDenied', () => {
     message: 'Resource not accessible by personal access token',
     path,
     count,
+    type: null,
   });
 
   it('folds the same refusal from several responses into one', () => {

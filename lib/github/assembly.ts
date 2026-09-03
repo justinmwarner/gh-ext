@@ -21,8 +21,8 @@ import {
   ProtocolFailure,
 } from '../messages';
 import type { KeyValueStore } from '../review/drafts';
-import { AuthError, RateLimitError } from './client';
-import { type DeniedField, mergeDenied } from './graphql-errors';
+import { HttpError } from './client';
+import { type DeniedField, describeDenied, mergeDenied } from './graphql-errors';
 import { parseUnifiedDiff } from './diff';
 import { fetchFilesFallback } from './files-fallback';
 import { type Connection, type Paged, collectConnection } from './pagination';
@@ -208,17 +208,40 @@ async function loadDiff(ports: AssemblyPorts, pr: PrRef): Promise<DiffLoad> {
   return { diff: await fetchDiffPayload(ports, pr), cachedAt: null };
 }
 
+/**
+ * Statuses that mean "this diff exists but I will not render it".
+ *
+ * 406 is GitHub's documented answer for a diff past its size threshold. 500
+ * is included because a very large diff can time out server-side instead, and
+ * the files endpoint genuinely does answer where the diff did not — but a 500
+ * from anything else costs one extra request and no correctness.
+ *
+ * Not 403, 404 or 429: those are about whether the request may be made at all,
+ * and the files endpoint will answer them the same way.
+ */
+const DIFF_TOO_LARGE: ReadonlySet<number> = new Set([406, 500]);
+
+const isDiffTooLarge = (error: unknown): boolean =>
+  error instanceof HttpError && DIFF_TOO_LARGE.has(error.status);
+
 async function fetchDiffPayload(ports: AssemblyPorts, pr: PrRef): Promise<DiffPayload> {
   try {
     const raw = await ports.github.fetchDiff(pr.owner, pr.repo, pr.number);
     return { source: 'unified', files: parseUnifiedDiff(raw), truncated: false };
   } catch (error) {
-    // Auth and quota failures are about the request, not the diff, and
-    // retrying them against a different endpoint only burns another call.
-    if (error instanceof AuthError || error instanceof RateLimitError) throw error;
-
-    // GitHub refuses to generate a unified diff past a size threshold. The
-    // files endpoint still answers, with less per file.
+    // Retry only what retrying can fix.
+    //
+    // The fallback exists for one thing: GitHub declining to generate a
+    // unified diff because it is too large. Everything else — a denial, a
+    // repository the token cannot see, a throttle — will refuse the files
+    // endpoint too, so a retry costs up to thirty more requests, replaces the
+    // real status with the fallback's, and throws away anything that came with
+    // it (an `X-GitHub-SSO` header names the one action that would fix it).
+    //
+    // Stated as the statuses worth retrying rather than the ones to rethrow.
+    // The old rule was the other way round and let every status it had not
+    // thought of through, which is how a 403 came to trigger a stampede.
+    if (!isDiffTooLarge(error)) throw error;
     const fallback = await fetchFilesFallback(
       pr.owner,
       pr.repo,
@@ -382,9 +405,21 @@ export async function assemblePullRequest(
 
   const node = data.repository?.pullRequest;
   if (!node) {
+    // GitHub nulls the data and explains itself in `errors`, and that sentence
+    // is often the only text naming the actual remedy — SAML enforcement wants
+    // the token authorised for the organisation, a token awaiting owner
+    // approval wants an owner. Neither is "check the repository name", so
+    // dropping it sends the reviewer to re-check a setting that is already
+    // correct. Read here rather than at the end of the happy path, which this
+    // never reaches.
+    // Tested for emptiness on the list, not on the sentence: `describeDenied`
+    // answers an empty list with "GitHub reported an error but described
+    // none", which quoted back here reads as a second, unrelated failure.
+    const refusals = denials.result();
     throw new ProtocolFailure(
       'not-found',
-      `No pull request ${prKey(pr)} — check the repository name and the token's access.`,
+      `No pull request ${prKey(pr)} — check the repository name and the token's access.` +
+        (refusals.length === 0 ? '' : ` GitHub said: ${describeDenied(refusals)}`),
     );
   }
 
