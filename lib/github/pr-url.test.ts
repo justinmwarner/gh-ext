@@ -112,3 +112,32 @@ describe('parseReviewHash', () => {
     expect(parseReviewHash('#/pr/octocat/hello-world/not-a-number')).toBeNull();
   });
 });
+
+describe('a hash nobody could have produced', () => {
+  /**
+   * `parseReviewHash` runs inside a `useMemo`, during render, and the review
+   * page mounts with no error boundary above it. A malformed percent sequence
+   * makes `decodeURIComponent` throw a `URIError` from inside render, which
+   * takes the whole page down to a blank white screen with only a console
+   * stack — for a hand-edited URL or a mangled bookmark.
+   *
+   * Returning null is the answer, because null already renders an explanation.
+   */
+  it('reports no route rather than throwing', () => {
+    expect(parseReviewHash('#/pr/a%zz/b/1')).toBeNull();
+  });
+
+  it('is not fooled by a truncated escape either', () => {
+    expect(parseReviewHash('#/pr/owner/repo%/1')).toBeNull();
+  });
+
+  it('still decodes an escape that is valid', () => {
+    // Owner and repo names cannot contain a percent, but the decode is there
+    // for a reason and must keep working.
+    expect(parseReviewHash('#/pr/my%2Dorg/my%2Drepo/7')).toEqual({
+      owner: 'my-org',
+      repo: 'my-repo',
+      number: 7,
+    });
+  });
+});

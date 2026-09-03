@@ -325,6 +325,19 @@ test('the keyboard map works against real key events', async ({
   await body.press('k');
   await expect(page.locator('.shell')).toHaveAttribute('data-current-file', FILES[0]);
 
+  // And the tree follows. Asserting only on `data-current-file` is how the
+  // tree came to sit still through `j` and `k`: the column moved, the shell
+  // attribute moved, and the rail kept highlighting whatever was clicked last.
+  // Matched on the name rather than exactly, because Pierre truncates the
+  // label right-to-left and renders it as two overlapping runs.
+  const selectedRow = page.locator('[role="treeitem"][aria-selected="true"]');
+  await expect(selectedRow).toHaveCount(1);
+  await expect(selectedRow).toContainText('app');
+
+  await body.press('j');
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', FILES[1]);
+  await expect(selectedRow).toContainText('beta');
+
   // `?` is a shifted key on this layout, which is exactly the case the map
   // resolves from `event.key` rather than from `shiftKey`.
   await body.press('?');

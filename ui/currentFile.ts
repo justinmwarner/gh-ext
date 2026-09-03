@@ -19,7 +19,15 @@
  *    than merely alternate.
  */
 
-export type FileOrigin = 'tree' | 'scroll';
+/**
+ * Which surface moved the current file.
+ *
+ * Three, not two, because "neither of them" is a real answer. `j`, the jump
+ * panel and a thread link all move it without the tree or the column having
+ * acted, and both of those far surfaces need to follow. Reusing `tree` for
+ * those meant telling the tree to stand still for a move it did not make.
+ */
+export type FileOrigin = 'tree' | 'scroll' | 'command';
 
 export interface CurrentFile {
   path: string | null;
@@ -40,17 +48,26 @@ export function fromTree(state: CurrentFile, path: string): CurrentFile {
   return moveTo(state, path, 'tree');
 }
 
+/**
+ * A keyboard shortcut, the jump panel or a thread link moved it.
+ *
+ * Neither surface knows yet, so both act.
+ */
+export function fromCommand(state: CurrentFile, path: string): CurrentFile {
+  return moveTo(state, path, 'command');
+}
+
 /** The diff column scrolled and a different file reached the top. */
 export function fromScroll(state: CurrentFile, path: string): CurrentFile {
   return moveTo(state, path, 'scroll');
 }
 
 export function shouldScrollDiff(state: CurrentFile): boolean {
-  return state.origin === 'tree';
+  return state.origin === 'tree' || state.origin === 'command';
 }
 
 export function shouldSelectInTree(state: CurrentFile): boolean {
-  return state.origin === 'scroll';
+  return state.origin === 'scroll' || state.origin === 'command';
 }
 
 /** One mounted file card, and where its header sits relative to the viewport. */

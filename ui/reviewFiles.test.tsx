@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { fileFixture, prPayloadWithFiles } from './prPayload.fixture';
-import { reviewFiles } from './reviewFiles';
+import { countPatchLines, reviewFiles } from './reviewFiles';
 
 const patchOf = (path: string, added: number, removed: number): string =>
   [
@@ -147,5 +147,57 @@ describe('reviewFiles', () => {
     delete payload.pullRequest['files'];
 
     expect(reviewFiles(payload).map((f) => f.path)).toEqual(['src/a.ts']);
+  });
+});
+
+describe('countPatchLines', () => {
+  /**
+   * The fallback counter, used when the GraphQL `files` connection was capped
+   * or denied — which is exactly when nothing else can correct it.
+   */
+  const patch = (...body: string[]): string =>
+    ['diff --git a/x.sql b/x.sql', '--- a/x.sql', '+++ b/x.sql', '@@ -1,3 +1,3 @@', ...body].join(
+      '\n',
+    );
+
+  it('counts ordinary additions and deletions', () => {
+    expect(countPatchLines(patch(' ctx', '-gone', '+new'))).toEqual({
+      additions: 1,
+      deletions: 1,
+    });
+  });
+
+  it('does not count the file headers', () => {
+    // The whole reason the filter exists: without it every file reports a
+    // spurious +1 -1.
+    expect(countPatchLines(patch(' ctx'))).toEqual({ additions: 0, deletions: 0 });
+  });
+
+  it('counts a deleted line that itself starts with two dashes', () => {
+    // A SQL comment, or a YAML document separator. Prefixed with `-` for the
+    // deletion it becomes `---`, which the header filter swallowed — so a file
+    // that removed ten of them reported a confident, wrong, zero.
+    expect(countPatchLines(patch('-- a sql comment', '--- yaml separator'))).toEqual({
+      additions: 0,
+      deletions: 2,
+    });
+  });
+
+  it('counts an added line that itself starts with two pluses', () => {
+    expect(countPatchLines(patch('++i;', '+++ still code'))).toEqual({
+      additions: 2,
+      deletions: 0,
+    });
+  });
+
+  it('ignores hunk headers', () => {
+    expect(countPatchLines(patch('+one', '@@ -20,3 +20,3 @@', '+two'))).toEqual({
+      additions: 2,
+      deletions: 0,
+    });
+  });
+
+  it('survives a patch with no hunk at all', () => {
+    expect(countPatchLines('')).toEqual({ additions: 0, deletions: 0 });
   });
 });

@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   NO_FILE,
+  fromCommand,
   fromScroll,
   fromTree,
   shouldScrollDiff,
@@ -129,5 +130,45 @@ describe('topmostFile', () => {
         { path: 'src/b.ts', top: -10 },
       ]),
     ).toBe('src/b.ts');
+  });
+});
+
+describe('a move neither surface made', () => {
+  /**
+   * `j`, `k`, the Mod+K jump panel and the Overview's thread links all move
+   * the current file without either surface having done it. They reused
+   * `fromTree`, whose whole meaning is "the tree already knows, do not
+   * re-select there" — so the diff scrolled and the tree sat still, showing a
+   * file the reviewer left three keystrokes ago.
+   *
+   * The scroll echo cannot rescue it: `moveTo` returns the same state when the
+   * path has not changed, and Pierre scrolls instantly, so the one scroll
+   * event that follows reports the path already current and changes nothing.
+   */
+  it('scrolls the diff', () => {
+    expect(shouldScrollDiff(fromCommand(NO_FILE, 'src/app.ts'))).toBe(true);
+  });
+
+  it('selects in the tree as well', () => {
+    expect(shouldSelectInTree(fromCommand(NO_FILE, 'src/app.ts'))).toBe(true);
+  });
+
+  it('still lets the tree keep its own moves to itself', () => {
+    const fromTheTree = fromTree(NO_FILE, 'src/app.ts');
+    expect(shouldSelectInTree(fromTheTree)).toBe(false);
+    expect(shouldScrollDiff(fromTheTree)).toBe(true);
+  });
+
+  it('still lets a scroll keep the column to itself', () => {
+    const fromScrolling = fromScroll(NO_FILE, 'src/app.ts');
+    expect(shouldScrollDiff(fromScrolling)).toBe(false);
+    expect(shouldSelectInTree(fromScrolling)).toBe(true);
+  });
+
+  it('is a no-op when the file has not actually changed', () => {
+    // The identity check is what stops the two surfaces echoing each other
+    // forever; a third origin must not be the one that breaks it.
+    const at = fromCommand(NO_FILE, 'src/app.ts');
+    expect(fromCommand(at, 'src/app.ts')).toBe(at);
   });
 });

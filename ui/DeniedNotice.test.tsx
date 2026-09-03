@@ -90,3 +90,58 @@ describe('DeniedNotice', () => {
     expect(notice()?.textContent).toContain('Nope');
   });
 });
+
+describe('a requested reviewer the token could not read', () => {
+  /**
+   * `requestedReviewer` is a union with `Team` and `EnterpriseTeam` in it, and
+   * those are organisation objects a repository-scoped fine-grained token is
+   * not granted. GitHub nulls the node and the avatar row renders empty —
+   * indistinguishable from "nobody has been asked", which is exactly the
+   * failure the union was widened to prevent.
+   *
+   * Without an entry here the banner falls through to printing the raw GraphQL
+   * path and suppresses the "usually the token is missing X" line entirely, so
+   * the reviewer is shown a schema path and no action.
+   */
+  const teamDenied: DeniedField[] = [
+    {
+      message: 'Resource not accessible by personal access token',
+      path: 'repository.pullRequest.reviewRequests.nodes.N.requestedReviewer',
+      count: 1,
+      type: 'FORBIDDEN',
+    },
+  ];
+
+  it('names the requested reviewers in words a reader recognises', () => {
+    render(<DeniedNotice denied={teamDenied} pr={pr} href={null} />);
+
+    const text = screen.getByRole('status').textContent ?? '';
+    expect(text).toMatch(/reviewer/i);
+  });
+
+  it('does not describe the missing part as a GraphQL path', () => {
+    // The verbatim path still appears in the detail line, which is deliberate.
+    // What must not happen is the schema path standing in for the sentence
+    // that tells a reader what is missing.
+    render(<DeniedNotice denied={teamDenied} pr={pr} href={null} />);
+
+    expect(screen.getByRole('status').textContent).not.toMatch(
+      /would not show this token part of this pull request/,
+    );
+  });
+
+  it('sends the reviewer to the section that permission is actually in', () => {
+    // Members is an organisation permission. The remedy used to name
+    // "Repository permissions" for every case, so following it means scrolling
+    // a list that does not contain the setting.
+    render(<DeniedNotice denied={teamDenied} pr={pr} href={null} />);
+
+    expect(screen.getByRole('status').textContent).toMatch(/Organization permissions/);
+  });
+
+  it('names a permission that would fix it', () => {
+    render(<DeniedNotice denied={teamDenied} pr={pr} href={null} />);
+
+    expect(screen.getByRole('status').textContent).toMatch(/permission/i);
+  });
+});

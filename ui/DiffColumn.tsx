@@ -236,6 +236,9 @@ export function DiffColumn({
     lastGeneration.current = generation;
     revealed.current.clear();
     revealAttempted.current.clear();
+    // The notice names a file, and the file list has just been replaced. It
+    // may not even be in the column any more.
+    setExpansionError(null);
   }
 
   /** Bumped when a file hydrates or grows, which is what re-runs the layouts. */
@@ -524,15 +527,24 @@ export function DiffColumn({
       : `${blobs.pr.owner}/${blobs.pr.repo}/${blobs.pr.number}@${blobs.baseSha}..${blobs.headSha}`;
   const refs = useRef(blobs);
   refs.current = blobs;
-  const loadDiffFiles = useMemo(
-    () =>
-      refs.current === null
-        ? null
-        : createDiffFilesLoader(refs.current, (_path, reason) => {
-            setExpansionError(reason);
-          }),
-    [refsKey],
-  );
+  const loadDiffFiles = useMemo(() => {
+    if (refs.current === null) return null;
+    const load = createDiffFilesLoader(refs.current, (_path, reason) => {
+      setExpansionError(reason);
+    });
+    // Wrapped so a success can clear the notice. It was only ever set, never
+    // unset, so one file that could not be expanded — a binary base side, say
+    // — left "…cannot be expanded because the file is not text" at the top of
+    // the column for the rest of the session, naming a file the reviewer had
+    // long since scrolled past, and reading as a live failure of whatever they
+    // were looking at now. The loader rethrows after reporting, so this line
+    // is reached only when the expansion actually worked.
+    return async (fileDiff: Parameters<typeof load>[0]) => {
+      const loaded = await load(fileDiff);
+      setExpansionError(null);
+      return loaded;
+    };
+  }, [refsKey]);
 
   const options = useMemo<CodeViewReactOptions<AnnotationMetadata>>(
     () => ({

@@ -116,8 +116,19 @@ export function countPatchLines(patch: string): { additions: number; deletions: 
   let additions = 0;
   let deletions = 0;
 
+  // The headers are only above the first `@@`. Filtering them by prefix across
+  // the whole patch also swallows content: a deleted `-- comment` arrives as
+  // `--- comment` and an added `++i;` as `+++i;`, so a file that removed ten
+  // SQL comments or YAML separators reported a confident, wrong, zero — in the
+  // one situation where nothing else can correct it.
+  let inBody = false;
+
   for (const line of patch.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) continue;
+    if (line.startsWith('@@')) {
+      inBody = true;
+      continue;
+    }
+    if (!inBody) continue;
     if (line.startsWith('+')) additions += 1;
     else if (line.startsWith('-')) deletions += 1;
   }

@@ -50,12 +50,13 @@ export function parsePrUrl(url: string): PrRef | null {
   const [, owner, repo, number] = match;
   if (owner === undefined || repo === undefined || number === undefined) return null;
 
-  return {
-    owner: decodeURIComponent(owner),
-    repo: decodeURIComponent(repo),
-    number: Number(number),
-  };
+  const ownerName = decoded(owner);
+  const repoName = decoded(repo);
+  if (ownerName === null || repoName === null) return null;
+
+  return { owner: ownerName, repo: repoName, number: Number(number) };
 }
+
 
 /**
  * The pull request route on the review page.
@@ -88,9 +89,27 @@ export function parseReviewHash(hash: string): PrRef | null {
   const [, owner, repo, number] = match;
   if (owner === undefined || repo === undefined || number === undefined) return null;
 
-  return {
-    owner: decodeURIComponent(owner),
-    repo: decodeURIComponent(repo),
-    number: Number(number),
-  };
+  const ownerName = decoded(owner);
+  const repoName = decoded(repo);
+  if (ownerName === null || repoName === null) return null;
+
+  return { owner: ownerName, repo: repoName, number: Number(number) };
+}
+
+/**
+ * `decodeURIComponent`, without the throw.
+ *
+ * A malformed percent sequence — `%zz`, or a `%` at the end — raises
+ * `URIError`. `parseReviewHash` runs inside a `useMemo` during render, and the
+ * review page mounts with no error boundary, so one hand-edited URL or stale
+ * bookmark takes the whole page to blank white with a console stack. Null
+ * instead, which every caller already treats as "no route" and renders an
+ * explanation for.
+ */
+function decoded(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }

@@ -30,7 +30,7 @@ import { TopBar } from './TopBar';
 import { DeniedNotice } from './DeniedNotice';
 import { TokenRejectedNotice } from './TokenRejectedNotice';
 import { TruncationNotice } from './TruncationNotice';
-import { type CurrentFile, NO_FILE, fromScroll, fromTree } from './currentFile';
+import { type CurrentFile, NO_FILE, fromCommand, fromScroll, fromTree } from './currentFile';
 import { pullRequestUrl } from './githubUrl';
 import type { BlobRefs } from './blobLoader';
 import { prBaseSha, prPermalink, prViewerIsAuthor, prViewerReviewedAt } from './prNode';
@@ -118,6 +118,16 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const selectFromScroll = useCallback((path: string) => {
     setCurrent((state) => fromScroll(state, path));
   }, []);
+  /**
+   * A move the reviewer asked for without touching either surface.
+   *
+   * `j`, the jump panel and a thread link all land here. They used to reuse
+   * `selectFromTree`, which means "the tree already knows" — so the tree stood
+   * still and kept highlighting a file the reviewer had left.
+   */
+  const selectFromCommand = useCallback((path: string) => {
+    setCurrent((state) => fromCommand(state, path));
+  }, []);
 
   /**
    * Jumping to a thread, in two steps.
@@ -129,7 +139,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    * given when the path has not moved, exactly so echoes do not re-render.
    */
   const jumpToThread = useCallback((threadId: string, path: string) => {
-    setCurrent((state) => fromTree(state, path));
+    setCurrent((state) => fromCommand(state, path));
     setFocusedThread(threadId);
     setJump((previous) => ({ threadId, token: (previous?.token ?? 0) + 1 }));
   }, []);
@@ -166,8 +176,8 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     const { files: list, current: at } = latest.current;
     const from = at.path === null ? -1 : list.findIndex((f) => f.path === at.path);
     const next = step(list, from, direction);
-    if (next !== undefined) selectFromTree(next.path);
-  }, [selectFromTree]);
+    if (next !== undefined) selectFromCommand(next.path);
+  }, [selectFromCommand]);
 
   const moveThread = useCallback(
     (direction: 1 | -1, unresolvedOnly: boolean) => {
@@ -229,12 +239,12 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
 
   const goToResult = useCallback(
     (target: SearchTarget) => {
-      selectFromTree(target.path);
+      selectFromCommand(target.path);
       if (target.line !== null && target.side !== null) {
         column.current?.goToLine(target.path, target.side, target.line);
       }
     },
-    [selectFromTree],
+    [selectFromCommand],
   );
 
   useKeymap({

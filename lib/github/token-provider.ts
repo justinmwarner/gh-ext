@@ -39,12 +39,19 @@ export class ChromeTokenProvider implements TokenProvider {
     return typeof token === 'string' && token !== '' ? token : null;
   }
 
-  /** Passing null or an empty string clears the token. */
+  /**
+   * Passing null or an empty string clears the token.
+   *
+   * Throws for a token that cannot be sent, rather than storing it and letting
+   * it fail opaquely on the first request. See {@link tokenProblem}.
+   */
   async setToken(token: string | null): Promise<void> {
     if (token === null || token.trim() === '') {
       await browser.storage.local.remove(TOKEN_KEY);
       return;
     }
+    const problem = tokenProblem(token);
+    if (problem !== null) throw new Error(problem);
     await browser.storage.local.set({ [TOKEN_KEY]: token.trim() });
   }
 }
@@ -96,4 +103,36 @@ export function isTokenChange(
   // is a normal thing to do from the options page and should not throw away a
   // warm cache that is still valid for it.
   return change.oldValue !== change.newValue;
+}
+
+/**
+ * Why this token cannot be used, or null if it can.
+ *
+ * A token becomes an HTTP header value, and a header value cannot hold a line
+ * break, an interior space or a non-ASCII character. `fetch` refuses one with
+ * "Failed to construct 'Headers': Invalid value" — a TypeError saying nothing
+ * about tokens, which the worker classifies as `unknown` and the page renders
+ * as "Something went wrong", after the options page has already said "Token
+ * saved."
+ *
+ * The realistic way to get one is copying out of a wrapped terminal line, or
+ * out of a document that turned a hyphen into an en dash. Both are worth
+ * catching where the reviewer can still see what they pasted.
+ *
+ * Surrounding whitespace is not a problem — it is trimmed, and a trailing
+ * newline comes with almost every paste. Empty is not a problem either: that
+ * is how the token is cleared.
+ */
+export function tokenProblem(raw: string): string | null {
+  const token = raw.trim();
+  if (token === '') return null;
+
+  if (/\s/.test(token)) {
+    return 'That token contains a space or a line break in the middle. It was probably copied across a wrapped line — paste it again as one piece.';
+  }
+  // Printable ASCII only, which is what a header value may hold.
+  if (!/^[!-~]+$/.test(token)) {
+    return 'That token contains a character GitHub tokens never use — often a smart quote or an en dash picked up from a document. Copy it from GitHub directly.';
+  }
+  return null;
 }

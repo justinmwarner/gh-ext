@@ -111,6 +111,14 @@ function App() {
         tone: 'good',
         text: token.trim() === '' ? 'Token cleared.' : 'Token saved.',
       });
+    } catch (error) {
+      // A token that cannot be sent is refused here, where the reviewer can
+      // still see what they pasted, rather than stored and left to fail as an
+      // unrecognizable TypeError on the first request.
+      setResult({
+        tone: 'bad',
+        text: error instanceof Error ? error.message : 'That token could not be saved.',
+      });
     } finally {
       setBusy(false);
     }

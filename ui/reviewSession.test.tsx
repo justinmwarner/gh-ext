@@ -803,3 +803,49 @@ describe('a token that stops working while the page is open', () => {
     expect(screen.getByTestId('rejected').textContent).toBe('false');
   });
 });
+
+describe('starting a review twice', () => {
+  /**
+   * The button disables on `pending`, which only flips after the mutation
+   * returns, and the session's own guard reads the same state — so a
+   * double-click issues two `addPullRequestReview` calls. The loser costs a
+   * full re-read of the pull request to learn what the winner already knew,
+   * and if GitHub's one-pending-review check is not transactional both can
+   * succeed, orphaning a review this page has no id for.
+   */
+  it('sends one request however fast the button is pressed', async () => {
+    const never = () => new Promise<never>(() => {});
+    requestMock.mockImplementation((msg: { document?: string }) =>
+      msg.document === START_REVIEW ? never() : Promise.resolve({ ok: true, data: {} }),
+    );
+    mount();
+
+    await userEvent.click(screen.getByText('start'));
+    await userEvent.click(screen.getByText('start'));
+
+    expect(
+      requestMock.mock.calls.filter((call) => call[0]?.document === START_REVIEW),
+    ).toHaveLength(1);
+  });
+
+  it('lets a second review be started once the first attempt has finished', async () => {
+    // The guard is for concurrency, not a latch. A refused open must not stop
+    // the reviewer trying again.
+    answerByDocument({ [START_REVIEW]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByText('start'));
+    await waitFor(() =>
+      expect(screen.getByTestId('failures').textContent).toMatch(/GitHub said no/),
+    );
+    requestMock.mockClear();
+
+    await userEvent.click(screen.getByText('start'));
+
+    await waitFor(() =>
+      expect(
+        requestMock.mock.calls.filter((call) => call[0]?.document === START_REVIEW),
+      ).toHaveLength(1),
+    );
+  });
+});

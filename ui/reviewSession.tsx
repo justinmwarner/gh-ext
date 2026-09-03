@@ -776,12 +776,20 @@ export function ReviewSessionProvider({
     [clearFailure, publishThread, queueThread],
   );
 
-  const startReview = useCallback(async (): Promise<boolean> => {
-    // A second review would orphan the first, along with everything queued on
-    // it. The machine refuses the transition; this refuses the request.
-    if (pendingNow.current.kind === 'pending') return true;
+  /**
+   * Whether an open is in flight.
+   *
+   * A ref, not state: the button's `disabled` and the check below both read
+   * state that only moves once the mutation has returned, so a double-click
+   * slips between them and issues two `addPullRequestReview` calls. The loser
+   * costs a full re-read of the pull request to learn what the winner already
+   * knew — and if GitHub's one-pending-review rule is not transactional, both
+   * succeed and one review is orphaned with no id on this page to submit or
+   * delete it.
+   */
+  const startingReview = useRef(false);
 
-    clearFailure(REVIEW_START);
+  const openAndAdopt = useCallback(async (): Promise<boolean> => {
     const opened = await openOrJoinReview();
 
     if (!opened.ok) {
@@ -803,7 +811,26 @@ export function ReviewSessionProvider({
         : { type: 'review-started', reviewId: opened.reviewId },
     );
     return true;
-  }, [clearFailure, fail, openOrJoinReview]);
+  }, [fail, openOrJoinReview]);
+
+  const startReview = useCallback(async (): Promise<boolean> => {
+    // A second review would orphan the first, along with everything queued on
+    // it. The machine refuses the transition; this refuses the request.
+    if (pendingNow.current.kind === 'pending') return true;
+    if (startingReview.current) return false;
+    startingReview.current = true;
+
+    clearFailure(REVIEW_START);
+    try {
+      return await openAndAdopt();
+    } finally {
+      // Cleared however it went: this guards against concurrency, not against
+      // trying again after a refusal.
+      startingReview.current = false;
+    }
+  }, [clearFailure, openAndAdopt]);
+
+
 
   /**
    * Submit the pending review.
