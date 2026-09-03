@@ -105,12 +105,15 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
     page.locator('[data-unanchored="src/gamma.ts"] [data-listed-reason="outdated"]'),
   ).toHaveCount(1);
 
-  // The rail lists every unresolved thread, including the ones the diff cannot
-  // show, and every file is in the tree.
-  for (const thread of THREADS.filter((t) => !t.isResolved)) {
-    await expect(
-      page.locator('.rail').getByText(thread.comments.nodes[0]?.body ?? ''),
-    ).toBeVisible();
+  // The Conversations page lists every thread, including the ones the diff
+  // cannot show, and every file is in the tree.
+  await page.getByRole('tab', { name: 'Conversations' }).click();
+  for (const thread of THREADS) {
+    const entry = page.locator('.rail').getByText(thread.comments.nodes[0]?.body ?? '');
+    // Resolved ones are folded behind a disclosure — present, one click away,
+    // and never dropped.
+    if (thread.isResolved) await page.getByText('1 resolved').click();
+    await expect(entry).toBeVisible();
   }
   for (const path of FILES) {
     await expect(page.locator(`[data-item-path="${path}"]`)).toHaveCount(1);
@@ -119,6 +122,106 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
   // And the fixture answered every request: nothing reached github.com.
   expect(api.operations).toContain('PullRequestReview');
   expect(api.urls).toContain('/repos/acme/widgets/pulls/42');
+});
+
+test('the tree marks which files carry conversations, and follows a resolve', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The one thing no unit test can settle. `@pierre/trees` has no `refresh()`,
+  // its decoration renderer is fixed at construction, and the only way we found
+  // to redraw a row is re-setting the icons — inferred from the package's own
+  // source, on a beta version, against a shadow root jsdom renders differently.
+  // If that inference is wrong, the mark is drawn once and then lies for the
+  // rest of the review.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const row = (path: string) => page.locator(`[data-item-path="${path}"]`);
+
+  // Every file in the fixture carries exactly one open thread except src/app.ts,
+  // which carries an open one and a resolved one — so all four read as open.
+  await expect(row('src/beta.ts')).toContainText('●');
+  await expect(row('src/app.ts')).toContainText('●');
+  // And a file nobody has commented on says nothing at all.
+  await expect(row('src/epsilon.ts')).not.toContainText('●');
+  await expect(row('src/epsilon.ts')).not.toContainText('○');
+
+  // Resolving src/beta.ts's only thread has to flip its mark from open to
+  // settled. Nothing in the file list moves when it does.
+  await page.getByRole('tab', { name: 'Conversations' }).click();
+  await page.locator('.rail').getByText('Out of hunk comment.').click();
+  await page
+    .locator('[data-thread="PRRT_outofhunk"]')
+    .getByRole('button', { name: 'Resolve conversation' })
+    .click();
+
+  await expect(row('src/beta.ts')).toContainText('○');
+  await expect(row('src/beta.ts')).not.toContainText('●');
+  expect(api.operations).toContain('ResolveThread');
+
+  // Every run in the decoration has to measure. The library renders each part
+  // as its own `<span>` inside a flex container, so a part holding an ordinary
+  // space is a flex item whose whole content is collapsible whitespace: it lays
+  // out at zero width, and the counts meet as `+1−1`. Only a layout engine can
+  // see that, which is why it survived from the day the counts shipped.
+  const widths = await page.evaluate(() => {
+    const outer = document
+      .querySelector('file-tree-container')
+      ?.shadowRoot?.querySelector(
+        '[data-item-path="src/app.ts"] [data-item-section="decoration"] span',
+      );
+    return [...(outer?.children ?? [])].map(
+      (part) => part.getBoundingClientRect().width,
+    );
+  });
+  expect(widths).toHaveLength(5);
+  expect(widths.filter((width) => width > 0)).toHaveLength(5);
+});
+
+test('the rail’s reviewer list is not wearing the avatar’s ring', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // Two surfaces emit `reviewer-good`: the top bar's avatar, where it is a
+  // 2px ring around a 20px circle, and the rail's reviewer list, where the
+  // same rule drew a green rule across the full width of the row. Only a
+  // layout engine renders a box-shadow, so nothing until here could see it.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const shadowOf = (selector: string) =>
+    page.locator(selector).first().evaluate((node) => getComputedStyle(node).boxShadow);
+
+  expect(await shadowOf('.reviewer-state.reviewer-good')).toBe('none');
+  // And the avatar it belongs to still has it.
+  expect(await shadowOf('.reviewer.reviewer-good')).not.toBe('none');
+});
+
+test('the rail panel takes only the room its page needs', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The drag is a cap, not a height. The fixture's Overview is short, so a
+  // fixed height would leave a hole between the last reviewer and the tree —
+  // and no amount of dragging closes a hole, it only makes it bigger.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const box = (selector: string) =>
+    page.locator(selector).evaluate((node) => node.getBoundingClientRect().height);
+
+  const panel = await box('.rail-panel');
+  const page1 = await box('.rail-page:not([hidden])');
+
+  expect(panel).toBeGreaterThan(0);
+  expect(panel).toBeLessThan(240);
+  expect(Math.abs(panel - page1)).toBeLessThan(2);
 });
 
 test('scrolling the diff column walks the tree selection forward, in file order', async ({

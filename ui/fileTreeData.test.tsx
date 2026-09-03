@@ -10,13 +10,17 @@ import { describe, expect, it } from 'vitest';
 import type { PatchStatus } from '@/lib/github/types';
 import {
   ADDITION_COLOR,
+  COMMENT_COLOR,
   DELETION_COLOR,
   NOISE_COLOR,
+  SEPARATOR,
+  fileComments,
   gitStatusFor,
   rowDecoration,
   treeGitStatus,
   treePaths,
 } from './fileTreeData';
+import { reviewThread } from './prPayload.fixture';
 import type { ReviewFile } from './reviewFiles';
 
 const file = (overrides: Partial<ReviewFile> = {}): ReviewFile => ({
@@ -91,10 +95,20 @@ describe('rowDecoration', () => {
       title: '12 additions, 3 deletions',
       parts: [
         { text: '+12', color: ADDITION_COLOR },
-        { text: ' ' },
+        { text: SEPARATOR },
         { text: '−3', color: DELETION_COLOR },
       ],
     });
+  });
+
+  it('separates the runs with a space that cannot collapse', () => {
+    // Each part is rendered as its own `<span>` inside a **flex** container, so
+    // a part holding an ordinary space is a flex item whose only content is
+    // collapsible whitespace — it lays out at zero width and the counts run
+    // together as `+12−3`.
+    const parts = rowDecoration(file())?.parts ?? [];
+
+    expect(parts.map((part) => part.text)).toEqual(['+12', ' ', '−3']);
   });
 
   it('still reads as a decoration when nothing was added or removed', () => {
@@ -106,9 +120,11 @@ describe('rowDecoration', () => {
       file({ path: 'package-lock.json', noise: true, additions: 400, deletions: 20 }),
     );
 
-    expect(decoration?.parts.every((part) => part.color === NOISE_COLOR || part.text === ' ')).toBe(
-      true,
-    );
+    expect(
+      decoration?.parts.every(
+        (part) => part.color === NOISE_COLOR || part.text === SEPARATOR,
+      ),
+    ).toBe(true);
     expect(decoration?.title).toMatch(/generated|vendored|lock/i);
   });
 
@@ -116,5 +132,73 @@ describe('rowDecoration', () => {
     // Directories carry no counts of their own, and the git lane already rolls
     // descendants up into a dot.
     expect(rowDecoration(undefined)).toBeNull();
+  });
+});
+
+describe('fileComments', () => {
+  it('counts a file’s threads and how many are still open', () => {
+    const tally = fileComments([
+      reviewThread({ path: 'src/a.ts', line: 4 }),
+      reviewThread({ path: 'src/a.ts', line: 9, isResolved: true }),
+    ]);
+
+    expect(tally.get('src/a.ts')).toEqual({ total: 2, unresolved: 1 });
+  });
+
+  it('keeps a file whose threads are all resolved', () => {
+    // The row still has something to say: this is where the discussion was.
+    const tally = fileComments([
+      reviewThread({ path: 'src/a.ts', isResolved: true }),
+    ]);
+
+    expect(tally.get('src/a.ts')).toEqual({ total: 1, unresolved: 0 });
+  });
+
+  it('leaves a file nobody commented on out of the map entirely', () => {
+    // Absence is the signal `rowDecoration` reads; a zeroed entry would draw a
+    // dot on every row in the tree.
+    expect(fileComments([]).has('src/a.ts')).toBe(false);
+  });
+});
+
+describe('rowDecoration with comments', () => {
+  it('marks an open conversation with a filled dot after the counts', () => {
+    const decoration = rowDecoration(file(), { total: 2, unresolved: 1 });
+
+    expect(decoration?.text).toBe('+12 −3 ●');
+    expect(decoration?.parts.at(-1)).toEqual({ text: '●', color: COMMENT_COLOR });
+    expect(decoration?.title).toMatch(/1 unresolved comment$/);
+  });
+
+  it('marks a settled conversation with a hollow dot instead', () => {
+    // Shape as well as colour. A reader who cannot tell the two colours apart
+    // can still tell a ring from a disc.
+    const decoration = rowDecoration(file(), { total: 3, unresolved: 0 });
+
+    expect(decoration?.text).toBe('+12 −3 ○');
+    expect(decoration?.parts.at(-1)).toEqual({ text: '○', color: NOISE_COLOR });
+    expect(decoration?.title).toMatch(/3 comments, all resolved$/);
+  });
+
+  it('puts the dot last so a narrow rail clips the counts and not the dot', () => {
+    // The decoration lane is right-aligned with overflow hidden, so it is the
+    // start of the cell that disappears first. The counts are already on the
+    // row twice over; the dot is the only place this information exists.
+    const decoration = rowDecoration(file(), { total: 1, unresolved: 1 });
+
+    expect(decoration?.text.endsWith('●')).toBe(true);
+  });
+
+  it('says nothing extra about a file with no conversations', () => {
+    expect(rowDecoration(file(), undefined)?.text).toBe('+12 −3');
+  });
+
+  it('dots a noise file too, because a comment on one still matters', () => {
+    const decoration = rowDecoration(
+      file({ path: 'package-lock.json', noise: true }),
+      { total: 1, unresolved: 1 },
+    );
+
+    expect(decoration?.parts.at(-1)).toEqual({ text: '●', color: COMMENT_COLOR });
   });
 });

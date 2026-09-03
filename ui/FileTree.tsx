@@ -26,7 +26,12 @@ import type {
   FileTreeOptions,
 } from '@pierre/trees';
 import { type CurrentFile, shouldSelectInTree } from './currentFile';
-import { rowDecoration, treeGitStatus, treePaths } from './fileTreeData';
+import {
+  type FileComments,
+  rowDecoration,
+  treeGitStatus,
+  treePaths,
+} from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
 
 /**
@@ -50,6 +55,14 @@ const TREE_ICONS: FileTreeIcons = { set: 'complete', colored: true };
  */
 export interface FileTreeSources {
   files: readonly ReviewFile[];
+  /**
+   * How much conversation each file is carrying, by path.
+   *
+   * Separate from `files` because it comes from a different place and moves on
+   * a different clock: posting a comment or resolving a thread changes this and
+   * leaves the file list exactly as it was.
+   */
+  comments?: ReadonlyMap<string, FileComments>;
   onSelect?: (path: string) => void;
   lastReported?: string | null;
 }
@@ -89,7 +102,9 @@ export function fileTreeOptions(
     initialExpansion: 'open',
     icons: TREE_ICONS,
     renderRowDecoration: ({ item }) =>
-      item.kind === 'directory' ? null : rowDecoration(lookup(item.path)),
+      item.kind === 'directory'
+        ? null
+        : rowDecoration(lookup(item.path), sources.comments?.get(item.path)),
     onSelectionChange(selectedPaths) {
       report(sources, selectedPaths.find(isFilePath) ?? null);
     },
@@ -139,6 +154,12 @@ export interface FileTreeHandle {
 
 export interface FileTreeProps {
   files: readonly ReviewFile[];
+  /**
+   * Conversations per path. Must be referentially stable between renders —
+   * its identity is what triggers a redraw, so a fresh map every render would
+   * re-render the whole tree on every keystroke anywhere on the page.
+   */
+  comments?: ReadonlyMap<string, FileComments>;
   /** The file the review is on, and which surface last moved it. */
   current: CurrentFile;
   /** The reviewer selected or arrow-keyed onto a file. */
@@ -146,11 +167,12 @@ export interface FileTreeProps {
   ref?: Ref<FileTreeHandle>;
 }
 
-export function FileTree({ files, current, onSelect, ref }: FileTreeProps) {
+export function FileTree({ files, comments, current, onSelect, ref }: FileTreeProps) {
   // One object for the whole lifetime of the tree, mutated in place: the
   // options it was constructed from hold this exact reference.
   const [sources] = useState<FileTreeSources>(() => ({ files, onSelect }));
   sources.files = files;
+  sources.comments = comments;
   sources.onSelect = onSelect;
 
   const [options] = useState(() => fileTreeOptions(files, sources));
@@ -173,6 +195,18 @@ export function FileTree({ files, current, onSelect, ref }: FileTreeProps) {
     // what forces the rows to be decorated again.
     model.setIcons(TREE_ICONS);
   }, [model, files]);
+
+  // The same lever again, for the source the tree has even less idea about.
+  // Nothing in `files` moves when a comment is posted or a thread is resolved,
+  // so without this the conversation marks would be drawn once and then stay
+  // wrong for the rest of the review — the failure mode being a file that says
+  // it has nothing outstanding while a reply sits on it unread.
+  const appliedComments = useRef(comments);
+  useEffect(() => {
+    if (appliedComments.current === comments) return;
+    appliedComments.current = comments;
+    model.setIcons(TREE_ICONS);
+  }, [model, comments]);
 
   // Follow the keyboard. Arrow keys move focus and change no selection, so this
   // is the only channel that sees them. `subscribe` fires on every model emit,

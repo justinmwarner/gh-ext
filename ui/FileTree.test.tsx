@@ -12,7 +12,12 @@ import { act, render } from '@testing-library/react';
 import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { FileTreeVisibleRow } from '@pierre/trees';
-import { FileTree, type FileTreeHandle, fileTreeOptions } from './FileTree';
+import {
+  FileTree,
+  type FileTreeHandle,
+  type FileTreeSources,
+  fileTreeOptions,
+} from './FileTree';
 import { NO_FILE } from './currentFile';
 import type { ReviewFile } from './reviewFiles';
 
@@ -115,6 +120,34 @@ describe('fileTreeOptions', () => {
     live.files = [file({ path: 'src/app.ts', additions: 99, deletions: 0 })];
 
     expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+99 −0' });
+  });
+
+  it('decorates a row with the conversations on that row’s file', () => {
+    const options = fileTreeOptions(FILES, {
+      files: FILES,
+      comments: new Map([['src/app.ts', { total: 2, unresolved: 1 }]]),
+    });
+
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3 ●' });
+  });
+
+  it('leaves a row alone when nobody has commented on that file', () => {
+    const options = fileTreeOptions(FILES, {
+      files: FILES,
+      comments: new Map([['src/new.ts', { total: 1, unresolved: 1 }]]),
+    });
+
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3' });
+  });
+
+  it('reads conversations from the current tally, not the one it was built with', () => {
+    // Same reason as the counts above: options are read once, at construction,
+    // so a tally captured by value would freeze at first paint.
+    const live: FileTreeSources = { files: FILES };
+    const options = fileTreeOptions(FILES, live);
+    live.comments = new Map([['src/app.ts', { total: 1, unresolved: 1 }]]);
+
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3 ●' });
   });
 
   it('leaves a directory row undecorated', () => {
@@ -288,6 +321,32 @@ describe('FileTree', () => {
 
     expect(shadow()).toContain('+99');
     expect(shadow()).not.toContain('+12');
+  });
+
+  it('redraws the conversation mark when a thread resolves underneath it', () => {
+    // The same inferred refresh lever as the counts above, driven by a second
+    // source. Thread state lives in the review session, so nothing about the
+    // file list moves when a comment is posted or resolved — without its own
+    // effect the mark would render once at first paint and then lie.
+    const { container, rerender } = mount({
+      comments: new Map([['src/app.ts', { total: 1, unresolved: 1 }]]),
+    });
+    const shadow = () =>
+      container.querySelector('file-tree-container')?.shadowRoot?.textContent ?? '';
+
+    expect(shadow()).toContain('●');
+
+    rerender(
+      <FileTree
+        files={FILES}
+        current={NO_FILE}
+        onSelect={vi.fn()}
+        comments={new Map([['src/app.ts', { total: 1, unresolved: 0 }]])}
+      />,
+    );
+
+    expect(shadow()).toContain('○');
+    expect(shadow()).not.toContain('●');
   });
 
   it('says so when nothing changed', () => {

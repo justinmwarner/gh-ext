@@ -35,14 +35,15 @@ describe('Shell', () => {
     expect(screen.getByRole('main')).toBeDefined();
   });
 
-  it('puts a collapsible Overview at the top of the rail', () => {
+  it('puts the page tabs at the top of the rail, over a panel', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
     const rail = screen.getByRole('complementary');
-    const overview = screen.getByText('Overview');
+    const tabs = screen.getAllByRole('tab');
 
-    expect(rail.contains(overview)).toBe(true);
-    expect(overview.closest('details')).not.toBeNull();
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Conversations']);
+    expect(tabs.every((tab) => rail.contains(tab))).toBe(true);
+    expect(rail.contains(screen.getByRole('tabpanel'))).toBe(true);
   });
 
   it('says when a list was cut short, and offers the way out', () => {
@@ -122,7 +123,9 @@ describe('Shell', () => {
   it('gives the rail a resize handle the keyboard can reach', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
-    const separator = screen.getByRole('separator');
+    // Named, not just found: the rail's handle now shares the page with the
+    // one inside the rail, and they are different separators on different axes.
+    const separator = screen.getByRole('separator', { name: /sidebar/i });
     expect(separator.getAttribute('aria-orientation')).toBe('vertical');
     expect(separator.getAttribute('tabindex')).toBe('0');
   });
@@ -168,8 +171,8 @@ describe('the pending-review footer', () => {
   });
 });
 
-describe('the unresolved thread jump list', () => {
-  it('lists a thread whose file has no card in the column', () => {
+describe('the Conversations page', () => {
+  it('lists a thread whose file has no card in the column', async () => {
     // The per-file unanchorable section is rendered by `CodeView`'s custom
     // header, so it exists only for files the column has drawn. A pull request
     // whose `files` connection was capped still has threads on the files that
@@ -198,12 +201,13 @@ describe('the unresolved thread jump list', () => {
       column.querySelector('[data-thread="PRRT_lib/dropped.ts:3"]'),
     ).toBeNull();
 
-    const list = screen.getByRole('list', { name: /unresolved/i });
-    expect(screen.getByRole('complementary').contains(list)).toBe(true);
-    expect(list.textContent).toContain('lib/dropped.ts');
+    await userEvent.click(screen.getByRole('tab', { name: 'Conversations' }));
+    const panel = screen.getByRole('tabpanel');
+    expect(screen.getByRole('complementary').contains(panel)).toBe(true);
+    expect(panel.textContent).toContain('lib/dropped.ts');
   });
 
-  it('lists threads on files the reviewer has not scrolled to', () => {
+  it('lists threads on files the reviewer has not scrolled to', async () => {
     render(
       <Shell
         retry={() => {}}
@@ -217,8 +221,9 @@ describe('the unresolved thread jump list', () => {
       />,
     );
 
-    const list = screen.getByRole('list', { name: /unresolved/i });
-    expect(list.textContent).toContain('src/deep/last.ts');
+    await userEvent.click(screen.getByRole('tab', { name: 'Conversations' }));
+
+    expect(screen.getByRole('tabpanel').textContent).toContain('src/deep/last.ts');
   });
 });
 

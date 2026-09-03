@@ -1,21 +1,24 @@
 /**
- * The left rail's Overview disclosure.
+ * The rail's Overview page.
  *
- * Four regions, and each one has a way of lying that these tests exist to
+ * Three regions, and each one has a way of lying that these tests exist to
  * prevent: a description that injects HTML, a check list that renders only one
- * arm of the `statusCheckRollup.contexts` union, a reviewer list that drops
- * teams, and a thread jump list that can only see the files already on screen.
+ * arm of the `statusCheckRollup.contexts` union, and a reviewer list that drops
+ * teams.
+ *
+ * Threads are not here. They have a page of their own, because "what is still
+ * outstanding" was the thing a reviewer looks at most and it was at the bottom
+ * of a scrolling box under a description of arbitrary length.
  */
 
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrPayload } from '@/lib/messages';
 import { DraftStore } from '@/lib/review/drafts';
-import { Overview } from './Overview';
+import { OverviewPage } from './OverviewPage';
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
-import { prPayload, pullRequestNode, reviewThread } from './prPayload.fixture';
+import { prPayload, pullRequestNode } from './prPayload.fixture';
 import { ReviewSessionProvider } from './reviewSession';
 
 vi.mock('./background', () => ({ request: vi.fn() }));
@@ -24,10 +27,7 @@ beforeEach(() => {
   (request as unknown as Mock).mockReset();
 });
 
-function mount(
-  payload: PrPayload,
-  options: { paths?: readonly string[]; onJump?: (id: string, path: string) => void } = {},
-) {
+function mount(payload: PrPayload) {
   return render(
     <ReviewSessionProvider
       pullRequest={payload.pullRequest}
@@ -35,11 +35,7 @@ function mount(
       threads={payload.threads}
       drafts={new DraftStore(memoryStore())}
     >
-      <Overview
-        payload={payload}
-        paths={options.paths ?? []}
-        onJumpToThread={options.onJump ?? (() => {})}
-      />
+      <OverviewPage payload={payload} />
     </ReviewSessionProvider>,
   );
 }
@@ -190,57 +186,5 @@ describe('the reviewers', () => {
     );
 
     expect(screen.getByText(/no reviewers/i)).toBeDefined();
-  });
-});
-
-describe('the unresolved thread jump list', () => {
-  const payloadWithThreads = (threads: PrPayload['threads']): PrPayload =>
-    prPayload({ threads });
-
-  it('lists every unresolved thread and no resolved ones', () => {
-    mount(
-      payloadWithThreads([
-        reviewThread({ path: 'src/app.ts', line: 4 }),
-        reviewThread({ path: 'README.md', line: 9, isResolved: true }),
-      ]),
-      { paths: ['src/app.ts', 'README.md'] },
-    );
-
-    const list = screen.getByRole('list', { name: /unresolved/i });
-    expect(list.textContent).toContain('src/app.ts');
-    expect(list.textContent).not.toContain('README.md');
-  });
-
-  it('lists a thread on a file the diff column has not rendered', () => {
-    // The per-file unanchorable section only exists once CodeView has drawn
-    // that item, so this list is the only global index. A thread whose file is
-    // not on screen — or not in the diff at all — would otherwise be invisible.
-    mount(
-      payloadWithThreads([reviewThread({ path: 'lib/dropped.ts', line: 3 })]),
-      { paths: ['src/app.ts'] },
-    );
-
-    const list = screen.getByRole('list', { name: /unresolved/i });
-    expect(list.textContent).toContain('lib/dropped.ts');
-    expect(list.textContent).toMatch(/not in this diff/i);
-  });
-
-  it('asks the column to jump when an entry is pressed', async () => {
-    const onJump = vi.fn();
-    const user = userEvent.setup();
-    mount(payloadWithThreads([reviewThread({ path: 'src/app.ts', line: 4 })]), {
-      paths: ['src/app.ts'],
-      onJump,
-    });
-
-    await user.click(screen.getByRole('button', { name: /src\/app\.ts/ }));
-
-    expect(onJump).toHaveBeenCalledWith('PRRT_src/app.ts:4', 'src/app.ts');
-  });
-
-  it('says so when nothing is outstanding', () => {
-    mount(payloadWithThreads([]), { paths: ['src/app.ts'] });
-
-    expect(screen.getByText(/no unresolved comments/i)).toBeDefined();
   });
 });

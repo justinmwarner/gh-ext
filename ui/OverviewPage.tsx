@@ -1,16 +1,12 @@
 /**
- * The left rail's Overview disclosure.
+ * The rail's Overview page: what the diff column cannot show about the change.
  *
- * Four things the diff column cannot show, in the order a reviewer wants them:
- * what this change claims to do, whether CI agrees, who else has looked, and
- * what is still outstanding.
+ * Three things, in the order a reviewer wants them: what this change claims to
+ * do, whether CI agrees, and who else has looked.
  *
- * The last of those is not a convenience. A file's unanchorable-thread section
- * is rendered by `CodeView`'s custom header, so it exists only once the column
- * has drawn that file — and `files` is capped while `reviewThreads` is followed
- * separately, so some threads have no file card at all. This list is therefore
- * the only global index of open threads in the application, and it lists them
- * whether or not the column can scroll to them.
+ * What is *outstanding* used to be a fourth section here, and it has moved to
+ * the Conversations page. It is the thing a reviewer returns to most, and it
+ * sat below a description of arbitrary length.
  */
 
 import { useMemo } from 'react';
@@ -19,14 +15,9 @@ import { type CheckContext, checksSummary } from './checks';
 import { htmlToParagraphs } from './prBody';
 import { prPermalink, prReviewers } from './prNode';
 import { reviewerLabel, reviewerTone } from './reviewerLabel';
-import { useReviewSession } from './reviewSession';
-import { unresolvedJumps } from './reviewThreads';
 
-export interface OverviewProps {
+export interface OverviewPageProps {
   payload: PrPayload;
-  /** The paths the diff column has cards for, in the order it shows them. */
-  paths: readonly string[];
-  onJumpToThread: (threadId: string, path: string) => void;
 }
 
 function Description({ payload }: { payload: PrPayload }) {
@@ -119,48 +110,7 @@ function Reviewers({ payload }: { payload: PrPayload }) {
   );
 }
 
-function Unresolved({
-  paths,
-  onJumpToThread,
-}: {
-  paths: readonly string[];
-  onJumpToThread: OverviewProps['onJumpToThread'];
-}) {
-  const session = useReviewSession();
-  const jumps = useMemo(
-    () => unresolvedJumps(session.threads, paths),
-    [session.threads, paths],
-  );
-
-  if (jumps.length === 0) {
-    return <p className="placeholder">No unresolved comments.</p>;
-  }
-
-  return (
-    <ul className="jump-list" aria-label="Unresolved comments">
-      {jumps.map((jump) => (
-        <li key={jump.threadId}>
-          <button
-            type="button"
-            className="jump-entry"
-            onClick={() => onJumpToThread(jump.threadId, jump.path)}
-          >
-            <span className="jump-path">{jump.path}</span>
-            <span className="jump-position">{jump.position}</span>
-            {jump.excerpt !== '' && <span className="jump-excerpt">{jump.excerpt}</span>}
-            {!jump.inDiff && (
-              // The column has no card to scroll to. Saying so is the whole
-              // reason this entry is here rather than dropped.
-              <span className="jump-absent">Not in this diff</span>
-            )}
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function Overview({ payload, paths, onJumpToThread }: OverviewProps) {
+export function OverviewPage({ payload }: OverviewPageProps) {
   return (
     <div className="overview-body">
       <section className="overview-section">
@@ -176,11 +126,6 @@ export function Overview({ payload, paths, onJumpToThread }: OverviewProps) {
       <section className="overview-section">
         <h2>Reviewers</h2>
         <Reviewers payload={payload} />
-      </section>
-
-      <section className="overview-section">
-        <h2>Unresolved comments</h2>
-        <Unresolved paths={paths} onJumpToThread={onJumpToThread} />
       </section>
     </div>
   );

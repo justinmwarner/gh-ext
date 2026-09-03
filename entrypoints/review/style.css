@@ -309,16 +309,20 @@ code {
   color: light-dark(#59636e, #9198a1);
 }
 
+/* Qualified on `.reviewer`, and it has to be. The rail's reviewer list emits
+   the same `reviewer-good` / `reviewer-bad` tone class on its rows, so an
+   unqualified rule put a 2px ring meant for a 20px avatar around a full-width
+   list item — which reads as a green rule drawn under every approval. */
 .reviewer {
   border-radius: 50%;
   box-shadow: 0 0 0 2px light-dark(#d1d9e0, #3d444d);
 }
 
-.reviewer-good {
+.reviewer.reviewer-good {
   box-shadow: 0 0 0 2px light-dark(#1f883d, #3fb950);
 }
 
-.reviewer-bad {
+.reviewer.reviewer-bad {
   box-shadow: 0 0 0 2px light-dark(#cf222e, #f85149);
 }
 
@@ -351,16 +355,101 @@ code {
   border-right: 1px solid light-dark(#d1d9e0, #3d444d);
 }
 
-.overview {
+/* The tab strip runs full-bleed across the rail's padding so its rule meets
+   both edges, the way a tab strip has to for the underline to read as one. */
+.rail-tabs {
+  display: flex;
   flex: 0 0 auto;
-  max-height: 40%;
+  gap: 2px;
+  margin: -12px -12px 0;
+  padding: 0 12px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.rail-tab {
+  position: relative;
+  padding: 10px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: light-dark(#59636e, #9198a1);
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.rail-tab:hover {
+  color: inherit;
+}
+
+.rail-tab-active {
+  color: inherit;
+  font-weight: 600;
+}
+
+/* On a pseudo-element rather than a real border, so selecting a tab does not
+   move its label by the border's width. Inset by the padding so the rule sits
+   under the word and not under the whole hit target. */
+.rail-tab-active::after {
+  content: '';
+  position: absolute;
+  inset: auto 8px -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: light-dark(#0969da, #4493f8);
+}
+
+/* The drag sets a cap, not a height. An Overview with no description would
+   otherwise leave a hole above the tree that nothing can close. The 60% is the
+   same cap again for a short window, where a pixel maximum would leave the tree
+   nothing — and a tree with no room measures zero and renders no rows at all. */
+.rail-panel {
+  display: flex;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(var(--panel-max, 240px), 60%);
+  overflow: hidden;
+}
+
+.rail-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 8px;
   overflow-y: auto;
 }
 
-.overview summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 4px 0;
+/* `hidden` has to beat the flex display above it. */
+.rail-page[hidden] {
+  display: none;
+}
+
+/* Focusable so the panel can be scrolled from the keyboard, but it is not a
+   control: the ring belongs around its content, not tight to a scrollport. */
+.rail-page:focus-visible {
+  outline-offset: -2px;
+}
+
+.panel-resizer {
+  flex: 0 0 auto;
+  /* 13px of target, 3px of paint, the same trick as the rail's own handle —
+     and it supplies the gap above the tree, which is why `.filetree` no longer
+     has a margin of its own. */
+  height: 13px;
+  padding: 5px 0;
+  margin: 0 -12px;
+  background-clip: content-box;
+  background-color: transparent;
+  cursor: row-resize;
+}
+
+.panel-resizer:hover,
+.panel-resizer:focus-visible {
+  background-color: light-dark(#0969da, #4493f8);
+}
+
+.panel-resizer:focus-visible {
+  outline-offset: 0;
 }
 
 /* The tree owns the remaining height and does its own scrolling. */
@@ -368,7 +457,6 @@ code {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
-  margin-top: 8px;
 }
 
 /* An explicit height, not an inherited one. The tree virtualizes against this
@@ -397,6 +485,13 @@ code {
      1px, inside, and a different blue, so tabbing across the seam changed
      the ring's width, position and hue. */
   --trees-focus-ring-color-override: light-dark(#0969da, #4493f8);
+
+  /* The conversation mark. Not one of the tree's own names — it inherits into
+     the shadow root from here, which is the only way a colour reaches a row
+     decoration the page cannot select. Amber rather than a fourth blue: the
+     row already carries green and red counts and a coloured git letter, and
+     this is the page's one "needs your attention" hue. */
+  --comment-dot-color: light-dark(#9a6700, #d29922);
 }
 
 .rail-resizer {
@@ -877,10 +972,10 @@ code {
   margin-top: 8px;
 }
 
-/* -------------------------------------------------------------- overview */
+/* --------------------------------------------------------- rail pages */
 
-/* The Overview is capped and scrolls on its own (see `.overview` above), so a
-   long description cannot push the file tree off the bottom of the rail. */
+/* Both pages scroll inside `.rail-panel`, which is capped, so neither a long
+   description nor a long thread list can push the file tree off the bottom. */
 
 .overview-body {
   font-size: 13px;
@@ -972,25 +1067,77 @@ code {
   background: light-dark(#eef1f4, #262c36);
 }
 
-.jump-path {
-  display: block;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
 .jump-position,
-.jump-excerpt,
-.jump-absent {
+.jump-excerpt {
   display: block;
   font-size: 12px;
   color: light-dark(#59636e, #9198a1);
   overflow-wrap: anywhere;
 }
 
-/* A thread whose file has no card in the column. Listed rather than dropped,
+/* The position is what identifies the entry; the excerpt is what recognizes
+   it. One line of each, so a long comment cannot make one entry as tall as
+   the panel. */
+.jump-position {
+  font-weight: 600;
+  color: inherit;
+}
+
+.jump-excerpt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------- conversations page */
+
+.conversation-group + .conversation-group {
+  margin-top: 10px;
+}
+
+.conversation-path {
+  margin: 0 0 2px;
+  padding: 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* Truncate the directory, not the name — the same reason and the same
+     mechanism as `.file-path`. The span is what makes it work: reversing the
+     block's direction without isolating its text reorders the path itself. */
+  direction: rtl;
+  text-align: left;
+}
+
+.conversation-path > span {
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
+/* A file whose threads have no card in the column. Listed rather than dropped,
    and marked so the reviewer is not left wondering why nothing moved. */
-.jump-absent {
+.conversation-absent {
+  margin: 0 0 2px;
+  padding: 0 8px;
+  font-size: 12px;
   color: light-dark(#9a6700, #d29922);
+}
+
+/* Settled business, one line until asked for — the same treatment a resolved
+   thread gets in the diff column, for the same reason. */
+.conversation-resolved > summary {
+  padding: 3px 8px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.conversation-resolved > summary:hover {
+  background: light-dark(#eef1f4, #262c36);
 }
 
 /* --------------------------------------------------- pending review footer */

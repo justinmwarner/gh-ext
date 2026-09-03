@@ -17,8 +17,8 @@ import {
   orderedThreads,
   renderedLines,
   sourceLines,
+  threadGroups,
   threadPosition,
-  unresolvedJumps,
 } from './reviewThreads';
 import { reviewThread } from './prPayload.fixture';
 
@@ -246,9 +246,26 @@ describe('sourceLines', () => {
   });
 });
 
-describe('unresolvedJumps', () => {
-  it('lists only unresolved threads', () => {
-    const jumps = unresolvedJumps(
+describe('threadGroups', () => {
+  it('gathers a file’s threads under one heading', () => {
+    const groups = threadGroups(
+      [
+        reviewThread({ path: 'src/app.ts', line: 2 }),
+        reviewThread({ path: 'README.md', line: 1 }),
+        reviewThread({ path: 'src/app.ts', line: 9 }),
+      ],
+      ['README.md', 'src/app.ts'],
+    );
+
+    expect(groups.map((group) => group.path)).toEqual(['README.md', 'src/app.ts']);
+    expect(groups[1]?.open.map((entry) => entry.threadId)).toEqual([
+      'PRRT_src/app.ts:2',
+      'PRRT_src/app.ts:9',
+    ]);
+  });
+
+  it('separates what is settled from what is not', () => {
+    const groups = threadGroups(
       [
         reviewThread({ path: 'src/app.ts', line: 2 }),
         reviewThread({ path: 'src/app.ts', line: 9, isResolved: true }),
@@ -256,42 +273,29 @@ describe('unresolvedJumps', () => {
       ['src/app.ts'],
     );
 
-    expect(jumps.map((jump) => jump.threadId)).toEqual(['PRRT_src/app.ts:2']);
-  });
-
-  it('orders by the column, then by line within a file', () => {
-    const jumps = unresolvedJumps(
-      [
-        reviewThread({ path: 'src/app.ts', line: 9 }),
-        reviewThread({ path: 'README.md', line: 1 }),
-        reviewThread({ path: 'src/app.ts', line: 2 }),
-      ],
-      ['README.md', 'src/app.ts'],
-    );
-
-    expect(jumps.map((jump) => jump.threadId)).toEqual([
-      'PRRT_README.md:1',
+    expect(groups[0]?.open.map((entry) => entry.threadId)).toEqual([
       'PRRT_src/app.ts:2',
+    ]);
+    expect(groups[0]?.resolved.map((entry) => entry.threadId)).toEqual([
       'PRRT_src/app.ts:9',
     ]);
   });
 
-  it('keeps a thread whose file is not in the diff, and says so', () => {
-    // `files` is capped and threads are not, so a large pull request really can
-    // carry comments on files the column never received. Dropping them here
-    // would make them invisible: this list is the only global index of threads.
-    const jumps = unresolvedJumps(
-      [reviewThread({ path: 'lib/dropped.ts', line: 3 })],
+  it('keeps a file whose threads are all resolved', () => {
+    // Folded away, not dropped. A resolved thread on a file the column never
+    // received has no other surface in the application at all.
+    const groups = threadGroups(
+      [reviewThread({ path: 'src/app.ts', line: 2, isResolved: true })],
       ['src/app.ts'],
     );
 
-    expect(jumps.length).toBe(1);
-    expect(jumps[0]?.path).toBe('lib/dropped.ts');
-    expect(jumps[0]?.inDiff).toBe(false);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.open).toEqual([]);
+    expect(groups[0]?.resolved).toHaveLength(1);
   });
 
-  it('puts files the column knows about first', () => {
-    const jumps = unresolvedJumps(
+  it('puts files the column knows about first, and marks the rest', () => {
+    const groups = threadGroups(
       [
         reviewThread({ path: 'zzz/absent.ts', line: 1 }),
         reviewThread({ path: 'src/app.ts', line: 1 }),
@@ -299,20 +303,24 @@ describe('unresolvedJumps', () => {
       ['src/app.ts'],
     );
 
-    expect(jumps.map((jump) => jump.path)).toEqual(['src/app.ts', 'zzz/absent.ts']);
+    expect(groups.map((group) => [group.path, group.inDiff])).toEqual([
+      ['src/app.ts', true],
+      ['zzz/absent.ts', false],
+    ]);
   });
 
-  it('carries something to recognize the thread by', () => {
-    const jumps = unresolvedJumps([reviewThread({ path: 'src/app.ts', line: 2 })], [
-      'src/app.ts',
-    ]);
+  it('carries something to recognize each thread by', () => {
+    const groups = threadGroups(
+      [reviewThread({ path: 'src/app.ts', line: 2 })],
+      ['src/app.ts'],
+    );
 
-    expect(jumps[0]?.position).toBe('Line 2');
-    expect(jumps[0]?.excerpt).toContain('This allocates');
+    expect(groups[0]?.open[0]?.position).toBe('Line 2');
+    expect(groups[0]?.open[0]?.excerpt).toContain('This allocates');
   });
 
   it('sorts an outdated thread with no line last within its file', () => {
-    const jumps = unresolvedJumps(
+    const groups = threadGroups(
       [
         reviewThread({
           path: 'src/app.ts',
@@ -326,10 +334,14 @@ describe('unresolvedJumps', () => {
       ['src/app.ts'],
     );
 
-    expect(jumps.map((jump) => jump.threadId)).toEqual([
+    expect(groups[0]?.open.map((entry) => entry.threadId)).toEqual([
       'PRRT_src/app.ts:9',
       'PRRT_src/app.ts:none',
     ]);
+  });
+
+  it('has nothing to say about a pull request with no comments', () => {
+    expect(threadGroups([], ['src/app.ts'])).toEqual([]);
   });
 });
 

@@ -21,7 +21,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PrPayload } from '@/lib/messages';
 import { DiffColumn, type DiffColumnHandle, type ThreadJump } from './DiffColumn';
-import { RailResizer } from './RailResizer';
+import { Resizer } from './Resizer';
 import { ReviewFooter } from './ReviewFooter';
 import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
@@ -39,8 +39,11 @@ import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 import { orderedThreads } from './reviewThreads';
 import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
 import { useCompareDiff } from './useCompareDiff';
+import { useDragSize } from './useDragSize';
 import { useKeymap } from './useKeymap';
-import { useRailWidth } from './useRailWidth';
+
+/** Wide enough for a deep path, narrow enough to leave the diff its width. */
+const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
 
 /** Which overlay is open. Only ever one: they all want the same keystrokes. */
 type Overlay = { kind: 'none' } | { kind: 'help' } | { kind: 'search'; mode: SearchMode };
@@ -80,7 +83,7 @@ export function Shell({
 }
 
 function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => void }) {
-  const rail = useRailWidth();
+  const rail = useDragSize(RAIL);
   const session = useReviewSession();
   const targets = useShortcutTargets();
 
@@ -302,14 +305,21 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
       {session.tokenRejected && <TokenRejectedNotice retry={retry} />}
       <div className="shell-body">
         <SideRail
-          width={rail.width}
+          width={rail.size}
           payload={payload}
           files={files}
           current={current}
           onSelect={selectFromTree}
           onJumpToThread={jumpToThread}
         />
-        <RailResizer {...rail} />
+        <Resizer
+          {...rail}
+          className="rail-resizer"
+          orientation="vertical"
+          label="Resize the sidebar"
+          min={RAIL.min}
+          max={RAIL.max}
+        />
         <DiffColumn
           ref={column}
           files={files}
