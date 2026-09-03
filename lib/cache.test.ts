@@ -264,3 +264,60 @@ describe('writeGenerations', () => {
     expect(generations.fresh('acme/widgets/42')()).toBe(true);
   });
 });
+
+describe('forgetting superseded commits', () => {
+  /**
+   * Cache keys embed the head SHA, so a force-push makes every entry for the
+   * old one unreachable — and eviction only happens on read, which those keys
+   * never get again. `storage.session` caps at a few megabytes; once it is
+   * full every write is refused, the worker swallows the failure as a warning,
+   * and from then on the extension re-fetches everything on every load with
+   * nothing on screen to say why.
+   */
+  const key = (slot: string, sha: string) => `${slot}:acme/widgets/42@${sha}`;
+
+  it('drops the entries for a head commit that has moved on', async () => {
+    const store = memoryStore();
+    const cache = new PrCache(store);
+    await cache.set('diff', { owner: 'acme', repo: 'widgets', number: 42, headSha: 'old' }, 1);
+    await cache.set('pr', { owner: 'acme', repo: 'widgets', number: 42, headSha: 'old' }, 2);
+
+    await cache.forgetOtherCommits({ owner: 'acme', repo: 'widgets', number: 42 }, 'new');
+
+    expect(await store.get(key('diff', 'old'))).toBeNull();
+    expect(await store.get(key('pr', 'old'))).toBeNull();
+  });
+
+  it('keeps the commit that is current', async () => {
+    const store = memoryStore();
+    const cache = new PrCache(store);
+    await cache.set('diff', { owner: 'acme', repo: 'widgets', number: 42, headSha: 'new' }, 1);
+
+    await cache.forgetOtherCommits({ owner: 'acme', repo: 'widgets', number: 42 }, 'new');
+
+    expect(await store.get(key('diff', 'new'))).not.toBeNull();
+  });
+
+  it('leaves other pull requests alone', async () => {
+    // Reviewing several at once is ordinary, and one force-push says nothing
+    // about the others.
+    const store = memoryStore();
+    const cache = new PrCache(store);
+    await cache.set('diff', { owner: 'acme', repo: 'widgets', number: 99, headSha: 'old' }, 1);
+
+    await cache.forgetOtherCommits({ owner: 'acme', repo: 'widgets', number: 42 }, 'new');
+
+    expect(await store.get('diff:acme/widgets/99@old')).not.toBeNull();
+  });
+
+  it('leaves the head pointer alone', async () => {
+    // It is not slot-qualified and is the thing that finds everything else.
+    const store = memoryStore();
+    await store.set('head:acme/widgets/42', 'new');
+    const cache = new PrCache(store);
+
+    await cache.forgetOtherCommits({ owner: 'acme', repo: 'widgets', number: 42 }, 'new');
+
+    expect(await store.get('head:acme/widgets/42')).toBe('new');
+  });
+});

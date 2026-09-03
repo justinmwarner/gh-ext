@@ -487,6 +487,10 @@ export async function assemblePullRequest(
     ports.cacheWrite(() => ports.cache.set('diff', ref, diff));
   }
   ports.cacheWrite(() => ports.store.set(headPointerKey(pr), ref.headSha));
+  // Written alongside the new pointer, because this is the moment the old
+  // commit's entries become unreachable: keys embed the head SHA, and nothing
+  // will ever read those again to evict them.
+  ports.cacheWrite(() => ports.cache.forgetOtherCommits(pr, ref.headSha));
   ports.cacheWrite(() => ports.cache.set('pr', ref, fullNode));
   ports.cacheWrite(() => ports.cache.set('threads', ref, threads.nodes));
   ports.cacheWrite(() => ports.cache.set('checks', ref, checks));

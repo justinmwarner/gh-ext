@@ -53,6 +53,15 @@ const IMMUTABLE: Record<CacheSlot, boolean> = {
 };
 
 /**
+ * Every slot, for sweeping.
+ *
+ * Read off the record above rather than listed again. A second list would be
+ * one more thing to remember when a slot is added, and forgetting it here
+ * fails silently — the new slot simply never gets swept.
+ */
+const SLOTS = Object.keys(IMMUTABLE) as CacheSlot[];
+
+/**
  * How long mutable slots stay usable.
  *
  * Short on purpose: a stale thread list is worse than a slightly slower page,
@@ -150,6 +159,35 @@ export class PrCache {
     }
 
     return { hit: true, value: parsed.v as T };
+  }
+
+  /**
+   * Drop everything cached for this pull request at any other head commit.
+   *
+   * Keys embed the head SHA, so a force-push — or any new push — makes every
+   * entry for the previous one unreachable. Eviction happens on read, and
+   * those keys are never read again, so they accumulate for the life of the
+   * browser session. `diff` entries are the worst of it: they hold a whole
+   * parsed patch and carry no expiry at all, because a diff between two
+   * commits genuinely cannot change.
+   *
+   * The failure at the end of that is silent. `storage.session` has a quota;
+   * once it is full every write is refused, the worker logs a warning nobody
+   * reads, and the extension quietly degrades to re-fetching the entire pull
+   * request on every load with nothing on screen to explain the slowdown.
+   *
+   * The head pointer is left alone: it is not slot-qualified, and it is the
+   * thing that finds everything else.
+   */
+  async forgetOtherCommits(pr: PrRef, headSha: string): Promise<void> {
+    const prefixes = SLOTS.map((slot) => `${slot}:${pr.owner}/${pr.repo}/${pr.number}@`);
+    const keys = await this.store.keys();
+    const stale = keys.filter((key) => {
+      const prefix = prefixes.find((candidate) => key.startsWith(candidate));
+      return prefix !== undefined && key.slice(prefix.length) !== headSha;
+    });
+    // All of them attempted: a half-swept cache is still growing.
+    await Promise.allSettled(stale.map((key) => this.store.remove(key)));
   }
 
   async set<T>(slot: CacheSlot, ref: PrCacheRef, value: T): Promise<void> {
