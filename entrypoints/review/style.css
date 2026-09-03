@@ -89,6 +89,18 @@ code {
 
 /* ---------------------------------------------------------------- controls */
 
+/* The tree transitions its own rows; without this, hovering a tree row fades
+   and hovering the jump entry directly below it snaps. Colour only — nothing
+   here moves, so there is nothing for reduced-motion to suppress. */
+.button,
+.jump-entry,
+.search-result,
+.collapse-toggle {
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -195,15 +207,30 @@ code {
   align-items: center;
   gap: 6px;
   color: light-dark(#59636e, #9198a1);
+  /* Every neighbour in the bar is nowrap and refuses to shrink, so this is
+     what absorbs the squeeze — and the bar has a fixed height, so wrapping
+     spills over its bottom border onto the rail. */
+  min-width: 0;
 }
 
 .branches code {
   padding: 1px 6px;
   border-radius: 6px;
   background: light-dark(#f6f8fa, #212830);
+  /* The full name is already on the element's `title`. */
+  max-width: 16ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* ----------------------------------------------------------------- badges */
+
+/* A transparent border so the two keep the same box: `.chip` adds a real one
+   below, and without this they sat 2px apart in the same 52px bar. */
+.badge {
+  border: 1px solid transparent;
+}
 
 .badge,
 .chip {
@@ -348,6 +375,10 @@ code {
    element's scrollport, and without a resolved height it paints against a
    fallback of 420px once and then measures zero. */
 .filetree-host {
+  /* The tree indents its rows by its own inline padding on top of the rail's,
+     which put tree rows 24px further in than the Overview headings directly
+     above them. */
+  --trees-padding-inline-override: 0px;
   flex: 1 1 auto;
   min-width: 0;
   height: 100%;
@@ -371,15 +402,27 @@ code {
 .rail-resizer {
   flex: 0 0 auto;
   align-self: stretch;
-  width: 5px;
-  margin-left: -3px;
+  /* 13px of target, 5px of paint. `background-clip: content-box` keeps the
+     visible bar exactly as it was while giving the pointer something it can
+     actually catch; the negative margins keep the layout unchanged. */
+  width: 13px;
+  padding: 0 4px;
+  background-clip: content-box;
+  margin-left: -7px;
+  margin-right: -5px;
   cursor: col-resize;
-  background: transparent;
+  background-color: transparent;
 }
 
 .rail-resizer:hover,
 .rail-resizer:focus-visible {
-  background: light-dark(#0969da, #4493f8);
+  background-color: light-dark(#0969da, #4493f8);
+}
+
+/* The global ring sits 1px outside, which around a 5px bar draws a blue blob
+   rather than a focus indicator. */
+.rail-resizer:focus-visible {
+  outline-offset: 0;
 }
 
 .column {
@@ -443,10 +486,24 @@ code {
 
 .file-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 13px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /* Truncate the directory, not the name. `packages/app/src/components/very/
+     deep/Thing.tsx` was rendering as `packages/app/src/components/very/de…`,
+     cutting the one part the reviewer needs. Pierre's own file header does
+     the same thing for the same reason. */
+  direction: rtl;
+  text-align: left;
+}
+
+/* Kept left-to-right inside the reversed container, so a rename arrow and any
+   punctuation in the name do not flip. This is the CSS form of Pierre's
+   <bdi>. */
+.file-path > * {
+  unicode-bidi: isolate;
+  direction: ltr;
 }
 
 .file-path-old {
@@ -718,12 +775,6 @@ code {
   background: light-dark(#eaffea, #12261e);
 }
 
-.suggestion-apply {
-  display: inline-block;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
 .thread-more,
 .unanchored-reason {
   margin: 6px 0 0;
@@ -906,7 +957,8 @@ code {
 .jump-entry {
   display: block;
   width: 100%;
-  padding: 4px 6px;
+  /* 8px, so this row's text starts where a tree row's does. */
+  padding: 4px 8px;
   font: inherit;
   text-align: left;
   color: inherit;
@@ -968,9 +1020,11 @@ code {
 }
 
 .review-summary-input {
+  /* 30px, matching `.button` beside it and Pierre's own row height. It was
+     32px, which is visible in a flex row that centres them. */
   flex: 1 1 220px;
   min-width: 160px;
-  height: 32px;
+  height: 30px;
   padding: 5px 8px;
   font: inherit;
   font-size: 13px;
@@ -1064,8 +1118,8 @@ code {
   width: min(680px, calc(100vw - 32px));
   max-height: 70vh;
   overflow: hidden;
-  background: light-dark(#ffffff, #161b22);
-  border: 1px solid light-dark(#d0d7de, #30363d);
+  background: light-dark(#ffffff, #151b23);
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
   border-radius: 8px;
   box-shadow: 0 8px 24px light-dark(rgb(140 149 159 / 20%), rgb(1 4 9 / 60%));
 }
@@ -1076,7 +1130,7 @@ code {
   justify-content: space-between;
   gap: var(--gap);
   padding: 12px 16px;
-  border-bottom: 1px solid light-dark(#d0d7de, #30363d);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
 }
 
 .overlay-head h2 {
@@ -1092,7 +1146,7 @@ code {
 
 .shortcut-group {
   padding: 12px 16px;
-  border-bottom: 1px solid light-dark(#d8dee4, #21262d);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
 }
 
 .shortcut-group:last-child {
@@ -1105,7 +1159,7 @@ code {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: light-dark(#656d76, #8b949e);
+  color: light-dark(#59636e, #9198a1);
 }
 
 .shortcut-list {
@@ -1135,25 +1189,29 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 18px;
-  background: light-dark(#f6f8fa, #21262d);
-  border: 1px solid light-dark(#d0d7de, #30363d);
+  background: light-dark(#f6f8fa, #212830);
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
   border-bottom-width: 2px;
   border-radius: 4px;
 }
 
 .shortcut-or {
-  color: light-dark(#656d76, #8b949e);
+  color: light-dark(#59636e, #9198a1);
 }
 
 /* ------------------------------------------------------------- search panel */
 
 .search-input {
+  /* Matched to the panel it is the first child of, which is `overflow:
+     hidden` with an 8px radius — a square focus rectangle inside it loses
+     its two top corners. */
+  border-radius: 8px 8px 0 0;
   padding: 12px 16px;
   font: inherit;
   color: inherit;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid light-dark(#d0d7de, #30363d);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
   outline-offset: -2px;
 }
 
@@ -1197,14 +1255,14 @@ code {
 .search-result-path {
   flex: 0 0 auto;
   font-size: 12px;
-  color: light-dark(#656d76, #8b949e);
+  color: light-dark(#59636e, #9198a1);
 }
 
 .search-result-line {
   flex: 0 0 auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: light-dark(#656d76, #8b949e);
+  color: light-dark(#59636e, #9198a1);
 }
 
 /* The changed line itself. Clipped rather than wrapped: a minified file has
@@ -1226,7 +1284,7 @@ code {
 .search-empty {
   margin: 0;
   padding: 16px;
-  color: light-dark(#656d76, #8b949e);
+  color: light-dark(#59636e, #9198a1);
 }
 
 /* ------------------------------------------- not posted yet
@@ -1259,4 +1317,48 @@ code {
 .composer-target-queued {
   color: light-dark(#7d4e00, #e3b341);
   font-weight: 600;
+}
+
+/* ------------------------------------------------- states with no styling */
+
+/*
+ * Three classes were being rendered by components with no rule anywhere, so
+ * the state each names was invisible. They are not decoration: each one is the
+ * page trying to say something it was not, in the end, saying.
+ */
+
+/* A composer GitHub refused looked byte-identical to a working one — same
+   confident blue border — while holding text that cannot be posted. */
+.composer-rejected {
+  border-color: light-dark(#cf222e, #f85149);
+}
+
+/* An optimistic comment, still in flight. Only the literal word "Sending…"
+   distinguished it from one that had actually landed. */
+.comment-sending {
+  opacity: 0.6;
+}
+
+.comment-pending {
+  font-style: italic;
+  color: light-dark(#59636e, #9198a1);
+}
+
+/* A link that stands in for a control. It had padding and no colour, so it
+   read as a padded default link. */
+.suggestion-apply {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: 13px;
+  line-height: 20px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#f6f8fa, #212830);
+  text-decoration: none;
+}
+
+.suggestion-apply:hover {
+  background: light-dark(#eef1f4, #262c36);
+  text-decoration: none;
 }
