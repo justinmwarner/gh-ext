@@ -1,10 +1,15 @@
 /**
- * The loaded layout: top bar, resizable rail, diff column.
+ * The loaded layout: an identity bar, a view switcher, and one of three views.
  *
- * Deliberately the same shape as GitHub's Files-changed tab. A reviewer who
- * arrives here from that page should not have to find anything twice.
+ * The views are all mounted and the inactive ones are hidden with
+ * `visibility`, never `display: none`. Both Pierre surfaces virtualize against
+ * a scrollport they measure, and `display: none` takes that measurement to
+ * zero — on the way back the column would have to rediscover its own height,
+ * and `CodeView` offers nothing that asks it to. `visibility: hidden` leaves
+ * the layout exactly where it was, so switching views costs the diff nothing:
+ * not its scroll position, not its expanded context, not its mounted rows.
  *
- * It also owns the two pieces of state every region shares:
+ * It also owns the pieces of state every view shares:
  *
  * - **Which file the review is on.** Neither the rail nor the column can own it
  *   — the tree scrolls the column and the column selects in the tree, so
@@ -20,13 +25,15 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PrPayload } from '@/lib/messages';
-import { DiffColumn, type DiffColumnHandle, type ThreadJump } from './DiffColumn';
-import { Resizer } from './Resizer';
+import { ConversationsView } from './ConversationsView';
+import type { DiffColumnHandle, ThreadJump } from './DiffColumn';
+import { FilesView } from './FilesView';
+import { OverviewView } from './OverviewView';
 import { ReviewFooter } from './ReviewFooter';
 import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
-import { SideRail } from './SideRail';
 import { TopBar } from './TopBar';
+import { type ReviewView, ViewSwitcher, viewId, viewTabId } from './ViewSwitcher';
 import { DeniedNotice } from './DeniedNotice';
 import { TokenRejectedNotice } from './TokenRejectedNotice';
 import { TruncationNotice } from './TruncationNotice';
@@ -39,11 +46,7 @@ import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 import { orderedThreads } from './reviewThreads';
 import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
 import { useCompareDiff } from './useCompareDiff';
-import { useDragSize } from './useDragSize';
 import { useKeymap } from './useKeymap';
-
-/** Wide enough for a deep path, narrow enough to leave the diff its width. */
-const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
 
 /** Which overlay is open. Only ever one: they all want the same keystrokes. */
 type Overlay = { kind: 'none' } | { kind: 'help' } | { kind: 'search'; mode: SearchMode };
@@ -83,7 +86,6 @@ export function Shell({
 }
 
 function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => void }) {
-  const rail = useDragSize(RAIL);
   const session = useReviewSession();
   const targets = useShortcutTargets();
 
@@ -92,6 +94,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const [jump, setJump] = useState<ThreadJump | null>(null);
   const [focusedThread, setFocusedThread] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(NO_OVERLAY);
+  const [view, setView] = useState<ReviewView>('files');
 
   const column = useRef<DiffColumnHandle>(null);
 
@@ -142,6 +145,10 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    * given when the path has not moved, exactly so echoes do not re-render.
    */
   const jumpToThread = useCallback((threadId: string, path: string) => {
+    // The view first. Every caller of this is asking to be shown the thread in
+    // its code — the Conversations list, the keyboard, a jump-panel result —
+    // and none of them can do that from a view the diff is not in.
+    setView('files');
     setCurrent((state) => fromCommand(state, path));
     setFocusedThread(threadId);
     setJump((previous) => ({ threadId, token: (previous?.token ?? 0) + 1 }));
@@ -242,6 +249,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
 
   const goToResult = useCallback(
     (target: SearchTarget) => {
+      setView('files');
       selectFromCommand(target.path);
       if (target.line !== null && target.side !== null) {
         column.current?.goToLine(target.path, target.side, target.line);
@@ -277,18 +285,17 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     },
   });
 
+  // Only what is outstanding. The badge exists because putting the threads
+  // behind a view means a reviewer can be reading the diff with comments they
+  // cannot see, and resolved ones are not that.
+  const unresolved = useMemo(
+    () => session.threads.filter((thread) => !thread.isResolved).length,
+    [session.threads],
+  );
+
   return (
-    <div className="shell" data-current-file={current.path ?? ''}>
-      <TopBar
-        payload={payload}
-        compare={{
-          active: sinceLastReview && narrowed,
-          available: reviewedAt !== null,
-          busy: compare.status === 'loading',
-          onToggle: () => setSinceLastReview((on) => !on),
-        }}
-        compareError={compare.status === 'failed' ? compare.message : null}
-      />
+    <div className="shell" data-current-file={current.path ?? ''} data-view={view}>
+      <TopBar payload={payload} />
       <TruncationNotice
         truncated={payload.truncated}
         pr={payload.ref}
@@ -299,44 +306,78 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
         pr={payload.ref}
         href={prPermalink(payload.pullRequest)}
       />
-      {/* Above the diff rather than in place of it. What is on screen was
+      {/* Above the views rather than in place of them. What is on screen was
           loaded with a token that worked and is still worth reading; only
           writing has stopped. */}
       {session.tokenRejected && <TokenRejectedNotice retry={retry} />}
+
       <div className="shell-body">
-        <SideRail
-          width={rail.size}
-          payload={payload}
-          files={files}
-          current={current}
-          onSelect={selectFromTree}
-          onJumpToThread={jumpToThread}
-        />
-        <Resizer
-          {...rail}
-          className="rail-resizer"
-          orientation="vertical"
-          label="Resize the sidebar"
-          min={RAIL.min}
-          max={RAIL.max}
-        />
-        <DiffColumn
-          ref={column}
-          files={files}
-          // The comparison always comes back as a real unified diff, so while
-          // it is showing, the files-endpoint warning would be describing a
-          // list that is no longer on screen.
-          diff={
-            narrowed
-              ? { source: 'unified', truncated: false }
-              : { source: payload.diff.source, truncated: payload.diff.truncated }
-          }
-          current={current}
-          onScrollTo={selectFromScroll}
-          jump={jump}
-          blobs={blobs}
-        />
+        <ViewSwitcher active={view} unresolved={unresolved} onSelect={setView} />
+
+        {/* One grid cell, three views stacked in it. `visibility` rather than
+            `display`, and rather than not rendering at all: the diff column
+            measures its own scrollport, and anything that takes that
+            measurement to zero costs the reviewer their scroll position and
+            every line of context they expanded to get there. */}
+        <div className="views">
+          <div
+            className="view"
+            id={viewId('files')}
+            role="tabpanel"
+            aria-labelledby={viewTabId('files')}
+            style={{ visibility: view === 'files' ? 'visible' : 'hidden' }}
+          >
+            <FilesView
+              payload={payload}
+              files={files}
+              current={current}
+              onSelectFromTree={selectFromTree}
+              onSelectFromScroll={selectFromScroll}
+              jump={jump}
+              blobs={blobs}
+              // The comparison always comes back as a real unified diff, so
+              // while it is showing, the files-endpoint warning would be
+              // describing a list that is no longer on screen.
+              diff={
+                narrowed
+                  ? { source: 'unified', truncated: false }
+                  : { source: payload.diff.source, truncated: payload.diff.truncated }
+              }
+              compare={{
+                active: sinceLastReview && narrowed,
+                available: reviewedAt !== null,
+                busy: compare.status === 'loading',
+                onToggle: () => setSinceLastReview((on) => !on),
+              }}
+              compareError={compare.status === 'failed' ? compare.message : null}
+              columnRef={column}
+            />
+          </div>
+
+          <div
+            className="view view-scrolls"
+            id={viewId('conversations')}
+            role="tabpanel"
+            aria-labelledby={viewTabId('conversations')}
+            tabIndex={0}
+            style={{ visibility: view === 'conversations' ? 'visible' : 'hidden' }}
+          >
+            <ConversationsView paths={paths} onGoTo={jumpToThread} />
+          </div>
+
+          <div
+            className="view view-scrolls"
+            id={viewId('overview')}
+            role="tabpanel"
+            aria-labelledby={viewTabId('overview')}
+            tabIndex={0}
+            style={{ visibility: view === 'overview' ? 'visible' : 'hidden' }}
+          >
+            <OverviewView payload={payload} />
+          </div>
+        </div>
       </div>
+
       <ReviewFooter viewerIsAuthor={prViewerIsAuthor(payload.pullRequest)} />
 
       {overlay.kind === 'help' && <ShortcutHelp onClose={() => setOverlay(NO_OVERLAY)} />}

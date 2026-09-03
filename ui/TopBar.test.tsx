@@ -1,12 +1,15 @@
 /**
- * The sticky top bar.
+ * The sticky top bar: which pull request this is, and the two controls that
+ * have to be reachable from every view.
  *
- * Everything it shows is already in the payload, so none of it is a placeholder
- * — if the bar renders "#undefined" or an empty branch pair against a realistic
- * node, these tests say so before a real pull request does.
+ * It carried the branch pair, the checks chip and the reviewer avatars as
+ * well, and all three have moved to the Overview view — they are facts about
+ * the change and they now sit beside the lists that explain them.
  *
- * It is mounted inside a session because the review control is a real control
- * now: `Start a review` opens the PENDING review the footer later submits.
+ * What stays is what has to: the identity, so no view can leave you unsure
+ * which pull request you are in; the pending chip, because forgetting a review
+ * was never submitted is the one way to lose a whole review's writing; and
+ * `Start a review`, which is the only thing that makes comments queue.
  */
 
 import { render, screen, waitFor } from '@testing-library/react';
@@ -36,10 +39,7 @@ const tree = (payload: PrPayload) => (
     threads={payload.threads}
     drafts={new DraftStore(memoryStore())}
   >
-    <TopBar
-      payload={payload}
-      compare={{ active: false, available: false, busy: false, onToggle: () => {} }}
-    />
+    <TopBar payload={payload} />
   </ReviewSessionProvider>
 );
 
@@ -53,12 +53,10 @@ describe('TopBar', () => {
     expect(screen.getByText('#42')).toBeDefined();
   });
 
-  it('renders the state badge and the branch pair', () => {
-    const { container } = mount();
+  it('renders the state badge', () => {
+    mount();
 
     expect(screen.getByText('Open')).toBeDefined();
-    expect(container.textContent).toContain('main');
-    expect(container.textContent).toContain('cache-the-diff');
   });
 
   it('prefers Draft and Merged over the raw state', () => {
@@ -75,60 +73,6 @@ describe('TopBar', () => {
       ),
     );
     expect(screen.getByText('Merged')).toBeDefined();
-  });
-
-  it('summarizes the check rollup, including the absence of one', () => {
-    const { rerender, container } = mount();
-    expect(container.textContent).toMatch(/checks passed/i);
-
-    rerender(tree(prPayload({ checks: { state: 'FAILURE' } })));
-    expect(container.textContent).toMatch(/checks failed/i);
-
-    // A head commit with no checks at all is not a pending check.
-    rerender(tree(prPayload({ checks: null })));
-    expect(container.textContent).toMatch(/no checks/i);
-  });
-
-  it('names every reviewer, requested or already reviewed', () => {
-    mount();
-
-    expect(screen.getByRole('img', { name: /dana/ })).toBeDefined();
-    expect(screen.getByRole('img', { name: /kim/ })).toBeDefined();
-  });
-
-  it('names a team and a bot reviewer as such, not as usernames', () => {
-    // A pull request whose only pending reviewer is a team used to render no
-    // avatars at all, which reads as "nobody has been asked to review".
-    mount(
-      prPayload({
-        pullRequest: pullRequestNode({
-          latestReviews: { nodes: [] },
-          reviewRequests: {
-            nodes: [
-              {
-                requestedReviewer: {
-                  __typename: 'Team',
-                  name: 'Platform Infrastructure',
-                  slug: 'platform-infra',
-                },
-              },
-              {
-                requestedReviewer: {
-                  __typename: 'Bot',
-                  login: 'copilot-pull-request-reviewer',
-                  avatarUrl: 'https://avatars.example/copilot',
-                },
-              },
-            ],
-          },
-        }),
-      }),
-    );
-
-    expect(screen.getByRole('img', { name: /platform-infra \(team\)/ })).toBeDefined();
-    expect(
-      screen.getByRole('img', { name: /copilot-pull-request-reviewer \(bot\)/ }),
-    ).toBeDefined();
   });
 
   it('links to the pull request on github.com', () => {

@@ -1,13 +1,13 @@
 /**
- * The rail's Overview page.
+ * The Overview view: everything about the change that is not the change.
  *
- * Three regions, and each one has a way of lying that these tests exist to
- * prevent: a description that injects HTML, a check list that renders only one
- * arm of the `statusCheckRollup.contexts` union, and a reviewer list that drops
- * teams.
+ * Four regions, and each has a way of lying that these tests exist to prevent:
+ * a description that injects HTML, a check list that renders only one arm of
+ * the `statusCheckRollup.contexts` union, a reviewer list that drops teams, and
+ * a branch pair that silently shows one branch twice.
  *
- * Threads are not here. They have a page of their own, because "what is still
- * outstanding" was the thing a reviewer looks at most and it was at the bottom
+ * Threads are not here. They have a view of their own, because "what is still
+ * outstanding" is the thing a reviewer looks at most and it was at the bottom
  * of a scrolling box under a description of arbitrary length.
  */
 
@@ -15,7 +15,7 @@ import { render, screen } from '@testing-library/react';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrPayload } from '@/lib/messages';
 import { DraftStore } from '@/lib/review/drafts';
-import { OverviewPage } from './OverviewPage';
+import { OverviewView } from './OverviewView';
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
 import { prPayload, pullRequestNode } from './prPayload.fixture';
@@ -35,7 +35,7 @@ function mount(payload: PrPayload) {
       threads={payload.threads}
       drafts={new DraftStore(memoryStore())}
     >
-      <OverviewPage payload={payload} />
+      <OverviewView payload={payload} />
     </ReviewSessionProvider>,
   );
 }
@@ -64,9 +64,12 @@ describe('the description', () => {
       }),
     );
 
-    expect(container.querySelector('img')).toBeNull();
-    expect(container.querySelector('b')).toBeNull();
-    expect(container.textContent).toContain('bold');
+    // Scoped to the description. Reviewer avatars are real `<img>` elements
+    // elsewhere on this view, and an unscoped query would pass on those.
+    const description = container.querySelector('.overview-main');
+    expect(description?.querySelector('img')).toBeNull();
+    expect(description?.querySelector('b')).toBeNull();
+    expect(description?.textContent).toContain('bold');
   });
 
   it('says so when there is no description at all', () => {
@@ -107,12 +110,12 @@ describe('the checks', () => {
     expect(screen.getByText('node-test-commit')).toBeDefined();
   });
 
-  it('renders "no checks" for a head commit that has none', () => {
+  it('says nothing has run for a head commit with no checks', () => {
     // Null means no CI is configured, which is not an error and not a pending
     // check. `pierrecomputer/pierre#1` really does come back this way.
     mount(prPayload({ checks: null }));
 
-    expect(screen.getByText(/no checks/i)).toBeDefined();
+    expect(screen.getByText(/nothing has run/i)).toBeDefined();
   });
 
   it('degrades an unknown conclusion into readable words', () => {
@@ -186,5 +189,100 @@ describe('the reviewers', () => {
     );
 
     expect(screen.getByText(/no reviewers/i)).toBeDefined();
+  });
+});
+
+describe('the branches', () => {
+  it('names what is being merged into what', () => {
+    // It was in the top bar beside the title, as though it described the pull
+    // request rather than one fact about it.
+    mount(
+      prPayload({
+        pullRequest: pullRequestNode({
+          baseRefName: 'main',
+          headRefName: 'cache-the-diff',
+        }),
+      }),
+    );
+
+    const branches = screen.getByTitle(/merging cache-the-diff into main/i);
+    expect(branches.textContent).toContain('main');
+    expect(branches.textContent).toContain('cache-the-diff');
+  });
+
+  it('says nothing rather than half a pair when GitHub withheld one', () => {
+    // `main ←` reads as a branch pair with one branch in it, not as a gap.
+    mount(prPayload({ pullRequest: pullRequestNode({ headRefName: null }) }));
+
+    expect(screen.getByText(/did not say which branches/i)).toBeDefined();
+    expect(screen.queryByTitle(/merging/i)).toBeNull();
+  });
+});
+
+describe('the summaries beside each list', () => {
+  it('puts the rollup chip at the head of the checks', () => {
+    const { container } = mount(prPayload({ checks: null }));
+
+    const head = container.querySelector('.overview-head .chip');
+    expect(head?.textContent).toBe('No checks');
+  });
+
+  it('summarizes the rollup in that chip, including the absence of one', () => {
+    const chip = () =>
+      document.querySelector('.overview-head .chip')?.textContent ?? '';
+
+    const { unmount } = mount(prPayload());
+    expect(chip()).toMatch(/checks passed/i);
+    unmount();
+
+    const failed = mount(prPayload({ checks: { state: 'FAILURE' } }));
+    expect(chip()).toMatch(/checks failed/i);
+    failed.unmount();
+
+    // A head commit with no checks at all is not a pending check.
+    mount(prPayload({ checks: null }));
+    expect(chip()).toMatch(/no checks/i);
+  });
+
+  it('puts the avatars at the head of the reviewers', () => {
+    mount(prPayload());
+
+    expect(screen.getByRole('img', { name: /dana/ })).toBeDefined();
+    expect(screen.getByRole('img', { name: /kim/ })).toBeDefined();
+  });
+
+  it('names a team and a bot reviewer as such, not as usernames', () => {
+    // A pull request whose only pending reviewer is a team used to render no
+    // avatars at all, which reads as "nobody has been asked to review".
+    mount(
+      prPayload({
+        pullRequest: pullRequestNode({
+          latestReviews: { nodes: [] },
+          reviewRequests: {
+            nodes: [
+              {
+                requestedReviewer: {
+                  __typename: 'Team',
+                  name: 'Platform Infrastructure',
+                  slug: 'platform-infra',
+                },
+              },
+              {
+                requestedReviewer: {
+                  __typename: 'Bot',
+                  login: 'copilot-pull-request-reviewer',
+                  avatarUrl: 'https://avatars.example/copilot',
+                },
+              },
+            ],
+          },
+        }),
+      }),
+    );
+
+    expect(screen.getByRole('img', { name: /platform-infra \(team\)/ })).toBeDefined();
+    expect(
+      screen.getByRole('img', { name: /copilot-pull-request-reviewer \(bot\)/ }),
+    ).toBeDefined();
   });
 });

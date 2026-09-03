@@ -1,20 +1,25 @@
 /**
- * The sticky top bar.
+ * The sticky top bar: which pull request this is, and nothing else that could
+ * live somewhere better.
  *
- * Everything in it is already in the payload, so none of it is a placeholder.
+ * The branch pair, the checks chip and the reviewer avatars were all here and
+ * have moved to the Overview view, beside the lists that explain them. They
+ * were facts about the change presented as though they were the change's name.
+ * "Since my last review" moved down to the Files view, which is the only place
+ * it means anything.
  *
- * It also owns the one half of the review flow the footer cannot: the footer
- * exists only while a review is pending, so the control that *opens* one — and
- * the failure message when GitHub refuses — has to live somewhere that is
- * always on screen.
+ * What is left has to be here. The identity, so no view can leave you unsure
+ * which pull request you are reading. The pending chip, because forgetting a
+ * review was never submitted is the one way to lose a whole review's writing.
+ * And the control that *opens* a review — the footer exists only once one is
+ * pending, so the thing that starts it, and the failure when GitHub refuses,
+ * have to live somewhere that is always on screen.
  */
 
 import type { PrPayload } from '@/lib/messages';
-import { ChecksChip } from './ChecksChip';
 import { OpenInGitHub } from './OpenInGitHub';
-import { ReviewerAvatars } from './ReviewerAvatars';
 import { StateBadge } from './StateBadge';
-import { prBranches, prPermalink, prReviewers, prState } from './prNode';
+import { prPermalink, prState } from './prNode';
 import { REVIEW_START, useReviewSession } from './reviewSession';
 
 /**
@@ -83,51 +88,12 @@ function StartReviewButton() {
   );
 }
 
-const NEVER_REVIEWED =
-  'You have not reviewed this pull request yet, so there is no earlier commit ' +
-  'to compare against.';
-
-export interface CompareToggleProps {
-  /** Whether the column is showing the narrowed diff. */
-  active: boolean;
-  /** False for a first-time reviewer: there is nothing to compare from. */
-  available: boolean;
-  busy: boolean;
-  onToggle: () => void;
-}
-
-/**
- * Narrow the column to what has landed since the viewer's own last review.
- *
- * Disabled rather than hidden when there is no prior review. A control that
- * appears and disappears with the pull request is one the reviewer has to
- * rediscover; a disabled one with the reason on it explains itself.
- */
-function CompareToggle({ active, available, busy, onToggle }: CompareToggleProps) {
-  return (
-    <button
-      type="button"
-      className="button"
-      aria-pressed={active}
-      disabled={!available || busy}
-      title={available ? undefined : NEVER_REVIEWED}
-      onClick={onToggle}
-    >
-      {busy ? 'Comparing…' : 'Since my last review'}
-    </button>
-  );
-}
-
 export interface TopBarProps {
   payload: PrPayload;
-  compare: CompareToggleProps;
-  /** Why the comparison could not be shown. Null when nothing went wrong. */
-  compareError?: string | null;
 }
 
-export function TopBar({ payload, compare, compareError = null }: TopBarProps) {
+export function TopBar({ payload }: TopBarProps) {
   const node = payload.pullRequest;
-  const { base, head } = prBranches(node);
 
   return (
     <header className="topbar">
@@ -135,34 +101,13 @@ export function TopBar({ payload, compare, compareError = null }: TopBarProps) {
         <h1 className="pr-title">{node.title}</h1>
         <span className="pr-number">#{node.number}</span>
         <StateBadge state={prState(node)} />
-      </div>
-
-      <div className="topbar-meta">
-        {base !== null && head !== null && (
-          <span className="branches" title={`Merging ${head} into ${base}`}>
-            <code>{base}</code>
-            <span className="branch-arrow" aria-hidden="true">
-              ←
-            </span>
-            <code>{head}</code>
-          </span>
-        )}
-        <ChecksChip checks={payload.checks} />
         <PendingChip />
-        <ReviewerAvatars reviewers={prReviewers(node)} />
       </div>
 
       <div className="topbar-actions">
-        <CompareToggle {...compare} />
         <OpenInGitHub pr={payload.ref} href={prPermalink(node)} />
         <StartReviewButton />
       </div>
-
-      {compareError !== null && (
-        <p className="topbar-error" role="alert">
-          {`That comparison could not be loaded: ${compareError} Showing the whole pull request.`}
-        </p>
-      )}
     </header>
   );
 }

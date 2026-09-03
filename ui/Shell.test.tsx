@@ -1,9 +1,9 @@
 /**
  * The loaded layout.
  *
- * Three regions, mirroring GitHub's Files-changed tab. Two of them are empty
- * until later tasks fill them; these tests pin the frame so those tasks have
- * somewhere to land rather than a layout to invent.
+ * An identity bar, a vertical switcher, and one of three views in the space
+ * that is left. These tests pin the frame — which views exist, that switching
+ * reaches them, and that the one thing no view may do is lose a thread.
  */
 
 import { render, screen, waitFor } from '@testing-library/react';
@@ -27,23 +27,45 @@ beforeEach(() => {
 });
 
 describe('Shell', () => {
-  it('renders the top bar, the left rail and the main column', () => {
+  it('renders the top bar, the view switcher and the diff', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
     expect(screen.getByRole('banner')).toBeDefined();
-    expect(screen.getByRole('complementary')).toBeDefined();
+    expect(screen.getByRole('tablist', { name: 'Views' })).toBeDefined();
     expect(screen.getByRole('main')).toBeDefined();
   });
 
-  it('puts the page tabs at the top of the rail, over a panel', () => {
+  it('offers the three views down the left, and opens on the diff', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
-    const rail = screen.getByRole('complementary');
-    const tabs = screen.getAllByRole('tab');
+    expect(
+      screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label')),
+    ).toEqual(['Files', 'Conversations', 'Overview']);
+    expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe(
+      'vertical',
+    );
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
+      'Files',
+    );
+  });
 
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Conversations']);
-    expect(tabs.every((tab) => rail.contains(tab))).toBe(true);
-    expect(rail.contains(screen.getByRole('tabpanel'))).toBe(true);
+  it('keeps every view mounted so the diff does not lose its place', async () => {
+    // `visibility`, never `display: none` and never unmounting. CodeView
+    // virtualizes against a scrollport it measures, and anything that takes
+    // that measurement to zero costs the reviewer their scroll position and
+    // every line of context they expanded to reach it.
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('tab', { name: /overview/i }));
+
+    const files = document.getElementById('review-view-files');
+    expect(files?.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
+    expect(files?.style.visibility).toBe('hidden');
   });
 
   it('says when a list was cut short, and offers the way out', () => {
@@ -98,19 +120,23 @@ describe('Shell', () => {
       />,
     );
 
-    expect(screen.getByText('+12')).toBeDefined();
-    expect(screen.getByText('−3')).toBeDefined();
+    // Scoped to the card's own counts. The bar above the diff totals the same
+    // numbers for a one-file pull request, and an unscoped query would be
+    // satisfied by that total whatever the card said.
+    const counts = document.querySelector('.file-counts');
+    expect(counts?.textContent).toContain('+12');
+    expect(counts?.textContent).toContain('−3');
     expect(
       (screen.getByRole('checkbox', { name: /src\/app\.ts/ }) as HTMLInputElement)
         .checked,
     ).toBe(true);
   });
 
-  it('puts the file tree in the rail, below the overview', () => {
+  it('puts the file tree in the Files view, beside the diff', () => {
     render(<Shell retry={() => {}} payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])} />);
 
     const tree = screen.getByRole('navigation', { name: /changed files/i });
-    expect(screen.getByRole('complementary').contains(tree)).toBe(true);
+    expect(document.getElementById('review-view-files')?.contains(tree)).toBe(true);
     expect(tree.querySelector('file-tree-container')).not.toBeNull();
   });
 
@@ -120,14 +146,33 @@ describe('Shell', () => {
     expect(screen.getAllByText(/no changed files/i).length).toBe(2);
   });
 
-  it('gives the rail a resize handle the keyboard can reach', () => {
+  it('gives the file tree a resize handle the keyboard can reach', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
-    // Named, not just found: the rail's handle now shares the page with the
-    // one inside the rail, and they are different separators on different axes.
     const separator = screen.getByRole('separator', { name: /sidebar/i });
     expect(separator.getAttribute('aria-orientation')).toBe('vertical');
     expect(separator.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('goes back to the diff when a conversation asks to be shown', async () => {
+    // The whole point of the Go to button. A thread the reviewer asked to see
+    // is not shown by a view the diff is not in.
+    render(
+      <Shell
+        retry={() => {}}
+        payload={{
+          ...prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })]),
+          threads: [reviewThread({ path: 'src/app.ts', line: 2 })],
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('tab', { name: /conversations/i }));
+    await userEvent.click(screen.getByRole('button', { name: /go to/i }));
+
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
+      'Files',
+    );
   });
 });
 
@@ -171,7 +216,7 @@ describe('the pending-review footer', () => {
   });
 });
 
-describe('the Conversations page', () => {
+describe('the Conversations view', () => {
   it('lists a thread whose file has no card in the column', async () => {
     // The per-file unanchorable section is rendered by `CodeView`'s custom
     // header, so it exists only for files the column has drawn. A pull request
@@ -201,10 +246,11 @@ describe('the Conversations page', () => {
       column.querySelector('[data-thread="PRRT_lib/dropped.ts:3"]'),
     ).toBeNull();
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Conversations' }));
-    const panel = screen.getByRole('tabpanel');
-    expect(screen.getByRole('complementary').contains(panel)).toBe(true);
-    expect(panel.textContent).toContain('lib/dropped.ts');
+    await userEvent.click(screen.getByRole('tab', { name: /conversations/i }));
+
+    expect(
+      document.getElementById('review-view-conversations')?.textContent,
+    ).toContain('lib/dropped.ts');
   });
 
   it('lists threads on files the reviewer has not scrolled to', async () => {
@@ -221,9 +267,11 @@ describe('the Conversations page', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Conversations' }));
+    await userEvent.click(screen.getByRole('tab', { name: /conversations/i }));
 
-    expect(screen.getByRole('tabpanel').textContent).toContain('src/deep/last.ts');
+    expect(
+      document.getElementById('review-view-conversations')?.textContent,
+    ).toContain('src/deep/last.ts');
   });
 });
 

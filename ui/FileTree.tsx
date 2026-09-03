@@ -145,8 +145,8 @@ function selectOnly(model: FileTreeModel, path: string): void {
  * The model, for the callers that have to drive it imperatively.
  *
  * The keyboard map moves between files without the tree holding focus, and a
- * jump-list entry has to be able to reveal a path. Neither is expressible as a
- * prop.
+ * Go to from the Conversations view has to be able to reveal a path. Neither
+ * is expressible as a prop.
  */
 export interface FileTreeHandle {
   model: FileTreeModel;

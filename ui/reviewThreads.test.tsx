@@ -20,7 +20,7 @@ import {
   threadGroups,
   threadPosition,
 } from './reviewThreads';
-import { reviewThread } from './prPayload.fixture';
+import { reviewComment, reviewThread } from './prPayload.fixture';
 
 /**
  * Two hunks with a gap between them, so lines 4–19 exist in the file and are
@@ -309,14 +309,77 @@ describe('threadGroups', () => {
     ]);
   });
 
-  it('carries something to recognize each thread by', () => {
+  it('carries enough of the opening comment to read it without leaving', () => {
     const groups = threadGroups(
       [reviewThread({ path: 'src/app.ts', line: 2 })],
       ['src/app.ts'],
     );
 
-    expect(groups[0]?.open[0]?.position).toBe('Line 2');
-    expect(groups[0]?.open[0]?.excerpt).toContain('This allocates');
+    expect(groups[0]?.open[0]).toMatchObject({
+      position: 'Line 2',
+      author: 'dana',
+      isOutdated: false,
+      isResolved: false,
+      replies: 0,
+    });
+    expect(groups[0]?.open[0]?.body).toContain('This allocates');
+    expect(groups[0]?.open[0]?.createdAt).not.toBe('');
+  });
+
+  it('counts the replies after the opening comment', () => {
+    // The list shows the first comment. Saying how many follow it is what
+    // stops a long argument reading as a one-line note.
+    const groups = threadGroups(
+      [
+        reviewThread({
+          path: 'src/app.ts',
+          line: 2,
+          comments: {
+            totalCount: 4,
+            nodes: [reviewComment({ id: 'c1' }), reviewComment({ id: 'c2' })],
+          },
+        }),
+      ],
+      ['src/app.ts'],
+    );
+
+    // From `totalCount`, not from the nodes: the connection is capped, and a
+    // thread with forty replies must not report one.
+    expect(groups[0]?.open[0]?.replies).toBe(3);
+  });
+
+  it('says a thread is outdated, which is why it has no line', () => {
+    const groups = threadGroups(
+      [
+        reviewThread({
+          path: 'src/app.ts',
+          line: null,
+          startLine: null,
+          originalLine: 4,
+          isOutdated: true,
+        }),
+      ],
+      ['src/app.ts'],
+    );
+
+    expect(groups[0]?.open[0]?.isOutdated).toBe(true);
+  });
+
+  it('survives a thread GitHub returned with no comments in it', () => {
+    // `nodes` is a connection and can come back empty. Reading `[0]` blind is
+    // how a rail full of comments becomes a blank page.
+    const groups = threadGroups(
+      [
+        reviewThread({
+          path: 'src/app.ts',
+          line: 2,
+          comments: { totalCount: 0, nodes: [] },
+        }),
+      ],
+      ['src/app.ts'],
+    );
+
+    expect(groups[0]?.open[0]).toMatchObject({ author: '', body: '', replies: 0 });
   });
 
   it('sorts an outdated thread with no line last within its file', () => {

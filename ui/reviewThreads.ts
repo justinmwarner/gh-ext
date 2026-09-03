@@ -279,13 +279,29 @@ export function orderedThreads(
     .map(({ thread, rank }) => ({ thread, inDiff: rank !== UNPLACED }));
 }
 
-/** One thread as the Conversations page lists it. */
+/**
+ * One thread as the Conversations view lists it.
+ *
+ * The opening comment in full rather than a clipped line: the view has the
+ * whole window now, and a thread you can read is a thread you do not have to
+ * navigate to in order to dismiss. Clipping is the stylesheet's job.
+ *
+ * Every field has a defined value for a thread GitHub returned with an empty
+ * `comments` connection, which it is entitled to do. Reading `nodes[0]` blind
+ * is how a list of comments becomes a blank page.
+ */
 export interface ThreadEntry {
   threadId: string;
   /** Where it sits, in the same words the thread header uses. */
   position: string;
-  /** The first line of the opening comment, to recognize it by. */
-  excerpt: string;
+  /** Who opened it, or empty when GitHub did not say. */
+  author: string;
+  createdAt: string;
+  body: string;
+  /** How many comments follow the opening one. */
+  replies: number;
+  isOutdated: boolean;
+  isResolved: boolean;
 }
 
 /**
@@ -328,10 +344,18 @@ export function threadGroups(
       groups.push(group);
     }
 
+    const first = thread.comments.nodes[0];
     const entry: ThreadEntry = {
       threadId: thread.id,
       position: threadPosition(thread),
-      excerpt: excerptOf(thread),
+      author: first?.author?.login ?? '',
+      createdAt: first?.createdAt ?? '',
+      body: first?.body ?? '',
+      // From `totalCount`, not from the nodes: the connection is capped, and a
+      // thread with forty replies must not report one.
+      replies: Math.max(0, thread.comments.totalCount - 1),
+      isOutdated: thread.isOutdated,
+      isResolved: thread.isResolved,
     };
     (thread.isResolved ? group.resolved : group.open).push(entry);
   }

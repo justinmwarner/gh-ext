@@ -22,13 +22,7 @@ import { threadPosition } from './reviewThreads';
 import { useReviewSession } from './reviewSession';
 import { useShortcutTarget } from './shortcutTargets';
 import { splitBody } from './suggestion';
-
-/** The instant, machine-readable; the words, however the reader's OS says them. */
-function formatTimestamp(iso: string): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-}
+import { formatTimestamp } from './timestamp';
 
 function Body({ comment }: { comment: ReviewComment }) {
   const parts = splitBody(comment.body);

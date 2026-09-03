@@ -93,7 +93,7 @@ code {
    and hovering the jump entry directly below it snaps. Colour only — nothing
    here moves, so there is nothing for reduced-motion to suppress. */
 .button,
-.jump-entry,
+.view-tab,
 .search-result,
 .collapse-toggle {
   transition:
@@ -188,40 +188,11 @@ code {
   font-weight: 400;
 }
 
-.topbar-meta {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--gap) * 1.5);
-  min-width: 0;
-}
-
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: var(--gap);
   margin-left: auto;
-}
-
-.branches {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: light-dark(#59636e, #9198a1);
-  /* Every neighbour in the bar is nowrap and refuses to shrink, so this is
-     what absorbs the squeeze — and the bar has a fixed height, so wrapping
-     spills over its bottom border onto the rail. */
-  min-width: 0;
-}
-
-.branches code {
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
-  /* The full name is already on the element's `title`. */
-  max-width: 16ch;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* ----------------------------------------------------------------- badges */
@@ -345,118 +316,185 @@ code {
   min-height: 0;
 }
 
-.rail {
+/* ------------------------------------------------------- the view switcher */
+
+.viewswitcher {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  /* Sized by its longest label rather than by a number that has to be kept in
+     step with one. "Conversations" was being clipped to "Conversa…". */
+  width: max-content;
+  min-width: 72px;
+  padding: 8px 6px;
+  border-right: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #010409);
+}
+
+.view-tab {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: hidden;
-  padding: 12px;
-  border-right: 1px solid light-dark(#d1d9e0, #3d444d);
-}
-
-/* The tab strip runs full-bleed across the rail's padding so its rule meets
-   both edges, the way a tab strip has to for the underline to read as one. */
-.rail-tabs {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 2px;
-  margin: -12px -12px 0;
-  padding: 0 12px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
-}
-
-.rail-tab {
-  position: relative;
-  padding: 10px 8px;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 8px 7px;
   font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  white-space: nowrap;
+  font-size: 11px;
+  line-height: 14px;
   color: light-dark(#59636e, #9198a1);
   border: 0;
+  border-radius: 6px;
   background: none;
   cursor: pointer;
+  /* For the active marker below, which is a pseudo-element rather than a
+     border precisely so selecting a view does not move the icon. */
+  position: relative;
 }
 
-.rail-tab:hover {
-  color: inherit;
+.view-tab:hover {
+  color: light-dark(#1f2328, #e6edf3);
+  background: light-dark(#eef1f4, #212830);
 }
 
-.rail-tab-active {
-  color: inherit;
+.view-tab-active {
+  color: light-dark(#1f2328, #e6edf3);
+  background: light-dark(#eef1f4, #212830);
   font-weight: 600;
 }
 
-/* On a pseudo-element rather than a real border, so selecting a tab does not
-   move its label by the border's width. Inset by the padding so the rule sits
-   under the word and not under the whole hit target. */
-.rail-tab-active::after {
+.view-tab-active::before {
   content: '';
   position: absolute;
-  inset: auto 8px -1px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
+  left: -6px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
   background: light-dark(#0969da, #4493f8);
 }
 
-/* The drag sets a cap, not a height. An Overview with no description would
-   otherwise leave a hole above the tree that nothing can close. The 60% is the
-   same cap again for a short window, where a pixel maximum would leave the tree
-   nothing — and a tree with no room measures zero and renders no rows at all. */
-.rail-panel {
-  display: flex;
-  flex: 0 1 auto;
+.view-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+/* Sits on the icon rather than beside the label, because it is a property of
+   the view and not of the word. Anchored to the icon's top-right corner and
+   allowed to grow leftwards, so "99+" does not widen the rail. */
+.view-badge {
+  position: absolute;
+  top: -5px;
+  left: 9px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  color: #ffffff;
+  border-radius: 999px;
+  background: light-dark(#9a6700, #bb8009);
+}
+
+.view-label {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- the views */
+
+/* One grid cell with all three views stacked in it. They are hidden with
+   `visibility`, never `display: none`: both Pierre surfaces virtualize against
+   a scrollport they measure, and a display-hidden ancestor takes that
+   measurement to zero. Stacked, every view keeps the size it had. */
+.views {
+  display: grid;
+  grid-template: 1fr / 1fr;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  max-height: min(var(--panel-max, 240px), 60%);
+}
+
+.view {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
-.rail-page {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding-top: 8px;
+/* The two reading views scroll themselves. The Files view does not: the tree
+   and the diff each own a scrollport of their own. */
+.view-scrolls {
   overflow-y: auto;
 }
 
-/* `hidden` has to beat the flex display above it. */
-.rail-page[hidden] {
-  display: none;
-}
-
-/* Focusable so the panel can be scrolled from the keyboard, but it is not a
-   control: the ring belongs around its content, not tight to a scrollport. */
-.rail-page:focus-visible {
+.view-scrolls:focus-visible {
   outline-offset: -2px;
 }
 
-.panel-resizer {
-  flex: 0 0 auto;
-  /* 13px of target, 3px of paint, the same trick as the rail's own handle —
-     and it supplies the gap above the tree, which is why `.filetree` no longer
-     has a margin of its own. */
-  height: 13px;
-  padding: 5px 0;
-  margin: 0 -12px;
-  background-clip: content-box;
-  background-color: transparent;
-  cursor: row-resize;
-}
+/* --------------------------------------------------------- the Files view */
 
-.panel-resizer:hover,
-.panel-resizer:focus-visible {
-  background-color: light-dark(#0969da, #4493f8);
-}
-
-.panel-resizer:focus-visible {
-  outline-offset: 0;
-}
-
-/* The tree owns the remaining height and does its own scrolling. */
-.filetree {
+.filesview {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
+}
+
+/* Thin, and right-aligned against the diff rather than the tree: it describes
+   what the column is showing. */
+.filesview-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 6px 12px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.filesview-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.filesview-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.filesview-error {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: light-dark(#9a6700, #d29922);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.filesview-body {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The tree owns the width the drag gave it and does its own scrolling. */
+.filetree {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 8px 0 8px 12px;
+  overflow: hidden;
 }
 
 /* An explicit height, not an inherited one. The tree virtualizes against this
@@ -464,8 +502,7 @@ code {
    fallback of 420px once and then measures zero. */
 .filetree-host {
   /* The tree indents its rows by its own inline padding on top of the rail's,
-     which put tree rows 24px further in than the Overview headings directly
-     above them. */
+     which put tree rows 24px further in than the headings above them. */
   --trees-padding-inline-override: 0px;
   flex: 1 1 auto;
   min-width: 0;
@@ -503,7 +540,7 @@ code {
   width: 13px;
   padding: 0 4px;
   background-clip: content-box;
-  margin-left: -7px;
+  margin-left: -1px;
   margin-right: -5px;
   cursor: col-resize;
   background-color: transparent;
@@ -972,21 +1009,63 @@ code {
   margin-top: 8px;
 }
 
-/* --------------------------------------------------------- rail pages */
+/* ------------------------------------------------------ the Overview view */
 
-/* Both pages scroll inside `.rail-panel`, which is capped, so neither a long
-   description nor a long thread list can push the file tree off the bottom. */
-
-.overview-body {
-  font-size: 13px;
+/* Two columns: the description gets a reading measure, the facts about the
+   change stand beside it rather than under it. One column below 900px, where
+   two would leave neither of them readable. */
+.overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 40px;
+  align-content: start;
+  width: 100%;
+  /* Sized so the description column lands near its own 72ch measure. Wider,
+     and the two columns sit against opposite edges of the window with a void
+     between them that reads as a rendering fault. */
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px;
 }
 
-.overview-section {
-  margin-top: 10px;
+@media (max-width: 900px) {
+  .overview {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
 }
 
-.overview-section h2 {
-  margin: 0 0 4px;
+.overview-main {
+  min-width: 0;
+  /* The measure, not the column. Prose past about 80 characters a line is
+     measurably harder to track back from, and this view is wide. */
+  max-width: 72ch;
+}
+
+.overview-meta {
+  min-width: 0;
+}
+
+.overview-section + .overview-section {
+  margin-top: 20px;
+}
+
+/* The heading and its one-glance summary on the same line: the chip and the
+   avatars used to be in the top bar, two regions away from the lists that
+   explain them. */
+.overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  min-height: 20px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.overview-head h2 {
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -995,24 +1074,44 @@ code {
 }
 
 .overview-text {
-  margin: 0 0 6px;
+  margin: 0 0 10px;
   /* The description is plain text with its markup removed, so long tokens and
      what used to be code fences have to be allowed to wrap. */
   overflow-wrap: anywhere;
 }
 
 .overview-note {
-  margin: 4px 0 0;
+  margin: 10px 0 0;
   font-size: 12px;
   color: light-dark(#59636e, #9198a1);
 }
 
+.overview-branches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.overview-branches code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: light-dark(#f6f8fa, #212830);
+  /* The full pair is already on the element's `title`. */
+  max-width: 18ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .checks-list,
-.reviewer-states,
-.jump-list {
+.reviewer-states {
   list-style: none;
   margin: 0;
   padding: 0;
+  font-size: 13px;
 }
 
 .check {
@@ -1020,8 +1119,12 @@ code {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 6px;
-  padding: 3px 0;
+  padding: 4px 0;
   border-bottom: 1px solid light-dark(#eef1f4, #262c36);
+}
+
+.check:last-child {
+  border-bottom: 0;
 }
 
 .check-name {
@@ -1037,7 +1140,7 @@ code {
 }
 
 .reviewer-state {
-  padding: 2px 0;
+  padding: 3px 0;
   overflow-wrap: anywhere;
 }
 
@@ -1049,57 +1152,25 @@ code {
   color: light-dark(#cf222e, #f85149);
 }
 
-.jump-entry {
-  display: block;
+/* ------------------------------------------------- the Conversations view */
+
+.conversations {
   width: 100%;
-  /* 8px, so this row's text starts where a tree row's does. */
-  padding: 4px 8px;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: none;
-  cursor: pointer;
+  /* A reading column, not the window. The entries carry prose, and prose set
+     to 1400px is not read, it is scanned past. */
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 24px;
 }
-
-.jump-entry:hover {
-  background: light-dark(#eef1f4, #262c36);
-}
-
-.jump-position,
-.jump-excerpt {
-  display: block;
-  font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
-  overflow-wrap: anywhere;
-}
-
-/* The position is what identifies the entry; the excerpt is what recognizes
-   it. One line of each, so a long comment cannot make one entry as tall as
-   the panel. */
-.jump-position {
-  font-weight: 600;
-  color: inherit;
-}
-
-.jump-excerpt {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* ---------------------------------------------------- conversations page */
 
 .conversation-group + .conversation-group {
-  margin-top: 10px;
+  margin-top: 28px;
 }
 
 .conversation-path {
-  margin: 0 0 2px;
-  padding: 0 8px;
+  margin: 0 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   white-space: nowrap;
@@ -1119,25 +1190,93 @@ code {
 /* A file whose threads have no card in the column. Listed rather than dropped,
    and marked so the reviewer is not left wondering why nothing moved. */
 .conversation-absent {
-  margin: 0 0 2px;
-  padding: 0 8px;
+  margin: -4px 0 8px;
   font-size: 12px;
   color: light-dark(#9a6700, #d29922);
 }
 
 /* Settled business, one line until asked for — the same treatment a resolved
    thread gets in the diff column, for the same reason. */
+.conversation-resolved {
+  margin-top: 10px;
+}
+
 .conversation-resolved > summary {
-  padding: 3px 8px;
+  display: inline-flex;
+  padding: 4px 10px;
   font-size: 12px;
   color: light-dark(#59636e, #9198a1);
-  border-radius: 6px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 999px;
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
 
 .conversation-resolved > summary:hover {
   background: light-dark(#eef1f4, #262c36);
+}
+
+.conversation-resolved[open] > summary {
+  margin-bottom: 10px;
+}
+
+.thread-entry {
+  padding: 12px 14px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 8px;
+  background: light-dark(#ffffff, #151b23);
+}
+
+.thread-entry + .thread-entry {
+  margin-top: 8px;
+}
+
+.thread-entry-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+/* Pushed to the end of the head, so the one action on the card is in the same
+   place down a column of cards of different heights. */
+.thread-entry-goto {
+  margin-left: auto;
+}
+
+.thread-entry-position {
+  font-size: 12px;
+  font-weight: 600;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.thread-entry-byline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+/* Markdown drawn as plain text, so the newlines in the body are the only
+   structure it has left — and three lines is enough to recognize a comment
+   without letting one argument fill the view. */
+.thread-entry-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.thread-entry-replies {
+  color: light-dark(#0969da, #4493f8);
 }
 
 /* --------------------------------------------------- pending review footer */

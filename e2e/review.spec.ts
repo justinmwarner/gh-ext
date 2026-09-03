@@ -26,6 +26,13 @@ import type { Page } from '@playwright/test';
 /** The scrollport `CodeView` was handed. */
 const VIEW = '.diff-view';
 
+/** Every view is mounted at once, so anything text-based has to be scoped. */
+const filesView = (page: Page) => page.locator('#review-view-files');
+const threadsView = (page: Page) => page.locator('#review-view-conversations');
+
+const openView = (page: Page, name: RegExp) =>
+  page.getByRole('tab', { name }).click();
+
 async function openReview(page: Page, extensionId: string): Promise<void> {
   await page.goto(reviewUrl(extensionId));
   // The shell only renders once the worker has assembled the whole payload.
@@ -93,26 +100,32 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
   await expect(firstDiff.locator('[data-column-number]').first()).toBeVisible();
   await expect(page.getByText('new src/app.ts')).toBeVisible();
 
-  // An anchored thread is drawn in the diff; the three that cannot be are
-  // listed instead, which is the whole safety net.
+  // An anchored thread is drawn in the diff; the ones that cannot be are listed
+  // in their own file's card instead, which is the whole safety net. Each file
+  // is selected in the tree before it is looked for — the column virtualizes,
+  // so what is mounted depends on how much of it fits, and this used to depend
+  // on the exact height of everything above it.
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
-  await expect(
-    page.locator('[data-unanchored="src/beta.ts"] [data-listed-reason="out-of-hunk"]'),
-  ).toHaveCount(1);
-  await expect(
-    page.locator('[data-unanchored="src/gamma.ts"] [data-listed-reason="outdated"]'),
-  ).toHaveCount(1);
+  for (const [path, reason] of [
+    ['src/beta.ts', 'out-of-hunk'],
+    ['src/gamma.ts', 'outdated'],
+  ] as const) {
+    await page.locator(`[data-item-path="${path}"]`).click();
+    await expect(
+      page.locator(`[data-unanchored="${path}"] [data-listed-reason="${reason}"]`),
+    ).toHaveCount(1);
+  }
 
-  // The Conversations page lists every thread, including the ones the diff
+  // The Conversations view lists every thread, including the ones the diff
   // cannot show, and every file is in the tree.
-  await page.getByRole('tab', { name: 'Conversations' }).click();
+  await openView(page, /conversations/i);
   for (const thread of THREADS) {
-    const entry = page.locator('.rail').getByText(thread.comments.nodes[0]?.body ?? '');
+    const entry = threadsView(page).getByText(thread.comments.nodes[0]?.body ?? '');
     // Resolved ones are folded behind a disclosure — present, one click away,
     // and never dropped.
-    if (thread.isResolved) await page.getByText('1 resolved').click();
+    if (thread.isResolved) await threadsView(page).getByText('1 resolved').click();
     await expect(entry).toBeVisible();
   }
   for (const path of FILES) {
@@ -150,9 +163,18 @@ test('the tree marks which files carry conversations, and follows a resolve', as
 
   // Resolving src/beta.ts's only thread has to flip its mark from open to
   // settled. Nothing in the file list moves when it does.
-  await page.getByRole('tab', { name: 'Conversations' }).click();
-  await page.locator('.rail').getByText('Out of hunk comment.').click();
-  await page
+  //
+  // By way of the Conversations view's Go to, which is the whole point of that
+  // button: a thread is read and answered where its code is, so asking to be
+  // shown one has to put the diff back on screen and scroll it there.
+  await openView(page, /conversations/i);
+  await threadsView(page)
+    .locator('[data-thread-entry="PRRT_outofhunk"]')
+    .getByRole('button', { name: /go to/i })
+    .click();
+  await expect(page.locator('.shell')).toHaveAttribute('data-view', 'files');
+
+  await filesView(page)
     .locator('[data-thread="PRRT_outofhunk"]')
     .getByRole('button', { name: 'Resolve conversation' })
     .click();
@@ -201,27 +223,35 @@ test('the rail’s reviewer list is not wearing the avatar’s ring', async ({
   expect(await shadowOf('.reviewer.reviewer-good')).not.toBe('none');
 });
 
-test('the rail panel takes only the room its page needs', async ({
+test('switching views and back leaves the diff exactly where it was', async ({
   context,
   extensionId,
   api,
 }) => {
   void api;
-  // The drag is a cap, not a height. The fixture's Overview is short, so a
-  // fixed height would leave a hole between the last reviewer and the tree —
-  // and no amount of dragging closes a hole, it only makes it bigger.
+  // The reason the views are hidden with `visibility` rather than with
+  // `display: none` or by not rendering them. `CodeView` virtualizes against a
+  // scrollport it measures; a display-hidden ancestor takes that measurement
+  // to zero, and on the way back the reviewer has lost their scroll position,
+  // their mounted rows, and every line of context they expanded to get there.
+  // Nothing in jsdom performs layout, so this cannot be checked anywhere else.
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const box = (selector: string) =>
-    page.locator(selector).evaluate((node) => node.getBoundingClientRect().height);
+  await scrollTo(page, 900);
+  const scrollTop = () =>
+    page.evaluate((selector) => document.querySelector(selector)?.scrollTop ?? -1, VIEW);
+  const before = await scrollTop();
+  expect(before).toBeGreaterThan(0);
 
-  const panel = await box('.rail-panel');
-  const page1 = await box('.rail-page:not([hidden])');
+  await openView(page, /overview/i);
+  await expect(page.locator('.shell')).toHaveAttribute('data-view', 'overview');
+  await openView(page, /^files$/i);
 
-  expect(panel).toBeGreaterThan(0);
-  expect(panel).toBeLessThan(240);
-  expect(Math.abs(panel - page1)).toBeLessThan(2);
+  expect(await scrollTop()).toBe(before);
+  await expect(
+    page.locator('diffs-container').first().locator('[data-column-number]').first(),
+  ).toBeVisible();
 });
 
 test('scrolling the diff column walks the tree selection forward, in file order', async ({
@@ -355,7 +385,7 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
 
   // And it comes back onto the page as a thread rather than vanishing.
   await expect(
-    page.getByText('Posted from the browser test.').last(),
+    filesView(page).getByText('Posted from the browser test.').last(),
   ).toBeVisible();
 
   // Nothing is left queued: no pending-review bar, no "not posted" chip.
