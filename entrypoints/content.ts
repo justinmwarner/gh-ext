@@ -66,7 +66,17 @@ export default defineContentScript({
   main(ctx: ContentScriptContext) {
     /** The pull request we have already asked the worker to prefetch. */
     let prefetchedKey: string | null = null;
-    let anchorWarned = false;
+    /**
+     * Whether the "no header found" note has already been logged.
+     *
+     * Latched for the log and nothing else. It used to gate the mount as well,
+     * which made it a one-way switch on the whole fallback: `sync` removes the
+     * button when the tab leaves a pull request, and coming back found no
+     * anchor and a latch that refused to run again — no button, no entry
+     * point, until a hard reload. The console does not need the same sentence
+     * on every navigation; the reviewer does need the button every time.
+     */
+    let anchorMissLogged = false;
     let anchorWarningTimer: number | null = null;
     let resyncPending = false;
 
@@ -104,12 +114,11 @@ export default defineContentScript({
      * on a page that ends up working. Hence the grace period and the re-check.
      */
     function mountFallback(): void {
-      if (anchorWarned || anchorWarningTimer !== null) return;
+      if (anchorWarningTimer !== null) return;
 
       anchorWarningTimer = ctx.setTimeout(() => {
         anchorWarningTimer = null;
-        if (anchorWarned || document.getElementById(BUTTON_ID)) return;
-        anchorWarned = true;
+        if (document.getElementById(BUTTON_ID)) return;
 
         // Re-check: the header may have arrived late, in which case prefer it.
         const late = findAnchor();
@@ -118,11 +127,14 @@ export default defineContentScript({
           return;
         }
 
-        log(
-          'No pull request header found, so the Fast review button was placed ' +
-            'in the corner instead. GitHub markup has probably changed. Tried:',
-          ANCHOR_SELECTORS.join(', '),
-        );
+        if (!anchorMissLogged) {
+          anchorMissLogged = true;
+          log(
+            'No pull request header found, so the Fast review button was placed ' +
+              'in the corner instead. GitHub markup has probably changed. Tried:',
+            ANCHOR_SELECTORS.join(', '),
+          );
+        }
 
         // Placement degrades, the feature does not disappear. A button nobody
         // can find is indistinguishable from a broken extension.

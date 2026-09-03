@@ -29,9 +29,9 @@ export function App() {
       return load.error.kind === 'auth' ? (
         <SetupState pr={pr} error={load.error} />
       ) : (
-        <ErrorState pr={pr} error={load.error} />
+        <ErrorState pr={pr} error={load.error} retry={load.retry} />
       );
     case 'ready':
-      return <Shell payload={load.payload} />;
+      return <Shell payload={load.payload} retry={load.retry} />;
   }
 }

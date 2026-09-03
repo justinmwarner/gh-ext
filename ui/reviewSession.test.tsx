@@ -100,6 +100,7 @@ function Harness() {
       </button>
       <p data-testid="mode">{session.pending.kind}</p>
       <p data-testid="resolving">{[...session.resolveInFlight].join(',')}</p>
+      <p data-testid="rejected">{String(session.tokenRejected)}</p>
       <p data-testid="complete">
         {session.pending.kind === 'pending' ? String(session.pending.countIsComplete) : ''}
       </p>
@@ -763,5 +764,42 @@ describe('two mutations racing on the same thing', () => {
     expect(requestMock.mock.calls.filter((call) => call[0]?.document !== undefined)).toHaveLength(
       1,
     );
+  });
+});
+
+describe('a token that stops working while the page is open', () => {
+  /**
+   * Fine-grained tokens expire, and the options page recommends the shortest
+   * expiry you can live with. When one lapses mid-review every mutation starts
+   * failing with the same sentence in whichever control was pressed — and
+   * nothing on the page says the remedy is two menus away, or that the page
+   * would tell them if they reloaded.
+   */
+  const rejected = {
+    ok: false,
+    error: { kind: 'auth', message: 'GitHub rejected the token', resetAt: null },
+  } as const;
+
+  it('reports the token as rejected, not just this one control as broken', async () => {
+    requestMock.mockResolvedValue(rejected);
+    mount();
+
+    await userEvent.click(screen.getByText('resolve'));
+
+    await waitFor(() => expect(screen.getByTestId('rejected').textContent).toBe('true'));
+  });
+
+  it('says nothing of the sort for an ordinary refusal', async () => {
+    // A rate limit or a permission problem on one thread is not a reason to
+    // tell someone their token has stopped working.
+    requestMock.mockResolvedValue(REFUSED);
+    mount();
+
+    await userEvent.click(screen.getByText('resolve'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('failures').textContent).toMatch(/GitHub said no/),
+    );
+    expect(screen.getByTestId('rejected').textContent).toBe('false');
   });
 });

@@ -146,6 +146,15 @@ export interface ReviewSessionValue {
   viewedInFlight: ReadonlySet<string>;
   /** Threads whose resolve mutation has not answered yet. */
   resolveInFlight: ReadonlySet<string>;
+  /**
+   * Whether GitHub has rejected the token since this page loaded.
+   *
+   * Page-level rather than per-control because that is what it is: an expired
+   * or revoked token fails everything, and reporting it as "this reply failed"
+   * in whichever box was pressed leaves the reviewer retrying controls instead
+   * of fixing the one thing that is wrong.
+   */
+  tokenRejected: boolean;
   setResolved(threadId: string, resolved: boolean): Promise<void>;
   reply(threadId: string, body: string): Promise<boolean>;
   postThread(input: NewThreadInput): Promise<boolean>;
@@ -404,11 +413,19 @@ export function ReviewSessionProvider({
     setFailures((current) => new Map(current).set(key, text));
   }, []);
 
+  const [tokenRejected, setTokenRejected] = useState(false);
+
   const mutate = useCallback(
-    (document: string, variables: Record<string, JsonValue>) =>
+    async (document: string, variables: Record<string, JsonValue>) => {
       // `pr` lets the worker drop the now-stale cached threads for this pull
       // request instead of serving what the reviewer just changed.
-      request(message('mutate', { document, variables, pr: prRef })),
+      const response = await request(message('mutate', { document, variables, pr: prRef }));
+      // Noticed here because every mutation passes through, so no caller has
+      // to remember to check — and a token that has lapsed will fail all of
+      // them, not the one that happened to be pressed first.
+      if (!response.ok && response.error.kind === 'auth') setTokenRejected(true);
+      return response;
+    },
     [prRef],
   );
 
@@ -950,6 +967,7 @@ export function ReviewSessionProvider({
       viewed,
       viewedInFlight,
       resolveInFlight,
+      tokenRejected,
       setResolved,
       reply,
       postThread,
@@ -973,6 +991,7 @@ export function ReviewSessionProvider({
       viewed,
       viewedInFlight,
       resolveInFlight,
+      tokenRejected,
       setResolved,
       reply,
       postThread,

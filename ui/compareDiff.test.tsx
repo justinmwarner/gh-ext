@@ -118,7 +118,7 @@ describe('the compare toggle', () => {
   it('is disabled when the viewer has never reviewed this pull request', () => {
     // There is no earlier commit to compare against, so there is nothing
     // honest the control could do.
-    render(<Shell payload={payloadWith({ reviewed: false })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: false })} />);
 
     const button = compareButton();
     expect((button as HTMLButtonElement).disabled).toBe(true);
@@ -127,7 +127,7 @@ describe('the compare toggle', () => {
 
   it('asks for nothing when it is disabled', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payloadWith({ reviewed: false })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: false })} />);
 
     await user.click(compareButton());
 
@@ -135,7 +135,7 @@ describe('the compare toggle', () => {
   });
 
   it('is offered once the viewer has a review with a commit on it', () => {
-    render(<Shell payload={payloadWith({ reviewed: true })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
     expect((compareButton() as HTMLButtonElement).disabled).toBe(false);
     expect(compareButton().getAttribute('aria-pressed')).toBe('false');
@@ -144,7 +144,7 @@ describe('the compare toggle', () => {
   it('asks the worker for base...head rather than fetching anything itself', async () => {
     const user = userEvent.setup();
     requestMock.mockResolvedValue(compareReply);
-    render(<Shell payload={payloadWith({ reviewed: true })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
     await user.click(compareButton());
 
@@ -166,7 +166,7 @@ describe('the compare toggle', () => {
     // Pierre silently declines to place.
     const user = userEvent.setup();
     requestMock.mockResolvedValue(compareReply);
-    render(<Shell payload={payloadWith({ reviewed: true })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
     await waitFor(() => {
       expect(document.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
@@ -192,7 +192,7 @@ describe('the compare toggle', () => {
     // silently, and with the numbers still lining up.
     const user = userEvent.setup();
     requestMock.mockResolvedValue(compareReply);
-    render(<Shell payload={payloadWith({ reviewed: true })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
     const rows = (): string[] =>
       [...fileShadow('src/app.ts').querySelectorAll('[data-column-number]')].map(
@@ -217,7 +217,7 @@ describe('the compare toggle', () => {
   it('goes back to the whole diff when it is switched off', async () => {
     const user = userEvent.setup();
     requestMock.mockResolvedValue(compareReply);
-    render(<Shell payload={payloadWith({ reviewed: true })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
     await user.click(compareButton());
     await waitFor(() => {
@@ -246,7 +246,7 @@ describe('the compare toggle', () => {
       ok: false,
       error: { kind: 'not-found', message: 'No commit a…a', resetAt: null },
     });
-    render(<Shell payload={payloadWith({ reviewed: true })} />);
+    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
     await user.click(compareButton());
 

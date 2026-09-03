@@ -11,7 +11,7 @@
  * above it has to change shape.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   type PrPayload,
   type PrRef,
@@ -19,14 +19,38 @@ import {
   message,
 } from '@/lib/messages';
 import { request } from './background';
+import { useTokenChange } from './useTokenChange';
 
-export type PrLoad =
+/** The three states, before the control that gets attached to all of them. */
+type PrLoadState =
   | { status: 'loading' }
   | { status: 'ready'; payload: PrPayload }
   | { status: 'failed'; error: ProtocolError };
 
+export type PrLoad = PrLoadState & {
+  /**
+   * Ask the worker again.
+   *
+   * Every failure this hook can report is one the reviewer might have just
+   * fixed somewhere else: a token pasted on the options page, a rate limit
+   * that has since reset, an organisation owner who has approved the token.
+   * Without this the only remedy was a reload, which nothing on screen
+   * suggested.
+   */
+  retry: () => void;
+};
+
 export function usePrPayload(pr: PrRef | null): PrLoad {
-  const [load, setLoad] = useState<PrLoad>({ status: 'loading' });
+  const [load, setLoad] = useState<PrLoadState>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+
+  const retry = useCallback(() => {
+    setAttempt((count) => count + 1);
+  }, []);
+
+  // The setup screen says the pull request will load once a token is pasted.
+  // This is what makes that true.
+  useTokenChange(retry);
 
   useEffect(() => {
     // No coordinates, nothing to ask for. Not an error — the caller renders an
@@ -50,7 +74,7 @@ export function usePrPayload(pr: PrRef | null): PrLoad {
     return () => {
       live = false;
     };
-  }, [pr]);
+  }, [pr, attempt]);
 
-  return load;
+  return { ...load, retry };
 }

@@ -533,3 +533,46 @@ test('clearing the token stops the cache serving the pull request', async ({
   await expect(page.locator('[data-file-card]')).toHaveCount(0);
   expect(api.urls.length).toBe(before);
 });
+
+test('the corner-button fallback comes back after leaving a pull request', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void extensionId;
+  void api;
+  // The day GitHub changes its header markup, the fallback is the whole
+  // feature. It used to mount once per tab: navigating away removed the
+  // button, and coming back found no anchor and a latch that refused to run
+  // again — so the extension had no entry point at all until a hard reload,
+  // which is not a thing anyone thinks to try.
+  await context.route('https://github.com/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      // No `.gh-header-actions`, and nothing else the injector looks for.
+      body: '<!doctype html><html><head><title>acme/widgets</title></head><body></body></html>',
+    }),
+  );
+
+  const page = await context.newPage();
+  await page.goto('https://github.com/acme/widgets/pull/42');
+
+  const button = page.locator('#fast-review-open-button');
+  await expect(button).toBeVisible({ timeout: 10_000 });
+
+  // Soft-navigate off the pull request, the way GitHub's own router does. The
+  // DOM change is what wakes the observer that drives the resync.
+  await page.evaluate(() => {
+    history.pushState({}, '', '/acme/widgets/issues');
+    document.body.append(document.createElement('span'));
+  });
+  await expect(button).toHaveCount(0);
+
+  // And back.
+  await page.evaluate(() => {
+    history.pushState({}, '', '/acme/widgets/pull/42');
+    document.body.append(document.createElement('span'));
+  });
+  await expect(button).toBeVisible({ timeout: 10_000 });
+});

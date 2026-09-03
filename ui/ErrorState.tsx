@@ -79,7 +79,16 @@ function explain(pr: PrRef, error: ProtocolError): Explanation {
   }
 }
 
-export function ErrorState({ pr, error }: { pr: PrRef; error: ProtocolError }) {
+export function ErrorState({
+  pr,
+  error,
+  retry,
+}: {
+  pr: PrRef;
+  error: ProtocolError;
+  /** Ask the worker again. Every failure here is one that may have passed. */
+  retry: () => void;
+}) {
   const { title, body, tokenMayBeAtFault } = explain(pr, error);
 
   return (
@@ -92,6 +101,14 @@ export function ErrorState({ pr, error }: { pr: PrRef; error: ProtocolError }) {
               Check your token
             </button>
           )}
+          {/* Offered for every failure, because every one of them can stop
+              being true without this page hearing about it — a quota refills,
+              an owner approves the token, a network comes back. Telling
+              someone to wait and then giving them nothing to press is how a
+              recoverable state reads as a dead end. */}
+          <button type="button" className="button" onClick={retry}>
+            Try again
+          </button>
           <OpenInGitHub pr={pr} />
         </>
       }

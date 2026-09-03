@@ -87,7 +87,7 @@ const untilDrawn = (path: string) =>
 describe('moving through the review with the keyboard', () => {
   it('moves to the next and previous file with j and k', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('j');
     expect(currentFile()).toBe('src/app.ts');
@@ -103,7 +103,7 @@ describe('moving through the review with the keyboard', () => {
     // Wrapping from the last file to the first reads as "nothing happened" and
     // loses the reviewer's place.
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('kk');
     expect(currentFile()).toBe('src/app.ts');
@@ -114,7 +114,7 @@ describe('moving through the review with the keyboard', () => {
 
   it('marks the current file viewed with v', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('j');
     await user.keyboard('v');
@@ -131,7 +131,7 @@ describe('moving through the review with the keyboard', () => {
   it('opens the pull request on GitHub for the sequence g h', async () => {
     const user = userEvent.setup();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('gh');
 
@@ -145,7 +145,7 @@ describe('moving through the review with the keyboard', () => {
   it('does not swallow the key after a lone g', async () => {
     const user = userEvent.setup();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('gj');
 
@@ -157,7 +157,7 @@ describe('moving through the review with the keyboard', () => {
 describe('the shortcut help overlay', () => {
   it('opens on ? and lists the bindings from the map itself', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('?');
 
@@ -171,7 +171,7 @@ describe('the shortcut help overlay', () => {
 
   it('closes again from its own button', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('?');
     await user.click(screen.getByRole('button', { name: /close/i }));
@@ -183,7 +183,7 @@ describe('the shortcut help overlay', () => {
 describe('searching the diff', () => {
   it('opens on / and lists changed lines that match', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('/');
     const box = screen.getByRole('searchbox', { name: /search the diff/i });
@@ -196,7 +196,7 @@ describe('searching the diff', () => {
 
   it('does not match a context line nobody changed', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('/');
     await user.type(screen.getByRole('searchbox', { name: /search the diff/i }), 'twentytwo');
@@ -206,7 +206,7 @@ describe('searching the diff', () => {
 
   it('goes to the file a result is on when it is chosen', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('/');
     await user.type(screen.getByRole('searchbox', { name: /search the diff/i }), 'new');
@@ -220,7 +220,7 @@ describe('searching the diff', () => {
 
   it('takes Ctrl+F too, so the browser find bar does not open instead', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('{Control>}f{/Control}');
 
@@ -231,7 +231,7 @@ describe('searching the diff', () => {
 describe('the file jump', () => {
   it('opens on Ctrl+K and filters the file list', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('{Control>}k{/Control}');
     const box = screen.getByRole('searchbox', { name: /jump to a file/i });
@@ -244,7 +244,7 @@ describe('the file jump', () => {
 
   it('moves the review to the file that is chosen', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('{Control>}k{/Control}');
     await user.type(screen.getByRole('searchbox', { name: /jump to a file/i }), 'cache');
@@ -265,7 +265,7 @@ describe('never while the reviewer is typing', () => {
     // silently drops them — or moves the page while someone writes — is worse
     // than having no shortcuts at all.
     const user = userEvent.setup();
-    render(<Shell payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
+    render(<Shell retry={() => {}} payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
 
     const box = await screen.findByRole('textbox', { name: /reply to the thread/i });
     await user.click(box);
@@ -281,7 +281,7 @@ describe('never while the reviewer is typing', () => {
   it('does not arm the g sequence from inside a text field', async () => {
     const user = userEvent.setup();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    render(<Shell payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
+    render(<Shell retry={() => {}} payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
 
     const box = await screen.findByRole('textbox', { name: /reply to the thread/i });
     await user.click(box);
@@ -293,7 +293,7 @@ describe('never while the reviewer is typing', () => {
 
   it('still posts the comment on Ctrl+Enter, which is the whole point', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
     await untilDrawn('src/app.ts');
 
     await act(async () => {
@@ -324,7 +324,7 @@ describe('moving between hunks', () => {
     // meaningful here; `hunkStops` is tested against real hunk headers on its
     // own. What this pins is that the channel exists and is connected.
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
     await untilDrawn('src/app.ts');
 
     await user.keyboard('J');
@@ -343,7 +343,7 @@ describe('Mod+Enter goes to the box the cursor is in', () => {
     // typing a reply and pressing Ctrl+Enter would post the *composer's*
     // comment on a different line of a different file.
     const user = userEvent.setup();
-    render(<Shell payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
+    render(<Shell retry={() => {}} payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
     await untilDrawn('src/app.ts');
 
     // A different line of the same file: jsdom virtualizes, so only the first
@@ -378,7 +378,7 @@ describe('Mod+Enter goes to the box the cursor is in', () => {
 describe('acting on the focused thread', () => {
   it('resolves the thread n moved to when e is pressed', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
+    render(<Shell retry={() => {}} payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
 
     await user.keyboard('n');
     await user.keyboard('e');
@@ -391,7 +391,7 @@ describe('acting on the focused thread', () => {
 
   it('puts the cursor in the reply box when r is pressed', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
+    render(<Shell retry={() => {}} payload={payload([reviewThread({ path: 'src/app.ts', line: 2 })])} />);
 
     await user.keyboard('n');
     await user.keyboard('r');
@@ -410,6 +410,7 @@ describe('acting on the focused thread', () => {
     const user = userEvent.setup();
     render(
       <Shell
+        retry={() => {}}
         payload={payload([
           reviewThread({ path: 'src/app.ts', line: 2, isResolved: true }),
           reviewThread({ path: 'src/app.ts', line: 3 }),
@@ -431,7 +432,7 @@ describe('acting on the focused thread', () => {
 
   it('does nothing at all when there are no threads', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('nre');
 
@@ -446,7 +447,7 @@ describe('submitting the review from the keyboard', () => {
       ok: true,
       data: { data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_1' } } } },
     });
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.click(screen.getByRole('button', { name: /start a review/i }));
     await waitFor(() => {
@@ -465,7 +466,7 @@ describe('submitting the review from the keyboard', () => {
 
   it('leaves the chord alone when no review is pending', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('{Control>}{Shift>}{Enter}{/Shift}{/Control}');
 
@@ -476,7 +477,7 @@ describe('submitting the review from the keyboard', () => {
 describe('commenting from the keyboard', () => {
   it('explains that nothing is selected rather than opening an empty composer', async () => {
     const user = userEvent.setup();
-    render(<Shell payload={payload()} />);
+    render(<Shell retry={() => {}} payload={payload()} />);
     await untilDrawn('src/app.ts');
 
     await user.keyboard('c');
@@ -493,6 +494,7 @@ describe('the pull request node the shortcuts read', () => {
     const base = payload();
     render(
       <Shell
+        retry={() => {}}
         payload={{
           ...base,
           pullRequest: pullRequestNode({ ...base.pullRequest, permalink: undefined }),

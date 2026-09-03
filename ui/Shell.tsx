@@ -28,6 +28,7 @@ import { ShortcutHelp } from './ShortcutHelp';
 import { SideRail } from './SideRail';
 import { TopBar } from './TopBar';
 import { DeniedNotice } from './DeniedNotice';
+import { TokenRejectedNotice } from './TokenRejectedNotice';
 import { TruncationNotice } from './TruncationNotice';
 import { type CurrentFile, NO_FILE, fromScroll, fromTree } from './currentFile';
 import { pullRequestUrl } from './githubUrl';
@@ -53,7 +54,14 @@ function step<T>(items: readonly T[], from: number, direction: 1 | -1): T | unde
   return items[Math.min(Math.max(next, 0), items.length - 1)];
 }
 
-export function Shell({ payload }: { payload: PrPayload }) {
+export function Shell({
+  payload,
+  retry,
+}: {
+  payload: PrPayload;
+  /** Ask the worker for this pull request again. */
+  retry: () => void;
+}) {
   return (
     // The session wraps the whole shell rather than the column alone: a
     // resolve has to be visible everywhere at once, and the pending-review
@@ -65,13 +73,13 @@ export function Shell({ payload }: { payload: PrPayload }) {
       threads={payload.threads}
     >
       <ShortcutTargetsProvider>
-        <ReviewSurface payload={payload} />
+        <ReviewSurface payload={payload} retry={retry} />
       </ShortcutTargetsProvider>
     </ReviewSessionProvider>
   );
 }
 
-function ReviewSurface({ payload }: { payload: PrPayload }) {
+function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => void }) {
   const rail = useRailWidth();
   const session = useReviewSession();
   const targets = useShortcutTargets();
@@ -278,6 +286,10 @@ function ReviewSurface({ payload }: { payload: PrPayload }) {
         pr={payload.ref}
         href={prPermalink(payload.pullRequest)}
       />
+      {/* Above the diff rather than in place of it. What is on screen was
+          loaded with a token that worked and is still worth reading; only
+          writing has stopped. */}
+      {session.tokenRejected && <TokenRejectedNotice retry={retry} />}
       <div className="shell-body">
         <SideRail
           width={rail.width}

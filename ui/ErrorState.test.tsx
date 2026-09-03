@@ -8,7 +8,8 @@
  */
 
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import type { PrRef } from '@/lib/messages';
 import { ErrorState } from './ErrorState';
 
@@ -22,6 +23,7 @@ describe('ErrorState', () => {
       <ErrorState
         pr={pr}
         error={{ kind: 'rate-limit', message: 'API rate limit exceeded', resetAt }}
+        retry={() => {}}
       />,
     );
 
@@ -34,6 +36,7 @@ describe('ErrorState', () => {
       <ErrorState
         pr={pr}
         error={{ kind: 'rate-limit', message: 'API rate limit exceeded', resetAt: null }}
+        retry={() => {}}
       />,
     );
 
@@ -50,6 +53,7 @@ describe('ErrorState', () => {
       <ErrorState
         pr={pr}
         error={{ kind: 'not-found', message: 'No pull request', resetAt: null }}
+        retry={() => {}}
       />,
     );
 
@@ -63,6 +67,7 @@ describe('ErrorState', () => {
       <ErrorState
         pr={pr}
         error={{ kind: 'unknown', message: 'Unexpected token < in JSON', resetAt: null }}
+        retry={() => {}}
       />,
     );
 
@@ -72,7 +77,9 @@ describe('ErrorState', () => {
   it.each(['rate-limit', 'not-found', 'unknown'] as const)(
     'offers an escape hatch to github.com for a %s failure',
     (kind) => {
-      render(<ErrorState pr={pr} error={{ kind, message: 'nope', resetAt: null }} />);
+      render(
+        <ErrorState pr={pr} error={{ kind, message: 'nope', resetAt: null }} retry={() => {}} />,
+      );
 
       const link = screen.getByRole('link', { name: /open in github/i });
       expect(link.getAttribute('href')).toBe('https://github.com/acme/widgets/pull/42');
@@ -84,7 +91,7 @@ describe('offering the token as the culprit', () => {
   const checkToken = () => screen.queryByRole('button', { name: /check your token/i });
 
   const show = (kind: 'rate-limit' | 'not-found' | 'unknown', message: string) =>
-    render(<ErrorState pr={pr} error={{ kind, message, resetAt: null }} />);
+    render(<ErrorState pr={pr} error={{ kind, message, resetAt: null }} retry={() => {}} />);
 
   it('offers it for a pull request that is out of reach', () => {
     // A fine-grained token that simply does not grant the repository comes back
@@ -118,5 +125,30 @@ describe('offering the token as the culprit', () => {
   it('always offers the escape hatch, whatever the failure', () => {
     show('unknown', 'Unexpected end of JSON input');
     expect(screen.getByRole('link', { name: /github/i })).not.toBeNull();
+  });
+});
+
+describe('trying again', () => {
+  /**
+   * Every failure this page shows is one the reviewer might have just fixed
+   * elsewhere — a rate limit that has since reset, an owner who has approved
+   * the token, a network that has come back. The copy said "wait and reload"
+   * and offered no way to do either.
+   */
+  const rateLimit = { kind: 'rate-limit', message: 'API rate limit exceeded', resetAt: null } as const;
+
+  it('offers a retry', () => {
+    render(<ErrorState pr={pr} error={rateLimit} retry={() => {}} />);
+
+    expect(screen.getByRole('button', { name: /try again/i })).toBeTruthy();
+  });
+
+  it('asks the worker again when pressed', async () => {
+    const retry = vi.fn();
+    render(<ErrorState pr={pr} error={rateLimit} retry={retry} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });

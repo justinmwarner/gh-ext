@@ -55,3 +55,27 @@ if (!('ResizeObserver' in globalThis)) {
     configurable: true,
   });
 }
+
+/**
+ * A `browser.storage.onChanged` nobody has subscribed to.
+ *
+ * The review page listens for the token changing, so it can load the pull
+ * request the moment the reviewer pastes one instead of leaving them on a
+ * setup screen that promised it would. That listener is registered on mount,
+ * which means every component test that renders the page reaches for
+ * `browser` — a global jsdom has no reason to have.
+ *
+ * Inert, and only installed when nothing else has provided one, so a test that
+ * wants to drive real change events can stub its own and keep it.
+ */
+if (!('browser' in globalThis)) {
+  Object.defineProperty(globalThis, 'browser', {
+    value: {
+      storage: {
+        onChanged: { addListener: () => {}, removeListener: () => {} },
+      },
+    },
+    writable: true,
+    configurable: true,
+  });
+}

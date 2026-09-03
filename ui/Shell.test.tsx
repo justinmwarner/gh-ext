@@ -28,7 +28,7 @@ beforeEach(() => {
 
 describe('Shell', () => {
   it('renders the top bar, the left rail and the main column', () => {
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     expect(screen.getByRole('banner')).toBeDefined();
     expect(screen.getByRole('complementary')).toBeDefined();
@@ -36,7 +36,7 @@ describe('Shell', () => {
   });
 
   it('puts a collapsible Overview at the top of the rail', () => {
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     const rail = screen.getByRole('complementary');
     const overview = screen.getByText('Overview');
@@ -49,7 +49,7 @@ describe('Shell', () => {
     // The worst outcome is a reviewer who cannot tell "no more comments" from
     // "we dropped them", so a capped list is announced rather than absorbed.
     render(
-      <Shell payload={prPayload({ truncated: { files: true, threads: true } })} />,
+      <Shell retry={() => {}} payload={prPayload({ truncated: { files: true, threads: true } })} />,
     );
 
     const notice = screen.getByRole('alert');
@@ -61,7 +61,7 @@ describe('Shell', () => {
   });
 
   it('says nothing about truncation for an ordinary pull request', () => {
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -69,6 +69,7 @@ describe('Shell', () => {
   it('gives every changed file a card in the main column', () => {
     render(
       <Shell
+        retry={() => {}}
         payload={prPayloadWithFiles([
           fileFixture({ path: 'src/app.ts', additions: 12, deletions: 3 }),
           fileFixture({ path: 'README.md' }),
@@ -84,6 +85,7 @@ describe('Shell', () => {
   it('reads the counts and the viewed state off the payload, not the patch', () => {
     render(
       <Shell
+        retry={() => {}}
         payload={prPayloadWithFiles([
           fileFixture({
             path: 'src/app.ts',
@@ -104,7 +106,7 @@ describe('Shell', () => {
   });
 
   it('puts the file tree in the rail, below the overview', () => {
-    render(<Shell payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])} />);
+    render(<Shell retry={() => {}} payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])} />);
 
     const tree = screen.getByRole('navigation', { name: /changed files/i });
     expect(screen.getByRole('complementary').contains(tree)).toBe(true);
@@ -112,13 +114,13 @@ describe('Shell', () => {
   });
 
   it('says so in both regions when a pull request changed nothing', () => {
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     expect(screen.getAllByText(/no changed files/i).length).toBe(2);
   });
 
   it('gives the rail a resize handle the keyboard can reach', () => {
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     const separator = screen.getByRole('separator');
     expect(separator.getAttribute('aria-orientation')).toBe('vertical');
@@ -128,7 +130,7 @@ describe('Shell', () => {
 
 describe('the pending-review footer', () => {
   it('is absent while browsing', () => {
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     expect(screen.queryByRole('contentinfo')).toBeNull();
   });
@@ -139,7 +141,7 @@ describe('the pending-review footer', () => {
       ok: true,
       data: { data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_1' } } } },
     });
-    render(<Shell payload={prPayload()} />);
+    render(<Shell retry={() => {}} payload={prPayload()} />);
 
     await user.click(screen.getByRole('button', { name: /start a review/i }));
 
@@ -152,6 +154,7 @@ describe('the pending-review footer', () => {
   it('is already there for a review GitHub still has open', () => {
     render(
       <Shell
+        retry={() => {}}
         payload={prPayload({
           pullRequest: {
             ...prPayload().pullRequest,
@@ -173,6 +176,7 @@ describe('the unresolved thread jump list', () => {
     // were dropped, and this list is the only place they can appear.
     render(
       <Shell
+        retry={() => {}}
         payload={{
           ...prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })]),
           threads: [reviewThread({ path: 'lib/dropped.ts', line: 3 })],
@@ -202,6 +206,7 @@ describe('the unresolved thread jump list', () => {
   it('lists threads on files the reviewer has not scrolled to', () => {
     render(
       <Shell
+        retry={() => {}}
         payload={{
           ...prPayloadWithFiles([
             fileFixture({ path: 'src/app.ts' }),
@@ -214,5 +219,43 @@ describe('the unresolved thread jump list', () => {
 
     const list = screen.getByRole('list', { name: /unresolved/i });
     expect(list.textContent).toContain('src/deep/last.ts');
+  });
+});
+
+describe('when the token stops working mid-review', () => {
+  /**
+   * Above the diff, not instead of it. The pull request on screen was loaded
+   * with a token that worked; only writing has stopped, and replacing the page
+   * would throw away a diff the reviewer is midway through.
+   */
+  it('says nothing while the token is fine', () => {
+    requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
+
+    render(<Shell retry={() => {}} payload={prPayload()} />);
+
+    expect(screen.queryByText(/rejected your token/i)).toBeNull();
+  });
+
+  it('explains itself once GitHub rejects the token', async () => {
+    requestMock.mockResolvedValue({
+      ok: false,
+      error: { kind: 'auth', message: 'GitHub rejected the token', resetAt: null },
+    });
+
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+    // Through the checkbox rather than a shortcut, so the test does not depend
+    // on which file happens to be current.
+    await userEvent.click(screen.getByRole('checkbox', { name: /src\/app\.ts/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/rejected your token/i)).toBeTruthy();
+    });
+    // And the diff is still there to read.
+    expect(document.querySelector('[data-file-card]')).not.toBeNull();
   });
 });
