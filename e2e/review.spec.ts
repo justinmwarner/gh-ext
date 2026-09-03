@@ -500,3 +500,36 @@ test('a comment expanded into view survives narrowing the diff', async ({
   // granted immediately. Either surface is correct — being on neither is not.
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
 });
+
+test('clearing the token stops the cache serving the pull request', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // Nothing in a cache key names an account, so without a sweep on token
+  // change the cache outlives the token that filled it — and a signed-out
+  // reviewer keeps seeing a whole private pull request until the TTL expires.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+
+  const before = api.urls.length;
+
+  // Signing out, written where the options page writes it.
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('the extension worker never started');
+  await worker.evaluate(async () => {
+    const api = (globalThis as unknown as {
+      chrome: { storage: { local: { remove(keys: string): Promise<void> } } };
+    }).chrome;
+    await api.storage.local.remove('github-token');
+  });
+
+  await page.reload();
+
+  // The setup screen, not the diff — and the worker did not answer it from
+  // cache, which is the part that would have been silent.
+  await expect(page.getByRole('button', { name: 'Open options' })).toBeVisible();
+  await expect(page.locator('[data-file-card]')).toHaveCount(0);
+  expect(api.urls.length).toBe(before);
+});

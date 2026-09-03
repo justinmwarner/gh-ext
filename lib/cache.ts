@@ -165,3 +165,57 @@ export class PrCache {
     return this.store.remove(storeKey(slot, ref));
   }
 }
+
+/**
+ * Drop everything in a cache store.
+ *
+ * For when the token changes. Cache keys name a pull request and a head SHA,
+ * never an account — which is right, because a token's identity has no place
+ * in a storage key, and wrong the moment the token moves: clearing the token
+ * would otherwise leave a whole pull request readable, and swapping in another
+ * account's token would serve the first account's viewed states, pending
+ * review id and author flag to the second.
+ *
+ * Every removal is attempted even if one fails. A half-swept cache is the
+ * dangerous outcome — `payloadFromCache` is all-or-nothing across its slots,
+ * so survivors can still add up to a complete stale payload.
+ */
+export async function forgetCachedReads(store: KeyValueStore): Promise<void> {
+  const keys = await store.keys();
+  await Promise.allSettled(keys.map((key) => store.remove(key)));
+}
+
+/**
+ * Whether a cache write still reflects the current state of a pull request.
+ *
+ * Assembling a payload takes several round trips, and a mutation can land in
+ * the middle of one. The mutation invalidates the slots it affected; the
+ * assembly then finishes and writes what it read *beforehand* straight back,
+ * with a fresh lifetime. A reviewer who reloads inside that window sees the
+ * thread they watched resolve unresolved again, and nothing anywhere says why.
+ *
+ * So a reader takes `fresh()` before it starts and consults it before writing.
+ * A comparison rather than a latch: the *next* read carries post-mutation data
+ * and is entitled to cache it. Per pull request, because reviewing two at once
+ * is ordinary and a resolve in one says nothing about the other.
+ *
+ * The payload itself is still returned when this reports stale — it is only
+ * slightly behind, and the page has already applied the change optimistically.
+ * What it must not become is the cached answer for everyone after.
+ */
+export function writeGenerations() {
+  const counts = new Map<string, number>();
+  const current = (key: string): number => counts.get(key) ?? 0;
+
+  return {
+    /** Called when a mutation for `key` has landed. */
+    bump(key: string): void {
+      counts.set(key, current(key) + 1);
+    },
+    /** True until a mutation for `key` lands after this call. */
+    fresh(key: string): () => boolean {
+      const startedAt = current(key);
+      return () => current(key) === startedAt;
+    },
+  };
+}

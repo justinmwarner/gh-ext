@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { KeyValueStore } from './review/drafts';
-import { DEFAULT_TTL_MS, PrCache, prCacheKey } from './cache';
+import {
+  DEFAULT_TTL_MS,
+  PrCache,
+  forgetCachedReads,
+  prCacheKey,
+  writeGenerations,
+} from './cache';
 
 function memoryStore(): KeyValueStore & { raw: Map<string, string> } {
   const map = new Map<string, string>();
@@ -152,5 +158,109 @@ describe('PrCache', () => {
     expect(await cache.get('threads', ref)).toEqual({ hit: true, value: ['thread'] });
     time.advance(1);
     expect(await cache.get('threads', ref)).toEqual({ hit: false });
+  });
+});
+
+describe('forgetCachedReads', () => {
+  /**
+   * Cache keys name a pull request and a head SHA — never an account. That is
+   * fine while one token is in play and wrong the moment it changes: clearing
+   * the token leaves a full pull request readable from `storage.session`, and
+   * replacing it with another account's token serves the first account's
+   * viewed states, pending review and author flag to the second.
+   *
+   * Keying the cache on the token would mean putting a credential's shadow in
+   * a storage key. Forgetting is the cheaper answer and has no such problem.
+   */
+  it('empties the store', async () => {
+    const store = memoryStore();
+    await store.set('pr:acme/widgets/42@abc', '{"value":1}');
+    await store.set('diff:acme/widgets/42@abc', '{"value":2}');
+    await store.set('head:acme/widgets/42', 'abc');
+
+    await forgetCachedReads(store);
+
+    expect(await store.keys()).toEqual([]);
+  });
+
+  it('leaves a store that was already empty alone', async () => {
+    const store = memoryStore();
+
+    await expect(forgetCachedReads(store)).resolves.toBeUndefined();
+  });
+
+  it('does not stop at the first key it cannot remove', async () => {
+    // A half-swept cache is the dangerous outcome: whatever survived is still
+    // servable, and `payloadFromCache` is all-or-nothing across six slots, so
+    // one surviving entry can still be part of a full stale payload.
+    const removed: string[] = [];
+    const store: KeyValueStore = {
+      get: () => Promise.resolve(null),
+      set: () => Promise.resolve(),
+      keys: () => Promise.resolve(['a', 'b', 'c']),
+      remove: (key) => {
+        removed.push(key);
+        return key === 'a' ? Promise.reject(new Error('nope')) : Promise.resolve();
+      },
+    };
+
+    await forgetCachedReads(store);
+
+    expect(removed).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('writeGenerations', () => {
+  /**
+   * A read takes several round trips and a mutation can land mid-flight. The
+   * mutation invalidates the affected slots; the read then finishes and writes
+   * back what it fetched *before* the mutation, with a fresh TTL. Reload
+   * inside that window and the thread the reviewer watched resolve is
+   * unresolved again, with nothing anywhere to explain it.
+   */
+  it('stays fresh while nothing has been mutated', () => {
+    const generations = writeGenerations();
+    const fresh = generations.fresh('acme/widgets/42');
+
+    expect(fresh()).toBe(true);
+  });
+
+  it('goes stale once a mutation lands', () => {
+    const generations = writeGenerations();
+    const fresh = generations.fresh('acme/widgets/42');
+
+    generations.bump('acme/widgets/42');
+
+    expect(fresh()).toBe(false);
+  });
+
+  it('stays stale for good, however many mutations follow', () => {
+    const generations = writeGenerations();
+    const fresh = generations.fresh('acme/widgets/42');
+
+    generations.bump('acme/widgets/42');
+    generations.bump('acme/widgets/42');
+
+    expect(fresh()).toBe(false);
+  });
+
+  it('does not let one pull request invalidate another', () => {
+    // Reviewing two pull requests in two tabs is ordinary. A resolve in one
+    // must not throw away the other's cache write.
+    const generations = writeGenerations();
+    const fresh = generations.fresh('acme/widgets/42');
+
+    generations.bump('acme/widgets/99');
+
+    expect(fresh()).toBe(true);
+  });
+
+  it('lets a read that starts after the mutation write normally', () => {
+    // The counter is a comparison, not a latch: the next read carries
+    // post-mutation data and is entitled to cache it.
+    const generations = writeGenerations();
+    generations.bump('acme/widgets/42');
+
+    expect(generations.fresh('acme/widgets/42')()).toBe(true);
   });
 });

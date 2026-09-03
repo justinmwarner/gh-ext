@@ -190,8 +190,8 @@ function testPorts(github: GitHubPort, store = memoryStore()) {
     fetchImpl: async () => {
       throw new Error('the files fallback must not be reached in this test');
     },
-    cacheWrite: (promise) => {
-      writes.push(promise);
+    cacheWrite: (write) => {
+      writes.push(write());
     },
   };
   // Cache writes are fire-and-forget in production; tests join them so the
@@ -604,5 +604,45 @@ describe('the viewer’s open pending review', () => {
     expect(github.calls.slice(0, 3).sort()).toEqual(
       ['diff', 'graphql:pending', 'graphql:pr'].sort(),
     );
+  });
+});
+
+describe('handing cache writes to the caller', () => {
+  /**
+   * The writes are offered as thunks, not as promises already in flight.
+   *
+   * A read that started before a mutation carries pre-mutation data. The
+   * worker invalidates the affected slots when the mutation lands, and then
+   * this assembly finishes and writes the old values straight back with a
+   * fresh TTL — so a thread the reviewer watched resolve is unresolved again
+   * on the next load, with nothing anywhere to explain it. The caller can only
+   * decline a write it has not already started.
+   */
+  it('starts no write the caller declines to run', async () => {
+    const { port } = stubGitHub();
+    const { ports, store } = testPorts(port);
+    const declined: unknown[] = [];
+    const guarded: AssemblyPorts = {
+      ...ports,
+      cacheWrite: (write) => {
+        declined.push(write);
+      },
+    };
+
+    await assemblePullRequest(guarded, PR);
+
+    // Offered, and none of them started: the store is untouched.
+    expect(declined.length).toBeGreaterThan(0);
+    expect(await store.keys()).toEqual([]);
+  });
+
+  it('writes when the caller does run them', async () => {
+    const { port } = stubGitHub();
+    const { ports, store, flushWrites } = testPorts(port);
+
+    await assemblePullRequest(ports, PR);
+    await flushWrites();
+
+    expect(await store.keys()).not.toEqual([]);
   });
 });

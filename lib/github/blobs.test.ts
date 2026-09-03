@@ -180,3 +180,27 @@ describe('BlobCache', () => {
     expect(cache.get('sha', 'b.ts')).not.toBeUndefined();
   });
 });
+
+describe('BlobCache.clear', () => {
+  it('drops every blob and the byte count with them', () => {
+    // For a token change. File contents are the largest thing this extension
+    // holds, and they were read with a token that may no longer be the
+    // reviewer's — so they must not survive it. Resetting the byte count
+    // matters as much as emptying the map: a stale count would evict live
+    // entries for space that is already free.
+    const cache = new BlobCache();
+    cache.set('sha', 'a.ts', { status: 'ok', text: 'x'.repeat(1000) });
+    cache.set('sha', 'b.ts', { status: 'ok', text: 'y'.repeat(1000) });
+    expect(cache.size).toBe(2);
+
+    cache.clear();
+
+    expect(cache.size).toBe(0);
+    expect(cache.get('sha', 'a.ts')).toBeUndefined();
+
+    // The budget starts fresh: two more fit without evicting each other.
+    cache.set('sha', 'c.ts', { status: 'ok', text: 'z' });
+    cache.set('sha', 'd.ts', { status: 'ok', text: 'z' });
+    expect(cache.size).toBe(2);
+  });
+});

@@ -164,6 +164,20 @@ export class BlobCache {
     }
   }
 
+  /**
+   * Forget everything, for when the token changes.
+   *
+   * A blob at a commit cannot change, which is why there is no TTL — but who
+   * is allowed to read it can, and these were fetched with a token that may no
+   * longer be the reviewer's. The byte count is reset with the map: leaving it
+   * would have the next writes evicting live entries to reclaim space that is
+   * already free.
+   */
+  clear(): void {
+    this.entries.clear();
+    this.bytes = 0;
+  }
+
   /** Exposed so a test can hold the budget to its word. */
   get size(): number {
     return this.entries.size;

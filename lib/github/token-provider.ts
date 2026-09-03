@@ -76,3 +76,24 @@ export function chromeKeyValueStore(name: StorageAreaName = 'local'): KeyValueSt
     },
   };
 }
+
+/**
+ * Whether a storage change replaced the GitHub token.
+ *
+ * Split out from the listener so the decision can be tested without a browser.
+ * The area is checked because the token lives in `local` and the pull request
+ * cache lives in `session`: a cache write must not be mistaken for the
+ * reviewer signing out and trigger a sweep of the very thing being written.
+ */
+export function isTokenChange(
+  changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+  areaName: string,
+): boolean {
+  if (areaName !== 'local') return false;
+  const change = changes[TOKEN_KEY];
+  if (change === undefined) return false;
+  // A write of the same value is not a change. Saving the token a second time
+  // is a normal thing to do from the options page and should not throw away a
+  // warm cache that is still valid for it.
+  return change.oldValue !== change.newValue;
+}

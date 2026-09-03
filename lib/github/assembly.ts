@@ -67,7 +67,14 @@ export interface AssemblyPorts {
    */
   fetchImpl: typeof fetch;
   /** Best-effort cache write. Never awaited: a full store must not fail a read. */
-  cacheWrite: (promise: Promise<void>) => void;
+  /**
+   * Offer a cache write.
+   *
+   * A thunk rather than a promise: an assembly can outlive a mutation that
+   * invalidated the very slots it is about to fill, and the caller can only
+   * decline a write that has not already been started.
+   */
+  cacheWrite: (write: () => Promise<void>) => void;
   /** Overridden only by tests that need the cap to engage quickly. */
   maxPages?: number;
 }
@@ -442,14 +449,14 @@ export async function assemblePullRequest(
   // failure halfway through leaves the cache as it was rather than half filled
   // with a pull request whose diff or thread tail never arrived.
   if (diffLoad.cachedAt !== ref.headSha) {
-    ports.cacheWrite(ports.cache.set('diff', ref, diff));
+    ports.cacheWrite(() => ports.cache.set('diff', ref, diff));
   }
-  ports.cacheWrite(ports.store.set(headPointerKey(pr), ref.headSha));
-  ports.cacheWrite(ports.cache.set('pr', ref, fullNode));
-  ports.cacheWrite(ports.cache.set('threads', ref, threads.nodes));
-  ports.cacheWrite(ports.cache.set('checks', ref, checks));
-  ports.cacheWrite(ports.cache.set('truncated', ref, truncated));
-  ports.cacheWrite(ports.cache.set('denied', ref, denied));
+  ports.cacheWrite(() => ports.store.set(headPointerKey(pr), ref.headSha));
+  ports.cacheWrite(() => ports.cache.set('pr', ref, fullNode));
+  ports.cacheWrite(() => ports.cache.set('threads', ref, threads.nodes));
+  ports.cacheWrite(() => ports.cache.set('checks', ref, checks));
+  ports.cacheWrite(() => ports.cache.set('truncated', ref, truncated));
+  ports.cacheWrite(() => ports.cache.set('denied', ref, denied));
 
   return {
     ref: pr,

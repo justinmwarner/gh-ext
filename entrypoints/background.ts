@@ -17,7 +17,12 @@
 
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import { PrCache, type PrCacheRef } from '@/lib/cache';
+import {
+  PrCache,
+  type PrCacheRef,
+  forgetCachedReads,
+  writeGenerations,
+} from '@/lib/cache';
 import {
   type AssemblyPorts,
   assemblePullRequest,
@@ -29,7 +34,11 @@ import { type BlobResult, BlobCache, fetchBlob } from '@/lib/github/blobs';
 import { AuthError, GitHubClient, RateLimitError } from '@/lib/github/client';
 import { parseUnifiedDiff } from '@/lib/github/diff';
 import { reviewHash } from '@/lib/github/pr-url';
-import { ChromeTokenProvider, chromeKeyValueStore } from '@/lib/github/token-provider';
+import {
+  ChromeTokenProvider,
+  chromeKeyValueStore,
+  isTokenChange,
+} from '@/lib/github/token-provider';
 import {
   type CompareDiff,
   type Err,
@@ -88,8 +97,8 @@ export default defineBackground({
     };
 
     /** Cache writes are best effort — a full storage area must not fail a read. */
-    const cacheWrite = (promise: Promise<void>): void => {
-      void promise.catch((error: unknown) => {
+    const cacheWrite = (write: () => Promise<void>): void => {
+      void write().catch((error: unknown) => {
         console.warn('[fast-review] cache write failed', error);
       });
     };
@@ -102,13 +111,38 @@ export default defineBackground({
       cacheWrite,
     };
 
+    /**
+     * How many times each pull request has been mutated from this worker.
+     *
+     * A read takes several round trips, and a mutation can land in the middle
+     * of one. The mutation invalidates the affected slots; the read then
+     * finishes and writes what it fetched *before* the mutation straight back,
+     * with a fresh TTL. The reviewer reloads inside that window and the thread
+     * they watched resolve is unresolved again, with nothing to explain it.
+     *
+     * So each assembly notes the count it started at and declines its cache
+     * writes if the count has moved. The payload it returns is still served —
+     * only slightly stale, and the page has already applied the mutation
+     * optimistically — but it is not allowed to become the cached answer.
+     */
+    const generations = writeGenerations();
+
     /** Assemble, folding concurrent callers for the same pull request together. */
     function assembleOnce(pr: PrRef): Promise<PrPayload> {
       const key = prKey(pr);
       const running = inflight.get(key);
       if (running) return running;
 
-      const promise = assemblePullRequest(ports, pr).finally(() => {
+      const fresh = generations.fresh(key);
+      const scoped: AssemblyPorts = {
+        ...ports,
+        cacheWrite: (write) => {
+          if (!fresh()) return;
+          cacheWrite(write);
+        },
+      };
+
+      const promise = assemblePullRequest(scoped, pr).finally(() => {
         inflight.delete(key);
       });
       inflight.set(key, promise);
@@ -161,12 +195,15 @@ export default defineBackground({
       // The reviewer's own action just invalidated the cached copy. Waiting out
       // the TTL would show them a stale version of what they just changed.
       if (pr) {
+        // Bumped before the removals, so an assembly that is already running
+        // knows its data predates this mutation and declines to write it back.
+        generations.bump(prKey(pr));
         const headSha = await readHeadSha(cacheStore, pr);
         if (headSha !== null) {
           const ref: PrCacheRef = { ...pr, headSha };
-          cacheWrite(cache.invalidate('threads', ref));
-          cacheWrite(cache.invalidate('checks', ref));
-          cacheWrite(cache.invalidate('pr', ref));
+          cacheWrite(() => cache.invalidate('threads', ref));
+          cacheWrite(() => cache.invalidate('checks', ref));
+          cacheWrite(() => cache.invalidate('pr', ref));
         }
       }
 
@@ -213,6 +250,29 @@ export default defineBackground({
      * — only the budget in `BlobCache`.
      */
     const blobs = new BlobCache();
+
+    /**
+     * Forget every cached read when the token changes.
+     *
+     * Nothing in a cache key names an account — deliberately, because a
+     * credential's identity has no business in a storage key — so without this
+     * the cache outlives the token that filled it. Clearing the token on the
+     * options page would leave a whole pull request readable for the rest of
+     * the TTL, and replacing it with another account's token would show that
+     * account the first one's viewed states, pending review and author flag,
+     * then fail every mutation against ids it cannot use.
+     *
+     * Registered at the top level of `main` so it survives the worker being
+     * killed and restarted, like every other listener here.
+     */
+    browser.storage.onChanged.addListener((changes, areaName) => {
+      if (!isTokenChange(changes, areaName)) return;
+      inflight.clear();
+      blobs.clear();
+      void forgetCachedReads(cacheStore).catch((error: unknown) => {
+        console.warn('[fast-review] could not clear the cache', error);
+      });
+    });
 
     /**
      * One side of one file, for `loadDiffFiles` on the review page.
