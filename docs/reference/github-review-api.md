@@ -376,7 +376,20 @@ Accept: application/vnd.github.diff
 ```
 
 One request, whole unified diff, no pagination. GitHub refuses to generate it for
-exceptionally large diffs; on failure fall back to:
+exceptionally large diffs.
+
+**"On failure" is the wrong rule, and this document used to say it.** Taken
+literally — as `lib/github/assembly.ts` did — every failure triggers the fallback,
+so a 403 from a token missing Contents, a 404 for a repository the token cannot
+see, or a 429 from a throttle each buy up to thirty more requests against an
+endpoint that is already refusing, and the reviewer is shown the *fallback's*
+error with the original status discarded. Fall back on the statuses that mean
+"this diff exists but I will not render it" — 406, and 500 for a diff large enough
+to time out server-side — and rethrow everything else. State it as the statuses
+worth retrying rather than the ones to skip: the inverted form silently lets
+through every status nobody thought of.
+
+Falling back means:
 
 ```
 GET /repos/{owner}/{repo}/pulls/{number}/files?per_page=100
@@ -388,10 +401,40 @@ which caps at 3000 files total and omits `patch` on very large individual files.
 
 ## 6. Rate limits
 
-REST: 5000 requests/hour. GraphQL: 5000 points/hour. The batched query above
-costs a single point. For one person this is not a practical constraint, but the
-remaining quota should be surfaced on the options page so an accidental polling
-loop is visible rather than mysterious.
+REST: 5000 requests/hour. GraphQL: 5000 points/hour. The remaining quota is
+surfaced on the options page so an accidental polling loop is visible rather than
+mysterious.
+
+The batched query does **not** cost a single point, as this document used to
+claim. By GitHub's own formula `reviewThreads(first: 100)` with a nested
+`comments(first: 50)` counts as 1 + 100, and `files`, `latestReviews`,
+`reviewRequests` and `commits` → `contexts` add more — roughly 106 requests, which
+rounds to 2 points. Still not a practical constraint for one person; the point is
+that the figure was asserted rather than derived.
+
+### The three shapes of "you are being throttled"
+
+The important omission. A client that recognises only one of these reports the
+other two as an unclassifiable error, and the reviewer is told "Something went
+wrong" about a problem that fixes itself by waiting.
+
+| Shape | How it arrives | What identifies it |
+| --- | --- | --- |
+| Primary REST limit | HTTP 403 | `x-ratelimit-remaining: 0`, plus `x-ratelimit-reset` as an absolute epoch second |
+| Primary GraphQL limit | **HTTP 200** | `errors[].type === "RATE_LIMITED"`, `data: null` |
+| Secondary limit | HTTP 403 **or** 429 | `Retry-After`, in seconds, and `x-ratelimit-remaining` left non-zero |
+
+Three consequences for any code reading these:
+
+- **The GraphQL limit is an HTTP 200.** Nothing about the status says what
+  happened, and a client that classifies only on status cannot see it at all.
+  This is the same lesson as §8, one section later, and the two belong together.
+- **Keep `errors[].type`.** It is the only field that separates `RATE_LIMITED`
+  from `FORBIDDEN`, and the remedies are opposites: wait, versus get a different
+  token. A grouping function that keeps only `message` and `path` throws that
+  away — `lib/github/graphql-errors.ts` did.
+- **Read `Retry-After` as well as `x-ratelimit-reset`.** A secondary limit sends
+  no `x-ratelimit-*` headers at all, so without it there is no countdown to show.
 
 ---
 

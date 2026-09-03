@@ -1437,6 +1437,23 @@ default, and you can override them with CSS variables (next section).
 
 ## E.5 CSS custom properties — fonts, sizes, colours
 
+### Theming: `color-scheme` and `light-dark()`
+
+Neither reference document recorded this, and it is the single most important
+styling fact about both packages. They do not have a theme class, a data
+attribute or a prop: they declare `color-scheme: light dark` and express every
+colour as `light-dark(light, dark)`, so they follow the OS on their own. A
+surrounding page that does the same thing needs no synchronisation and has no
+second source of truth — which is what `entrypoints/review/style.css` does, and
+what its own header comment says.
+
+The corollary is that a page which *does not* declare `color-scheme: light dark`
+has one surface following the OS and one not. That is what the options page did
+until it was fixed: a full-window white flash reached by a button from a dark
+review page.
+
+
+
 Everything renders inside a shadow root with `:host` defaults.
 
 **Page-level values do not always reach in, and the colour tokens are the case where
@@ -1548,8 +1565,11 @@ Built-in font fallbacks (`src/style.css` `:host`):
 
 ## E.6 `unsafeCSS` — injecting CSS into the shadow root
 
-`options.unsafeCSS: string` is wrapped in `@layer unsafe` (highest priority; the sheet
-declares `@layer base, theme, rendered, unsafe;`). Docs sample:
+`options.unsafeCSS: string` is wrapped in `@layer unsafe`, which is the highest
+priority. The shipped sheet does not declare the order in one statement, as this
+document previously claimed: it opens `@layer base {` on its first line and closes with
+`@layer theme, rendered, unsafe;` on its last. The conclusion is unchanged — `unsafe`
+wins — but the quoted declaration was not what ships. Docs sample:
 
 ```tsx
 <FileDiff

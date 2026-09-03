@@ -1702,3 +1702,32 @@ Types (selection): `FileTreeOptions`, `FileTreeVisibleRow`, `FileTreeItemHandle`
 `FileTreeControllerOptions`. (Several of these *are* exported from
 `dist/model/publicTypes.d.ts`, but that path is not in `exports`, so they are effectively private —
 restate them locally if you need them.)
+
+---
+
+## Theming, and what a page can actually override
+
+Recorded here because neither of these documents said it, and both are easy to
+get wrong from reading the source alone.
+
+`@pierre/trees` has no theme class, data attribute or prop. It declares
+`color-scheme: light dark` and writes every colour as `light-dark(light, dark)`,
+so it follows the OS by itself. A surrounding page that declares the same pair
+stays in step with no synchronisation.
+
+It ships **no `.css` file**: the stylesheet is a JS string in `dist/style.js`,
+adopted into the shadow root through `adoptedStyleSheets`. Reading it means
+decoding that string.
+
+Two things a page can change, both verified in a browser rather than inferred:
+
+- **The `--trees-*-override` tokens are real hooks** — undeclared fallback slots,
+  so a value set on the host reaches in. `--trees-bg-override`,
+  `--trees-border-color-override`, `--trees-accent-override`,
+  `--trees-status-added-override` and its deleted/modified twins,
+  `--trees-focus-ring-color-override`, `--trees-padding-inline-override`
+  (`grep -o -- "--trees-[a-z-]*-override" node_modules/@pierre/trees/dist/style.js`).
+- **It paints its background on the host element itself**, not on anything inside
+  the shadow root — unlike `@pierre/diffs`, which paints on the first element
+  within it. A test comparing backgrounds has to read them at different depths;
+  `e2e/review.spec.ts` does, and says so.
