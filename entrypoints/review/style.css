@@ -360,6 +360,71 @@ code {
   text-overflow: ellipsis;
 }
 
+/* ------------------------------------------------------- the commit strip */
+
+.commit-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Scrolls rather than wraps. A wrapped strip changes height as the pull
+   request does, and this bar sits above the diff — a second row appearing
+   would move the column under whoever is reading it. */
+.commit-strip {
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.commit-tab {
+  flex: 0 0 auto;
+  min-width: 24px;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 12px;
+  /* So the strip does not jitter as the numbers gain digits. */
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  color: light-dark(#59636e, #9198a1);
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#f6f8fa, #212830);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.commit-tab:hover {
+  color: light-dark(#1f2328, #e6edf3);
+  border-color: light-dark(#8c959f, #6e7681);
+}
+
+.commit-tab[aria-pressed='true'] {
+  color: #ffffff;
+  border-color: light-dark(#0969da, #4493f8);
+  background: light-dark(#0969da, #4493f8);
+}
+
+/* One line, one place, always rendered. A line that appears only on hover
+   moves everything below it every time the pointer crosses the strip. */
+.commit-detail {
+  margin: 0;
+  min-height: 16px;
+  font-size: 12px;
+  line-height: 16px;
+  color: light-dark(#59636e, #9198a1);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .scope-actions {
   display: flex;
   align-items: center;

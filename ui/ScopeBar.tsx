@@ -17,7 +17,9 @@
  * feature of its own rather than one preset among several.
  */
 
-import type { ResolvedScope } from '@/lib/review/diffScope';
+import type { DiffScope, ResolvedScope } from '@/lib/review/diffScope';
+import type { PrCommit } from '@/lib/github/types';
+import { CommitTabs } from './CommitTabs';
 
 const NEVER_REVIEWED =
   'You have not reviewed this pull request yet, so there is no earlier commit ' +
@@ -35,6 +37,11 @@ const NO_LIST =
 export interface ScopeBarProps {
   /** The scope the reviewer asked for, resolved against the current history. */
   scope: ResolvedScope;
+  /** Oldest first. The strip numbers these, and numbers nothing else. */
+  commits: readonly PrCommit[];
+  /** The unresolved scope, which is what the strip presses its numbers from. */
+  chosen: DiffScope;
+  onScope: (scope: DiffScope) => void;
   /** How many commits the picker has. Fewer than the pull request may have. */
   commitCount: number;
   /** GitHub sent fewer commits than it says exist, or none at all. */
@@ -93,6 +100,9 @@ function showing(scope: ResolvedScope, commitCount: number, failed: boolean): st
 
 export function ScopeBar({
   scope,
+  commits,
+  chosen,
+  onScope,
   commitCount,
   commitsTruncated,
   sinceReviewAvailable,
@@ -107,9 +117,21 @@ export function ScopeBar({
 
   return (
     <div className="scope-bar" data-scope={scopeState(scope, failed)}>
-      <p className="scope-showing">
-        {busy ? 'Comparing…' : showing(scope, commitCount, failed)}
-      </p>
+      {/* The strip carries its own line for whichever commit is under the
+          pointer, so the sentence about what is on screen goes there rather
+          than on a second row of its own. */}
+      <CommitTabs
+        commits={commits}
+        scope={chosen}
+        onScope={onScope}
+        fallback={busy ? 'Comparing…' : showing(scope, commitCount, failed)}
+      />
+
+      {commits.length === 0 && (
+        <p className="scope-showing">
+          {busy ? 'Comparing…' : showing(scope, commitCount, failed)}
+        </p>
+      )}
 
       <div className="scope-actions">
         <button

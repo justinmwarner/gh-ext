@@ -828,6 +828,78 @@ test('a comment expanded into view survives narrowing the diff', async ({
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
 });
 
+test('the numbered strip scopes the diff, and says which commit on hover', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // Numbers rather than subjects, because a strip of subjects is unscannable.
+  // What a number cannot say goes on the line underneath, in one fixed place —
+  // and that line is what makes the strip usable at all, so it is worth a
+  // browser test rather than a jsdom one.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const strip = page.getByRole('toolbar', { name: /scope the diff/i });
+  await expect(strip.getByRole('button')).toHaveCount(4);
+  await expect(strip.getByRole('button', { name: 'All' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  const detail = page.locator('.commit-detail');
+  await strip.getByRole('button', { name: /^Commit 2/ }).hover();
+  await expect(detail).toContainText('Handle renames');
+  await expect(detail).toContainText('rowan');
+
+  // The first commit alone, which is the one range this fixture routes for a
+  // single commit. Its own parent is the pull request's base.
+  await strip.getByRole('button', { name: /^Commit 1/ }).click();
+
+  await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'narrowed');
+  await expect(strip.getByRole('button', { name: /^Commit 1/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(api.urls.some((url) => url.includes(`${BASE_SHA}...${FIRST_SHA}`))).toBe(true);
+
+  // With the pointer away, the line falls back to what is actually on screen.
+  await page.locator('.pr-title').hover();
+  await expect(detail).toContainText('Add the parser');
+});
+
+test('shift-clicking the strip takes the span between two commits', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const strip = page.getByRole('toolbar', { name: /scope the diff/i });
+  await strip.getByRole('button', { name: /^Commit 1/ }).click();
+  await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'narrowed');
+
+  await page.keyboard.down('Shift');
+  await strip.getByRole('button', { name: /^Commit 2/ }).click();
+  await page.keyboard.up('Shift');
+
+  // Both ends pressed, and the middle of a two-commit span is its ends.
+  await expect(strip.getByRole('button', { name: /^Commit 1/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(strip.getByRole('button', { name: /^Commit 2/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  // The pointer is still on the tab that was just clicked, and the line says
+  // what is under the pointer. Move away and it says what is on screen.
+  await page.locator('.pr-title').hover();
+  await expect(page.locator('.commit-detail')).toContainText('2 commits');
+  expect(api.urls.some((url) => url.includes(`${BASE_SHA}...${PRIOR_SHA}`))).toBe(true);
+});
+
 test('scoping the diff to one commit never draws a comment on the wrong line', async ({
   context,
   extensionId,

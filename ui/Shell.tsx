@@ -341,6 +341,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
       <TopBar payload={payload} />
       <ScopeBar
         scope={resolved}
+        commits={payload.commits}
+        chosen={scope}
+        onScope={setScope}
         commitCount={payload.commits.length}
         commitsTruncated={payload.truncated.commits}
         sinceReviewAvailable={reviewedAt !== null}
