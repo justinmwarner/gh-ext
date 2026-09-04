@@ -399,6 +399,143 @@ which caps at 3000 files total and omits `patch` on very large individual files.
 
 ---
 
+## 5a. The pull request's commits, and scoping the diff to them
+
+**Verified 2026-09-04.** Every claim in this section was executed against
+`api.github.com`; the pull requests used are named beside each one.
+
+### `PullRequest.commits` stops at 250 and then says it is finished
+
+This is the one that will break naive code, and it belongs in section 1 in
+spirit. `NixOS/nixpkgs#554614` reports `commits.totalCount: 626`. Walking the
+connection at `first: 100`:
+
+```
+page 1: 100 nodes, hasNextPage true,  endCursor MTAw
+page 2: 100 nodes, hasNextPage true,  endCursor MjAw
+page 3:  50 nodes, hasNextPage FALSE, endCursor MjUw
+```
+
+GitHub stops at 250 and reports the walk complete. So a cursor-following
+collector — `lib/github/pagination.ts` — returns `truncated: false` in perfect
+good faith while 376 commits are missing, and a commit picker built on it would
+offer a history that silently is not the history.
+
+**`totalCount` is the only field that knows.** Select it, and compare it against
+the number of nodes the walk delivered. `lib/github/commits.ts` does.
+
+Also observed: `first` above 100 is accepted without a validation error on this
+connection (250 was tried), which is *not* a reason to rely on it. The documents
+here use `first: 100` like every other connection in this file.
+
+### Ordering
+
+`commits` is **oldest first**. That is why the batched read in section 3 reaches
+the head commit's checks with `commits(last: 1)`.
+
+### The shape
+
+`PullRequestCommitConnection` has `edges`, `nodes`, `pageInfo`, `totalCount`.
+`PullRequestCommit` has `commit`, `id`, `pullRequest`, `resourcePath`, `url` —
+the commit itself is one level down. Introspected 2026-09-04.
+
+The document this extension issues, executed as written against
+`pierrecomputer/pierre#1`:
+
+```graphql
+query PullRequestCommits($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      commits(first: 100) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes { ...PrCommitFields }
+      }
+    }
+  }
+}
+fragment PrCommitFields on PullRequestCommit {
+  commit {
+    oid abbreviatedOid messageHeadline committedDate
+    author { name user { login } }
+    parents(first: 1) { nodes { oid } }
+  }
+}
+```
+
+`author` is a `GitActor`: `name` is the string on the commit, `user` is null
+whenever GitHub could not match the address to an account. Select both.
+
+`parents(first: 1)` is not decoration. The only diff endpoint available
+compares *two* commits, so "show me just this commit" is the compare between it
+and its parent — and the parent has to come from the commit rather than from
+its neighbour in the list, because the first commit of a pull request has no
+neighbour and a list carrying commits merged in from the base branch can put a
+commit beside one that is not its parent.
+
+### `/compare/{a}..{b}` is a 404. Only three-dot exists
+
+```
+GET /repos/pierrecomputer/pierre/compare/{a}...{b}   → 200
+GET /repos/pierrecomputer/pierre/compare/{a}..{b}    → 404 Not Found
+```
+
+So there is no decision to make about two-dot versus three-dot: the REST API
+offers one syntax, and it is `merge-base(a, b)..b`. Where the two forms could
+disagree — a pair that has diverged — three-dot is also the one that answers
+"what did these commits change" rather than showing the divergence as reverted
+lines.
+
+### The wrong way round is HTTP 200 with an empty body
+
+```
+GET /compare/{later}...{earlier}
+  → 200, "status": "behind", "ahead_by": 0, "files": []
+  → with Accept: application/vnd.github.diff, an EMPTY body
+```
+
+Not an error anywhere. A caller that hands GitHub the pair in the order the
+reviewer clicked them renders an empty column, which reads as "those commits
+changed nothing". Order the two ends by their position in the commit list.
+
+A commit that does not exist at all *is* a 404.
+
+### A force-pushed commit stays reachable, so the compare still works
+
+The important one for correctness. `NixOS/nixpkgs#550556` was force-pushed on
+2026-08-25, from `ca43018` to `4c6df67`. Six days later:
+
+- `ca43018` is **not** in `PullRequest.commits` any more.
+- `GET /repos/NixOS/nixpkgs/commits/ca43018` still returns **200**.
+- `GET /compare/ca43018...4c6df67` still returns **200**:
+  `"status": "diverged", "ahead_by": 1, "behind_by": 1`, two files.
+
+So a page holding a commit the reviewer selected before a force-push will get a
+perfectly successful diff against history the pull request no longer has, with
+nothing in the response to say so. **Membership of the current `commits` list is
+the check**, and it has to happen before the request, because a request that
+succeeds is the failure. `lib/review/diffScope.ts` does it there.
+
+### Anchoring is against the pull request, not against the scope
+
+`AddPullRequestReviewThreadInput` (section 4) is `path`, `body`, `line`, `side`,
+`startLine`, `startSide`, `subjectType` and the two ids. **There is no commit
+argument.** The same is true of what comes back: `PullRequestReviewThread.line`
+is a position in the pull request's own diff.
+
+So on a diff between two other commits, a thread's line number counts against a
+different file — and it usually still exists, so an annotation placed on it
+renders, on the wrong text, silently. Both directions of this are handled in
+`ui/reviewThreads.ts` and `ui/composerAnchor.ts`: a side is trusted only when
+the narrowed diff's commit for that side is the pull request's own.
+
+REST *does* have what GraphQL lacks here — `POST /repos/{o}/{r}/pulls/{n}/comments`
+takes `commit_id` — which is the option written up in
+`docs/superpowers/specs/2026-09-04-commit-scoping-comparison.md`. It has not
+been executed against the live API and nothing here relies on it.
+
+---
+
 ## 6. Rate limits
 
 REST: 5000 requests/hour. GraphQL: 5000 points/hour. The remaining quota is

@@ -206,6 +206,10 @@ GitHub and vice versa. There is no parallel state to reconcile.
 review on the PR and re-renders the diff as `thatSha...headSha`. It is exposed as
 a toggle in the top bar, disabled when the viewer has no prior review.
 
+> **Superseded 2026-09-04 — see §16.9.** It is now one preset among several
+> over a general commit-scoping mechanism, and the control moved out of the top
+> bar onto a row of its own.
+
 ### Draft persistence
 
 Drafts are keyed by `{prId, path, line, side}` and written to
@@ -463,3 +467,32 @@ preserved and nothing is exposed to the page.
   fails. `vite` is a required peer dependency in 0.21, and Node >= 22 is needed.
 - Content scripts get no HMR and are absent from the dev manifest entirely, so
   the injected button must be smoke-tested against a production build.
+
+### 16.9 Narrowing is general, and line numbers do not survive it — §9 changes
+
+"Changes since my last review" was one feature. It is now one preset over
+`lib/review/diffScope.ts`, which resolves a single commit, a range of commits or
+the review preset into the same pair of commits and one `/compare/` request.
+
+Three things this exposed, all recorded in
+`docs/reference/github-review-api.md` §5a with the executions behind them:
+
+- **`PullRequest.commits` stops at 250 and then reports `hasNextPage: false`.**
+  Following the cursors cannot detect it. `totalCount` is the only field that
+  can, and the shortfall is said on screen.
+- **`/compare/{a}..{b}` is a 404.** Three-dot is not a choice.
+- **A force-pushed commit stays reachable and its compare still returns 200.**
+  So a selected commit that has left the pull request must be caught against the
+  commit list *before* the request, because the request succeeds.
+
+The change to §9 that matters most is not the feature. A review thread's `line`
+is a position in the **pull request's** diff, and
+`addPullRequestReviewThread` has no commit argument — so on a diff between two
+other commits that number counts against a different file. It usually exists,
+so Pierre renders the annotation, on the wrong text, silently. §16.2's rule
+therefore extends: a thread that cannot be *believed* is listed for that reason,
+and the composer refuses on that side. This was already happening on the
+deletions side of "since my last review".
+
+Open questions, with options and a recommendation, are in
+`docs/superpowers/specs/2026-09-04-commit-scoping-comparison.md`.
