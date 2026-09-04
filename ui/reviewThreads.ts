@@ -12,10 +12,18 @@
  * So every anchor from `partitionThreads` is cross-checked against the real
  * hunk ranges here, and anything outside them is demoted into the per-file
  * section rather than handed to a renderer that will drop it.
+ *
+ * The second cross-check is worse than the first. A thread's line is a
+ * position in the *pull request's* diff, and the diff on screen may be between
+ * two other commits — so the same number counts against a different file.
+ * There the annotation is not dropped, it is drawn, on whatever text occupies
+ * that row. `sides` says which sides can be believed, and a thread on one that
+ * cannot is demoted for that reason instead.
  */
 
 import type { DiffLineAnnotation, FileDiffMetadata, Hunk } from '@pierre/diffs';
 import type { DiffSide, ReviewThread } from '@/lib/github/types';
+import type { AnchorableSides } from '@/lib/review/diffScope';
 import { type AnnotationSide, isMultiLine, partitionThreads } from '@/lib/review/threads';
 
 /** An inclusive, one-based span of lines on one side of the diff. */
@@ -42,7 +50,13 @@ export interface ComposerMetadata {
 
 export type AnnotationMetadata = ThreadMetadata | ComposerMetadata;
 
-export type ListedReason = 'outdated' | 'file-level' | 'no-line' | 'out-of-hunk';
+export type ListedReason =
+  | 'outdated'
+  | 'file-level'
+  | 'no-line'
+  | 'out-of-hunk'
+  /** The diff on screen numbers this side's lines against a different commit. */
+  | 'other-commit';
 
 export interface ListedThread {
   thread: ReviewThread;
@@ -102,8 +116,31 @@ const EMPTY_LINES: ReadonlySet<number> = new Set();
 const toAnnotationSide = (side: DiffSide): AnnotationSide =>
   side === 'LEFT' ? 'deletions' : 'additions';
 
+export interface ThreadLayoutOptions {
+  /**
+   * Which sides of *this* diff number their lines the way the pull request's
+   * own diff does.
+   *
+   * Required rather than defaulted, because forgetting it is the dangerous
+   * outcome and a default would be exactly the forgotten case.
+   */
+  sides: AnchorableSides;
+  /** Memoized annotation metadata, kept alive across renders. */
+  metadata?: Map<string, ThreadMetadata>;
+  /** Lines the renderer has reported drawable after expanding context. */
+  revealed?: ReadonlySet<number>;
+}
+
 /**
  * Annotations for one file, plus everything that has to be listed instead.
+ *
+ * Two demotions happen here and they fail differently. A line outside the
+ * rendered hunks is a comment Pierre would silently *not* draw. A line on a
+ * side whose numbers belong to a different commit is a comment Pierre would
+ * silently draw *in the wrong place* — which is worse, because the reviewer
+ * has no way to suspect it. Both end up in the per-file list; only the second
+ * needs its own sentence, because "not shown" and "shown against code it was
+ * not written about" are not the same warning.
  *
  * `metadata` is passed in so its identity survives across renders: Pierre
  * compares annotation metadata **by reference**, so a fresh object each time
@@ -114,9 +151,9 @@ const toAnnotationSide = (side: DiffSide): AnnotationSide =>
 export function layoutThreads(
   threads: readonly ReviewThread[],
   fileDiff: FileDiffMetadata,
-  metadata: Map<string, ThreadMetadata> = new Map(),
-  revealed: ReadonlySet<number> = EMPTY_LINES,
+  options: ThreadLayoutOptions,
 ): FileThreadLayout {
+  const { sides, metadata = new Map(), revealed = EMPTY_LINES } = options;
   const lines = renderedLines(fileDiff);
   const { anchored, unanchorable } = partitionThreads([...threads]);
 
@@ -136,6 +173,16 @@ export function layoutThreads(
   }
 
   for (const { thread, anchor } of anchored) {
+    // Before the hunk check, and not subject to `revealed`. Expanding context
+    // proves a row is on screen; it says nothing about whether the number on
+    // that row means what this thread's line number means. Checked first so a
+    // thread that fails both tests is explained by the one the reviewer can do
+    // something about — going back to the whole diff.
+    if (!sides[anchor.side]) {
+      listed.push({ thread, reason: 'other-commit' });
+      continue;
+    }
+
     // The cross-check. Pierre would accept this annotation and then draw
     // nothing, so a line outside the hunks is demoted rather than trusted.
     //

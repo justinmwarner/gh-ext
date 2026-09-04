@@ -20,6 +20,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
+import { BOTH_SIDES } from '@/lib/review/diffScope';
 import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
 import { request } from './background';
 import { fileDiffFor, fileDiffSignature } from './diffItems';
@@ -112,6 +113,7 @@ function mount(
       <DiffColumn
         files={files}
         diff={UNIFIED}
+        sides={BOTH_SIDES}
         current={NO_FILE}
         onScrollTo={onScrollTo}
         {...props}
@@ -644,6 +646,7 @@ describe('switching the diff out from under the threads', () => {
       <DiffColumn
         files={files}
         diff={UNIFIED}
+        sides={BOTH_SIDES}
         current={NO_FILE}
         onScrollTo={() => {}}
       />
@@ -774,6 +777,42 @@ describe('starting a comment from the gutter', () => {
     expect(alert.textContent).toMatch(/both sides/i);
     expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
     expect(requestMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a line whose number belongs to another commit, and says why', async () => {
+    // A comment is posted as a line number in the *pull request's* diff —
+    // `addPullRequestReviewThread` has no argument for which commit a line was
+    // counted in. So a line picked off a diff between two other commits would
+    // be attached to whatever occupies that number in the pull request's own
+    // diff: a comment that looks posted, on code the reviewer never read.
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], {
+      sides: { additions: false, deletions: true },
+    });
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickGutterUtility('src/app.ts', 2, 'additions');
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/show all commits/i);
+    expect(screen.queryByRole('button', { name: 'Comment' })).toBeNull();
+    expect(requestMock).not.toHaveBeenCalled();
+  });
+
+  it('still allows a comment on the side that does line up', async () => {
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], {
+      sides: { additions: false, deletions: true },
+    });
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickGutterUtility('src/app.ts', 2, 'deletions');
+    });
+
+    expect(
+      await screen.findByRole('textbox', { name: /comment on src\/app\.ts/i }),
+    ).toBeDefined();
   });
 });
 

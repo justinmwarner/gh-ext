@@ -11,6 +11,7 @@
 import { parsePatchFiles } from '@pierre/diffs';
 import type { FileDiffMetadata } from '@pierre/diffs';
 import { describe, expect, it } from 'vitest';
+import { BOTH_SIDES } from '@/lib/review/diffScope';
 import {
   isRenderedLine,
   layoutThreads,
@@ -93,7 +94,7 @@ describe('layoutThreads', () => {
   it('anchors a thread that lands inside a rendered hunk', () => {
     const thread = reviewThread({ path: 'src/app.ts', line: 2 });
 
-    const layout = layoutThreads([thread], twoHunks());
+    const layout = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES });
 
     expect(layout.annotations).toHaveLength(1);
     expect(layout.annotations[0]?.side).toBe('additions');
@@ -107,7 +108,7 @@ describe('layoutThreads', () => {
     // a word, so the reviewer would never see the comment at all.
     const thread = reviewThread({ path: 'src/app.ts', line: 10 });
 
-    const layout = layoutThreads([thread], twoHunks());
+    const layout = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES });
 
     expect(layout.annotations).toHaveLength(0);
     expect(layout.listed).toEqual([{ thread, reason: 'out-of-hunk' }]);
@@ -122,7 +123,7 @@ describe('layoutThreads', () => {
       isOutdated: true,
     });
 
-    const layout = layoutThreads([thread], twoHunks());
+    const layout = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES });
 
     expect(layout.annotations).toHaveLength(0);
     expect(layout.listed).toEqual([{ thread, reason: 'outdated' }]);
@@ -131,7 +132,7 @@ describe('layoutThreads', () => {
   it('lists a file-level thread, which has no line to anchor to', () => {
     const thread = reviewThread({ path: 'src/app.ts', subjectType: 'FILE' });
 
-    const layout = layoutThreads([thread], twoHunks());
+    const layout = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES });
 
     expect(layout.annotations).toHaveLength(0);
     expect(layout.listed).toEqual([{ thread, reason: 'file-level' }]);
@@ -140,7 +141,7 @@ describe('layoutThreads', () => {
   it('anchors a LEFT-side thread to the deletions column', () => {
     const thread = reviewThread({ path: 'src/app.ts', line: 2, diffSide: 'LEFT' });
 
-    const layout = layoutThreads([thread], twoHunks());
+    const layout = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES });
 
     expect(layout.annotations[0]?.side).toBe('deletions');
   });
@@ -153,7 +154,7 @@ describe('layoutThreads', () => {
       startDiffSide: 'RIGHT',
     });
 
-    const layout = layoutThreads([thread], twoHunks());
+    const layout = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES });
 
     expect(layout.annotations[0]?.lineNumber).toBe(22);
   });
@@ -164,14 +165,90 @@ describe('layoutThreads', () => {
     const memo = new Map<string, { kind: 'thread'; threadId: string }>();
     const thread = reviewThread({ path: 'src/app.ts', line: 2 });
 
-    const first = layoutThreads([thread], twoHunks(), memo);
-    const second = layoutThreads(
-      [{ ...thread, isResolved: true }],
-      twoHunks(),
-      memo,
-    );
+    const first = layoutThreads([thread], twoHunks(), { sides: BOTH_SIDES, metadata: memo });
+    const second = layoutThreads([{ ...thread, isResolved: true }], twoHunks(), {
+      sides: BOTH_SIDES,
+      metadata: memo,
+    });
 
     expect(first.annotations[0]?.metadata).toBe(second.annotations[0]?.metadata);
+  });
+});
+
+/**
+ * A narrowed diff numbers its lines against its own two commits.
+ *
+ * A thread's `line` is a position in the *pull request's* diff. So on a diff
+ * scoped to some other pair of commits, line 42 is a line of a different file
+ * — and it very probably exists, which is what makes this worse than the
+ * out-of-hunk case. Pierre would happily draw the comment, on whatever text
+ * happens to occupy that row, and nothing anywhere would say so.
+ *
+ * The verdict has to be "list it", not "guess". A listed comment costs the
+ * reviewer a click; a comment drawn against the wrong line is a comment they
+ * read as being about code it was never written about.
+ */
+describe('layoutThreads on a diff taken between other commits', () => {
+  const OLDER_HEAD = { additions: false, deletions: true };
+  const OTHER_BASE = { additions: true, deletions: false };
+
+  it('lists a RIGHT-side thread when the narrowed head is not the pull request head', () => {
+    const thread = reviewThread({ path: 'src/app.ts', line: 2 });
+
+    const layout = layoutThreads([thread], twoHunks(), { sides: OLDER_HEAD });
+
+    expect(layout.annotations).toHaveLength(0);
+    expect(layout.listed).toEqual([{ thread, reason: 'other-commit' }]);
+  });
+
+  it('lists a LEFT-side thread when the narrowed base is not the pull request base', () => {
+    // The case that was already wrong. "Since my last review" compares from
+    // the reviewed commit, so its deletion lines number against that file and
+    // not against the pull request's base — and every LEFT-side thread on
+    // screen was being anchored as though they were the same file.
+    const thread = reviewThread({ path: 'src/app.ts', line: 2, diffSide: 'LEFT' });
+
+    const layout = layoutThreads([thread], twoHunks(), { sides: OTHER_BASE });
+
+    expect(layout.annotations).toHaveLength(0);
+    expect(layout.listed).toEqual([{ thread, reason: 'other-commit' }]);
+  });
+
+  it('still anchors the side that does line up', () => {
+    // "Since my last review" is exactly this: the head matches, the base does
+    // not. Demoting both sides would list every comment on the page and bury
+    // the ones that genuinely cannot be drawn.
+    const right = reviewThread({ path: 'src/app.ts', line: 2 });
+
+    const layout = layoutThreads([right], twoHunks(), { sides: OTHER_BASE });
+
+    expect(layout.annotations).toHaveLength(1);
+    expect(layout.listed).toHaveLength(0);
+  });
+
+  it('prefers the reason the reviewer can act on when a thread fails both tests', () => {
+    // Out of hunk *and* on a side that does not line up. Either sentence is
+    // true; "this diff is of other commits" is the one that explains why the
+    // whole diff would show it.
+    const thread = reviewThread({ path: 'src/app.ts', line: 10 });
+
+    const layout = layoutThreads([thread], twoHunks(), { sides: OLDER_HEAD });
+
+    expect(layout.listed).toEqual([{ thread, reason: 'other-commit' }]);
+  });
+
+  it('does not treat a revealed line as an escape from the commit mismatch', () => {
+    // Expanding context proves the row is on screen. It says nothing about
+    // whether the number on it means what the thread thinks it means.
+    const thread = reviewThread({ path: 'src/app.ts', line: 10 });
+
+    const layout = layoutThreads([thread], twoHunks(), {
+      sides: OLDER_HEAD,
+      revealed: new Set([10]),
+    });
+
+    expect(layout.annotations).toHaveLength(0);
+    expect(layout.listed).toEqual([{ thread, reason: 'other-commit' }]);
   });
 });
 

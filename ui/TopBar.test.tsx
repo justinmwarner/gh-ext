@@ -36,10 +36,7 @@ const tree = (payload: PrPayload) => (
     threads={payload.threads}
     drafts={new DraftStore(memoryStore())}
   >
-    <TopBar
-      payload={payload}
-      compare={{ active: false, available: false, busy: false, onToggle: () => {} }}
-    />
+    <TopBar payload={payload} />
   </ReviewSessionProvider>
 );
 

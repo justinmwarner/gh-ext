@@ -23,6 +23,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DraftLocation } from '@/lib/review/drafts';
 import type { CommentAnchor } from '@/lib/review/selection';
+import type { ComposerRejection } from './composerAnchor';
 import { NEW_THREAD, useReviewSession } from './reviewSession';
 import { useShortcutTarget } from './shortcutTargets';
 import { suggestionBlock } from './suggestion';
@@ -34,7 +35,7 @@ export interface ComposerProps {
   path: string;
   /** Null when the selection cannot be expressed as a GitHub comment. */
   anchor: CommentAnchor | null;
-  rejection: 'cross-side' | 'invalid-range' | null;
+  rejection: ComposerRejection | null;
   /** The source text of the selected lines, for seeding a suggestion. */
   selectedLines: readonly string[];
   onClose: () => void;
@@ -45,7 +46,7 @@ const positionLabel = (anchor: CommentAnchor): string =>
     ? `Lines ${anchor.startLine}-${anchor.line}`
     : `Line ${anchor.line}`;
 
-const REJECTIONS: Record<'cross-side' | 'invalid-range', string> = {
+const REJECTIONS: Record<ComposerRejection, string> = {
   'cross-side':
     'That selection covers both sides of the diff. GitHub comments live on ' +
     'one side or the other, so select lines from only the removed side or ' +
@@ -53,6 +54,13 @@ const REJECTIONS: Record<'cross-side' | 'invalid-range', string> = {
   'invalid-range':
     'That selection could not be read as a range of lines, so there is ' +
     'nothing to attach a comment to. Try selecting the lines again.',
+  // The only one of the three the reviewer can clear without changing their
+  // selection, so it says how.
+  'other-commit':
+    'This diff is between two commits of the pull request, and a GitHub ' +
+    'comment is anchored to a line of the pull request as a whole — there is ' +
+    'no way to say which commit a line number was counted in. Show all ' +
+    'commits to comment on this line.',
 };
 
 export function Composer({

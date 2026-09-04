@@ -25,6 +25,13 @@
  * actually be drawn. Pierre drops an annotation outside a rendered hunk in
  * silence, so every anchor is cross-checked against the real hunk ranges and
  * anything outside them is demoted into the per-file section on the card.
+ *
+ * `sides` is the second such obligation and the sharper one. The column can be
+ * showing a diff between two commits of the pull request rather than the pull
+ * request's own, and a thread's line — or a line the reviewer just selected —
+ * is numbered against the latter. Where the two disagree, the thread is listed
+ * and the composer refuses, because in that case Pierre would draw the
+ * annotation rather than drop it, on whatever text happened to be there.
  */
 
 import {
@@ -40,6 +47,7 @@ import { CodeView } from '@pierre/diffs/react';
 import type { CodeViewHandle, CodeViewReactOptions } from '@pierre/diffs/react';
 import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from '@pierre/diffs';
 import type { DiffPayload } from '@/lib/messages';
+import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { AnnotationSide } from '@/lib/review/threads';
 import { Composer } from './Composer';
 import { FileCard } from './FileCard';
@@ -103,6 +111,17 @@ export interface DiffColumnHandle {
 export interface DiffColumnProps {
   files: readonly ReviewFile[];
   diff: DiffOrigin;
+  /**
+   * Which sides of the diff on screen number their lines the way the pull
+   * request's own diff does.
+   *
+   * Everything anchored to a line consults this: the threads, and the
+   * composer. A narrowed diff between two other commits numbers its rows
+   * against different files, and a line number that means something else is
+   * the one failure here that produces no symptom at all — the annotation
+   * renders, on the wrong text.
+   */
+  sides: AnchorableSides;
   /** The file the review is on, and which surface last moved it. */
   current: CurrentFile;
   /** A different file reached the top of the column. */
@@ -186,6 +205,7 @@ const JUMP_FRAMES = 8;
 export function DiffColumn({
   files,
   diff,
+  sides,
   current,
   onScrollTo,
   jump = null,
@@ -274,6 +294,15 @@ export function DiffColumn({
    * thing hydration does *not* write anywhere is which of those new lines the
    * renderer has been asked to draw.
    */
+  /**
+   * The two booleans as one string, so the memo below can depend on their
+   * values rather than on the object identity the shell rebuilds each render.
+   * They belong in the per-file signature too: a file whose threads and hunks
+   * have not moved still needs re-laying out when the diff under them stops
+   * being the pull request's own.
+   */
+  const sidesKey = `${sides.additions ? 'a' : ''}${sides.deletions ? 'd' : ''}`;
+
   const cache = useRef(new Map<string, { signature: string; layout: FileThreadLayout }>());
   const layouts = useMemo(() => {
     const built = new Map<string, FileThreadLayout>();
@@ -281,7 +310,7 @@ export function DiffColumn({
       const threads = session.byPath.get(file.path) ?? [];
       const open = revealed.current.get(file.path);
       const signature =
-        `${fileDiffSignature(file)}#${open?.size ?? 0}#` +
+        `${fileDiffSignature(file)}#${open?.size ?? 0}#${sidesKey}#` +
         threads.map(anchorSignature).join('|');
       const cached = cache.current.get(file.path);
       if (cached !== undefined && cached.signature === signature) {
@@ -291,7 +320,11 @@ export function DiffColumn({
       const layout =
         threads.length === 0
           ? NO_LAYOUT
-          : layoutThreads(threads, fileDiffFor(file), metadata.current, open);
+          : layoutThreads(threads, fileDiffFor(file), {
+              sides,
+              metadata: metadata.current,
+              revealed: open,
+            });
       cache.current.set(file.path, { signature, layout });
       built.set(file.path, layout);
     }
@@ -300,7 +333,7 @@ export function DiffColumn({
     // above has moved. Pierre hydrates in place and fires no callback a
     // consumer can subscribe to, so a render has to be provoked from the
     // outside or the memo would never be asked the question again.
-  }, [files, session.byPath, expansion]);
+  }, [files, session.byPath, expansion, sidesKey]);
 
   const annotationsByPath = useMemo(() => {
     const built = new Map<string, DiffLineAnnotation<AnnotationMetadata>[]>();
@@ -358,7 +391,7 @@ export function DiffColumn({
   const openComposer = useRef((path: string, range: SelectedLineRange) => {});
   openComposer.current = (path, range) => {
     session.clearFailure(NEW_THREAD);
-    const target = composerFor(path, range);
+    const target = composerFor(path, range, sides);
     if (target === null) {
       // Nothing on screen to attach even the explanation to. Saying so here is
       // the alternative to posting `line: NaN` and reporting an opaque 422.
