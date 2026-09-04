@@ -30,6 +30,10 @@ import {
   prKey,
   readHeadSha,
 } from '@/lib/github/assembly';
+import {
+  type BinaryBlobResult,
+  fetchBinaryBlob,
+} from '@/lib/github/binary-blobs';
 import { type BlobResult, BlobCache, fetchBlob } from '@/lib/github/blobs';
 import { AuthError, GitHubClient, RateLimitError } from '@/lib/github/client';
 import { parseUnifiedDiff } from '@/lib/github/diff';
@@ -252,6 +256,20 @@ export default defineBackground({
     const blobs = new BlobCache();
 
     /**
+     * The same, for the files that are read as bytes rather than as text.
+     *
+     * A separate cache rather than a wider one, because a path at a commit has
+     * two answers here — its text and its bytes — and one map keyed on the pair
+     * would hand an image comparison the string form of a PNG.
+     *
+     * Fewer entries and a larger budget than the text cache above: an image is
+     * a hundred times the size of a source file and a reviewer looks at far
+     * fewer of them in a sitting. The stored form is base64, so the budget is
+     * counted in the inflated size rather than the file's own.
+     */
+    const imageBytes = new BlobCache<BinaryBlobResult>(24, 32_000_000);
+
+    /**
      * Forget every cached read when the token changes.
      *
      * Nothing in a cache key names an account — deliberately, because a
@@ -269,6 +287,7 @@ export default defineBackground({
       if (!isTokenChange(changes, areaName)) return;
       inflight.clear();
       blobs.clear();
+      imageBytes.clear();
       void forgetCachedReads(cacheStore).catch((error: unknown) => {
         console.warn('[fast-review] could not clear the cache', error);
       });
@@ -300,6 +319,39 @@ export default defineBackground({
         ref,
       });
       blobs.set(ref, path, result);
+      return result;
+    }
+
+    /**
+     * One side of one file as bytes, for the image and SVG comparisons.
+     *
+     * Deliberately a near-copy of `getBlob` above rather than a shared
+     * generic: the two differ in the media type they ask for, in what they do
+     * with the body, in which cache they consult and in the caps they enforce,
+     * which leaves nothing to share but the four-line guard.
+     */
+    async function getBlobBytes(
+      pr: PrRef,
+      path: string,
+      ref: string,
+    ): Promise<BinaryBlobResult> {
+      if (path === '' || ref === '') {
+        throw new ProtocolFailure(
+          'bad-request',
+          'A blob needs both a path and a commit, and one of them was missing.',
+        );
+      }
+
+      const cached = imageBytes.get(ref, path);
+      if (cached !== undefined) return cached;
+
+      const result = await fetchBinaryBlob(authorizedFetch, {
+        owner: pr.owner,
+        repo: pr.repo,
+        path,
+        ref,
+      });
+      imageBytes.set(ref, path, result);
       return result;
     }
 
@@ -349,6 +401,10 @@ export default defineBackground({
           case 'get-blob':
             return ok<'get-blob'>(
               await getBlob(message.pr, message.path, message.ref),
+            );
+          case 'get-blob-bytes':
+            return ok<'get-blob-bytes'>(
+              await getBlobBytes(message.pr, message.path, message.ref),
             );
           case 'validate-token':
             return ok<'validate-token'>(await validateToken());
