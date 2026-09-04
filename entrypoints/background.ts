@@ -211,17 +211,27 @@ export default defineBackground({
     }
 
     /**
-     * The diff between two commits, for "changes since my last review".
+     * The diff between two commits of this pull request.
      *
-     * Here rather than on the review page because every network call is here:
-     * the page has no token and cannot get one. The body is parsed with the
-     * same `parseUnifiedDiff` the full diff goes through, so the file shape the
-     * page receives is identical either way.
+     * Every narrowing the page offers arrives here — a single commit, a range
+     * of them, and "changes since my last review" alike — because all three
+     * are the same request. Here rather than on the review page because every
+     * network call is here: the page has no token and cannot get one. The body
+     * is parsed with the same `parseUnifiedDiff` the full diff goes through,
+     * so the file shape the page receives is identical either way.
      *
-     * Deliberately uncached. A compare is keyed on a pair of commits rather
-     * than on the head alone, the reviewer asks for it by pressing a toggle
-     * rather than on load, and the page holds the answer for as long as it is
-     * showing it.
+     * Only three-dot is ever sent, and not as a preference: `/compare/{a}..{b}`
+     * answers 404. See `lib/review/diffScope.ts`.
+     *
+     * Still uncached, and the reason is now weaker than it was. It used to be
+     * that the reviewer asked for one comparison by pressing a toggle; with a
+     * commit picker they may walk a history and come back, and each visit is a
+     * fresh request. A compare between two commits is immutable, so it *could*
+     * be cached forever — but not in `PrCache` as it stands, whose keys end in
+     * a single head SHA and whose sweep would treat every compare entry as
+     * belonging to a superseded commit and delete it. Left alone rather than
+     * bolted on: one request per selection is well inside the hour's quota,
+     * and the page holds the answer for as long as it is showing it.
      */
     async function compareDiff(
       pr: PrRef,

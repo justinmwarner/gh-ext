@@ -98,7 +98,7 @@ export interface CardTop {
  * Coupled to `--diffs-gap-block` in the stylesheet. Change the space between
  * files and this has to be measured again.
  */
-const REACHED = 36;
+export const REACHED = 36;
 
 /**
  * Which file the reviewer is looking at, given where the cards are.

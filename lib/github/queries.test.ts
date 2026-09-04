@@ -11,8 +11,11 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  COMMITS_PAGE_QUERY,
   FILES_PAGE_QUERY,
   FILE_FIELDS,
+  PR_COMMIT_FIELDS,
+  PULL_REQUEST_COMMITS_QUERY,
   PULL_REQUEST_QUERY,
   REQUESTED_REVIEWER_FIELDS,
   REVIEW_THREADS_PAGE_QUERY,
@@ -23,6 +26,8 @@ const DOCUMENTS = {
   PULL_REQUEST_QUERY,
   FILES_PAGE_QUERY,
   REVIEW_THREADS_PAGE_QUERY,
+  PULL_REQUEST_COMMITS_QUERY,
+  COMMITS_PAGE_QUERY,
 };
 
 const namesFrom = (document: string, pattern: RegExp): string[] => [
@@ -86,6 +91,29 @@ describe('the read documents', () => {
     // __typename is what lets a sixth member degrade instead of disappearing.
     expect(REQUESTED_REVIEWER_FIELDS).toMatch(/on RequestedReviewer \{\s*__typename/);
     expect(PULL_REQUEST_QUERY).toContain(REQUESTED_REVIEWER_FIELDS);
+  });
+
+  it('paginates commits with the very same node selection', () => {
+    expect(spreadsIn(PULL_REQUEST_COMMITS_QUERY)).toContain('PrCommitFields');
+    expect(spreadsIn(COMMITS_PAGE_QUERY)).toContain('PrCommitFields');
+    expect(PULL_REQUEST_COMMITS_QUERY).toContain(PR_COMMIT_FIELDS);
+    expect(COMMITS_PAGE_QUERY).toContain(PR_COMMIT_FIELDS);
+  });
+
+  it('selects a commit’s first parent, which is what makes one commit comparable', () => {
+    // Without it there is nothing to compare a single commit against, and the
+    // picker would have to guess at the previous entry in the list — which is
+    // not the parent for the first commit, nor across a merge from the base.
+    expect(PR_COMMIT_FIELDS).toMatch(/parents\(first: 1\) \{ nodes \{ oid \} \}/);
+  });
+
+  it('selects totalCount on commits, because the cursors cannot detect the cap', () => {
+    // GitHub stops `commits` at 250 nodes and then reports hasNextPage: false.
+    // totalCount is the only field that knows the list is short.
+    expect(PULL_REQUEST_COMMITS_QUERY).toMatch(/commits\(first: 100\) \{\s*totalCount/);
+    expect(COMMITS_PAGE_QUERY).toMatch(
+      /commits\(first: 100, after: \$after\) \{\s*totalCount/,
+    );
   });
 
   it('asks for the cursors it intends to follow', () => {

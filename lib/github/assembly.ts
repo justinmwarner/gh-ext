@@ -22,18 +22,21 @@ import {
 } from '../messages';
 import type { KeyValueStore } from '../review/drafts';
 import { HttpError } from './client';
+import { type CommitList, toCommitList } from './commits';
 import { type DeniedField, describeDenied, mergeDenied } from './graphql-errors';
 import { parseUnifiedDiff } from './diff';
 import { fetchFilesFallback } from './files-fallback';
 import { type Connection, type Paged, collectConnection } from './pagination';
 import { readPendingReviewId } from './pending-review-lookup';
 import {
+  COMMITS_PAGE_QUERY,
   FILES_PAGE_QUERY,
+  PULL_REQUEST_COMMITS_QUERY,
   PULL_REQUEST_QUERY,
   REVIEW_THREADS_PAGE_QUERY,
   VIEWER_PENDING_REVIEW,
 } from './queries';
-import type { PullRequestFile, ReviewThread } from './types';
+import type { PrCommit, PullRequestFile, ReviewThread } from './types';
 
 /**
  * The GitHub calls the assembler makes.
@@ -107,6 +110,20 @@ export interface PullRequestQueryData {
   repository?: { pullRequest?: RawPullRequest | null } | null;
 }
 
+/**
+ * The commits connection, which carries one field the shared `Connection` does
+ * not: `totalCount`. It is load-bearing rather than informational here —
+ * GitHub stops this connection at 250 nodes and *then* says the walk finished,
+ * so the count is the only thing that can contradict the cursor.
+ */
+interface CommitsConnection extends Connection<unknown> {
+  totalCount?: number | null;
+}
+
+interface CommitsQueryData {
+  repository?: { pullRequest?: { commits?: CommitsConnection | null } | null } | null;
+}
+
 /** What a follow-up page document returns, whichever connection it walked. */
 interface PageQueryData<T> {
   repository?: {
@@ -142,10 +159,11 @@ export async function payloadFromCache(
   if (headSha === null) return null;
 
   const ref: PrCacheRef = { ...pr, headSha };
-  const [node, diff, threads, checks, truncated, denied] = await Promise.all([
+  const [node, diff, threads, commits, checks, truncated, denied] = await Promise.all([
     ports.cache.get<PrPayload['pullRequest']>('pr', ref),
     ports.cache.get<PrPayload['diff']>('diff', ref),
     ports.cache.get<ReviewThread[]>('threads', ref),
+    ports.cache.get<PrCommit[]>('commits', ref),
     ports.cache.get<CheckRollup | null>('checks', ref),
     ports.cache.get<PrTruncation>('truncated', ref),
     ports.cache.get<DeniedField[]>('denied', ref),
@@ -159,6 +177,7 @@ export async function payloadFromCache(
     !node.hit ||
     !diff.hit ||
     !threads.hit ||
+    !commits.hit ||
     !checks.hit ||
     !truncated.hit ||
     !denied.hit
@@ -171,6 +190,7 @@ export async function payloadFromCache(
     headSha,
     pullRequest: node.value,
     threads: threads.value,
+    commits: commits.value,
     checks: checks.value,
     diff: diff.value,
     truncated: truncated.value,
@@ -295,6 +315,41 @@ function collectFiles(
   );
 }
 
+/**
+ * The pull request's commits, walked to the end of its cursors.
+ *
+ * Its own round trip, started with the others. `totalCount` travels back with
+ * the nodes because the cursors alone cannot detect GitHub's own 250-commit
+ * ceiling — see `lib/github/commits.ts`.
+ */
+async function collectCommits(
+  ports: AssemblyPorts,
+  pr: PrRef,
+  onPartial: Collect,
+): Promise<CommitList> {
+  const first = await ports.github.graphql<CommitsQueryData>(
+    PULL_REQUEST_COMMITS_QUERY,
+    { owner: pr.owner, repo: pr.repo, number: pr.number },
+    onPartial,
+  );
+  const connection = first?.repository?.pullRequest?.commits;
+
+  const paged = await collectConnection<unknown>(
+    connection,
+    async (after) => {
+      const data = await ports.github.graphql<CommitsQueryData>(
+        COMMITS_PAGE_QUERY,
+        { owner: pr.owner, repo: pr.repo, number: pr.number, after },
+        onPartial,
+      );
+      return data?.repository?.pullRequest?.commits;
+    },
+    ports.maxPages,
+  );
+
+  return toCommitList(paged, connection?.totalCount);
+}
+
 function collectThreads(
   ports: AssemblyPorts,
   pr: PrRef,
@@ -401,6 +456,18 @@ export async function assemblePullRequest(
     ),
   );
 
+  /**
+   * The pull request's own commits, for scoping the diff.
+   *
+   * Its own document and settled rather than unwrapped, on the same reasoning
+   * as the lookup above. It is not needed to paint the diff, so it does not
+   * belong on the batched read that the cold-start budget is spent on; and a
+   * commit list that could not be read costs the commit picker, not the review
+   * page. Needs only the coordinates the caller already had, so it goes out
+   * with the others rather than after them.
+   */
+  const commitsPromise = settle(collectCommits(ports, pr, denials.collect));
+
   const data = await queryPromise;
 
   const node = data.repository?.pullRequest;
@@ -445,9 +512,23 @@ export async function assemblePullRequest(
 
   const [files, threads] = unwrap(await pagesPromise);
 
+  /**
+   * A commit list that could not be read is an empty list that admits it.
+   *
+   * `truncated` rather than a separate failure flag because it is the same
+   * fact to every reader — the commits you can pick from are not all of them —
+   * and a pull request has at least one commit, so an empty list is never the
+   * honest answer on its own.
+   */
+  const commitsLoad = await commitsPromise;
+  const commits: CommitList = commitsLoad.ok
+    ? commitsLoad.value
+    : { commits: [], truncated: true };
+
   const truncated: PrTruncation = {
     files: files.truncated,
     threads: threads.truncated,
+    commits: commits.truncated,
   };
 
   const pendingLookup = await pendingPromise;
@@ -493,6 +574,7 @@ export async function assemblePullRequest(
   ports.cacheWrite(() => ports.cache.forgetOtherCommits(pr, ref.headSha));
   ports.cacheWrite(() => ports.cache.set('pr', ref, fullNode));
   ports.cacheWrite(() => ports.cache.set('threads', ref, threads.nodes));
+  ports.cacheWrite(() => ports.cache.set('commits', ref, commits.commits));
   ports.cacheWrite(() => ports.cache.set('checks', ref, checks));
   ports.cacheWrite(() => ports.cache.set('truncated', ref, truncated));
   ports.cacheWrite(() => ports.cache.set('denied', ref, denied));
@@ -502,6 +584,7 @@ export async function assemblePullRequest(
     headSha: ref.headSha,
     pullRequest: fullNode,
     threads: threads.nodes,
+    commits: commits.commits,
     checks,
     diff,
     truncated,

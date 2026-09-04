@@ -20,6 +20,14 @@ const REASONS: Record<ListedReason, string> = {
   'file-level': 'Left on the file as a whole rather than on a line.',
   'no-line': 'GitHub sent no line number for this thread.',
   'out-of-hunk': 'Its line is outside the part of the file this diff shows.',
+  // Not "not shown" but "cannot be placed". This comment's line number is a
+  // position in the pull request's own diff, and the diff on screen is between
+  // two other commits, so the line it names is a line of a different file.
+  // Drawing it anyway would put the comment on whatever text happened to be
+  // there, which is why it is here instead.
+  'other-commit':
+    'Written against the whole pull request, which is not the diff on screen. ' +
+    'Show all commits to see it in place.',
 };
 
 export function UnanchoredThreads({

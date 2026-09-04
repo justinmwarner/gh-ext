@@ -25,11 +25,19 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PrPayload } from '@/lib/messages';
+import {
+  BOTH_SIDES,
+  type DiffScope,
+  WHOLE_DIFF,
+  resolveScope,
+} from '@/lib/review/diffScope';
+import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
 import type { DiffColumnHandle, ThreadJump } from './DiffColumn';
 import { FilesView } from './FilesView';
 import { OverviewView } from './OverviewView';
 import { ReviewFooter } from './ReviewFooter';
+import { ScopeBar } from './ScopeBar';
 import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
 import { TopBar } from './TopBar';
@@ -49,7 +57,11 @@ import { useCompareDiff } from './useCompareDiff';
 import { useKeymap } from './useKeymap';
 
 /** Which overlay is open. Only ever one: they all want the same keystrokes. */
-type Overlay = { kind: 'none' } | { kind: 'help' } | { kind: 'search'; mode: SearchMode };
+type Overlay =
+  | { kind: 'none' }
+  | { kind: 'help' }
+  | { kind: 'search'; mode: SearchMode }
+  | { kind: 'commits' };
 
 const NO_OVERLAY: Overlay = { kind: 'none' };
 
@@ -99,22 +111,53 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const column = useRef<DiffColumnHandle>(null);
 
   /**
-   * Narrowing the column to what has landed since the viewer's last review.
+   * Narrowing the column to some of the pull request's commits.
    *
-   * The base commit comes from `viewerLatestReview`, so a first-time reviewer
-   * has none and the toggle is disabled rather than offered. A failed
-   * comparison falls back to the whole diff with the reason on screen: an empty
-   * column would read as "nothing changed".
+   * One mechanism with three ways in — a single commit, a range of them, and
+   * "since my last review" — because all three are the same request: a compare
+   * between two commits. `resolveScope` turns what the reviewer asked for into
+   * that pair *against the history in this payload*, so a commit that has been
+   * force-pushed away is caught here rather than fetched: GitHub keeps an
+   * orphaned commit reachable, so the request would succeed and the reviewer
+   * would be reading a diff against history this pull request no longer has.
+   *
+   * A failed comparison falls back to the whole diff with the reason on
+   * screen. An empty column would read as "nothing changed".
    */
   const reviewedAt = prViewerReviewedAt(payload.pullRequest);
-  const [sinceLastReview, setSinceLastReview] = useState(false);
-  const compare = useCompareDiff({
-    payload,
-    base: reviewedAt,
-    enabled: sinceLastReview,
-  });
-  const narrowed = compare.status === 'ready';
+  const [scope, setScope] = useState<DiffScope>(WHOLE_DIFF);
+  const resolved = useMemo(
+    () =>
+      resolveScope(scope, {
+        commits: payload.commits,
+        prBase: prBaseSha(payload.pullRequest),
+        prHead: payload.headSha,
+        reviewedAt,
+      }),
+    [scope, payload.commits, payload.pullRequest, payload.headSha, reviewedAt],
+  );
+  const compare = useCompareDiff({ payload, scope: resolved });
+
+  /**
+   * Whether the narrowed diff is what is actually on screen.
+   *
+   * Not the same question as "did the reviewer ask for one". While the request
+   * is in flight, or after it failed, the whole diff is showing — and every
+   * derived value below has to describe *that*, or the column would be told it
+   * is looking at commits it is not.
+   */
+  const narrowed = resolved.kind === 'narrowed' && compare.status === 'ready';
   const files: readonly ReviewFile[] = narrowed ? compare.files : wholeDiff;
+
+  /**
+   * Which sides of what is on screen number their lines like the pull
+   * request's own diff.
+   *
+   * Threads and the composer both read it. Both would otherwise place a line
+   * number from one diff onto a row of another, which is the one failure here
+   * that shows no symptom at all.
+   */
+  const sides = narrowed ? resolved.sides : BOTH_SIDES;
 
   // Both reducers return the state they were given when the path has not
   // moved, so an echo from the far surface is a bail-out rather than a render.
@@ -159,22 +202,22 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   /**
    * The two commits the column reads whole files from, for expanding context.
    *
-   * The base moves with the diff on screen. While the comparison is showing,
-   * the patches are `reviewedAt...head`, so their unchanged context is the
-   * file as it stood at the reviewer's last review — expanding against the
-   * pull request's own base would splice in lines from a different diff.
+   * **Both** move with the diff on screen. While a narrowed diff is showing,
+   * the patches run between the scope's two commits, so their unchanged
+   * context is those files — expanding against the pull request's own base or
+   * head would splice in lines from a different diff, under hunk headers that
+   * still line up.
    *
    * Null when there is no base commit at all: a payload cached before
    * `baseRefOid` was queried has none, and the column then offers no expander
    * rather than one that cannot work.
    */
-  const baseSha = narrowed ? reviewedAt : prBaseSha(payload.pullRequest);
+  const baseSha = narrowed ? resolved.range.base : prBaseSha(payload.pullRequest);
+  const headSha = narrowed ? resolved.range.head : payload.headSha;
   const blobs = useMemo(
     (): BlobRefs | null =>
-      baseSha === null
-        ? null
-        : { pr: payload.ref, baseSha, headSha: payload.headSha },
-    [baseSha, payload.ref, payload.headSha],
+      baseSha === null ? null : { pr: payload.ref, baseSha, headSha },
+    [baseSha, payload.ref, headSha],
   );
 
   // Read inside the keyboard handlers, which are rebuilt every render but are
@@ -296,6 +339,22 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   return (
     <div className="shell" data-current-file={current.path ?? ''} data-view={view}>
       <TopBar payload={payload} />
+      <ScopeBar
+        scope={resolved}
+        commitCount={payload.commits.length}
+        commitsTruncated={payload.truncated.commits}
+        sinceReviewAvailable={reviewedAt !== null}
+        sinceReviewActive={scope.kind === 'since-review'}
+        busy={compare.status === 'loading'}
+        requestError={compare.status === 'failed' ? compare.message : null}
+        onOpenPicker={() => setOverlay({ kind: 'commits' })}
+        onSinceReview={() => {
+          setScope((current) =>
+            current.kind === 'since-review' ? WHOLE_DIFF : { kind: 'since-review' },
+          );
+        }}
+        onShowAll={() => setScope(WHOLE_DIFF)}
+      />
       <TruncationNotice
         truncated={payload.truncated}
         pr={payload.ref}
@@ -343,13 +402,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
                   ? { source: 'unified', truncated: false }
                   : { source: payload.diff.source, truncated: payload.diff.truncated }
               }
-              compare={{
-                active: sinceLastReview && narrowed,
-                available: reviewedAt !== null,
-                busy: compare.status === 'loading',
-                onToggle: () => setSinceLastReview((on) => !on),
-              }}
-              compareError={compare.status === 'failed' ? compare.message : null}
+              sides={sides}
               columnRef={column}
             />
           </div>
@@ -386,6 +439,18 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
           mode={overlay.mode}
           files={files}
           onChoose={goToResult}
+          onClose={() => setOverlay(NO_OVERLAY)}
+        />
+      )}
+      {overlay.kind === 'commits' && (
+        <CommitPicker
+          commits={payload.commits}
+          selected={scope.kind === 'commits' ? scope : null}
+          onPick={(from, to) => setScope({ kind: 'commits', from, to })}
+          onShowAll={() => {
+            setScope(WHOLE_DIFF);
+            setOverlay(NO_OVERLAY);
+          }}
           onClose={() => setOverlay(NO_OVERLAY)}
         />
       )}

@@ -14,6 +14,11 @@
  * And the control that *opens* a review — the footer exists only once one is
  * pending, so the thing that starts it, and the failure when GitHub refuses,
  * have to live somewhere that is always on screen.
+ *
+ * What it does **not** own is which commits the column is showing. That is
+ * `ScopeBar`, on its own row: a reviewer has to be able to tell a diff scoped
+ * to one commit from the whole pull request at a glance, and a toggle among
+ * the other actions up here was not that.
  */
 
 import type { PrPayload } from '@/lib/messages';

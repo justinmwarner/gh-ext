@@ -16,7 +16,7 @@ import type { BlobResult } from './github/blobs';
 import type { ParsedDiffFile } from './github/diff';
 import type { DeniedField } from './github/graphql-errors';
 import type { FallbackDiffFile } from './github/files-fallback';
-import type { ReviewThread } from './github/types';
+import type { PrCommit, ReviewThread } from './github/types';
 
 /** A pull request's coordinates. The unit of work for the whole protocol. */
 export interface PrRef {
@@ -82,6 +82,18 @@ export type DiffPayload =
 export interface PrTruncation {
   files: boolean;
   threads: boolean;
+  /**
+   * True when the commit list is short of what GitHub says exists.
+   *
+   * Two ways it gets there, and only one of them is the page cap above.
+   * `PullRequest.commits` stops at **250 nodes and then reports
+   * `hasNextPage: false`** (see `lib/github/commits.ts`), so a pull request
+   * with more than that hands back a complete-looking list that is missing
+   * hundreds of commits. It is also true when the lookup failed outright: the
+   * fact the reviewer needs — "the commits you can pick from are not all of
+   * them" — is the same either way.
+   */
+  commits: boolean;
 }
 
 /** Everything the review page needs for a first paint. */
@@ -91,6 +103,15 @@ export interface PrPayload {
   headSha: string;
   pullRequest: PullRequestNode;
   threads: ReviewThread[];
+  /**
+   * The pull request's own commits, oldest first — what the reviewer scopes
+   * the diff by.
+   *
+   * Empty when the lookup failed, which `truncated.commits` distinguishes from
+   * a list that is merely short. It is never legitimately empty otherwise: a
+   * pull request has at least one commit.
+   */
+  commits: PrCommit[];
   checks: CheckRollup | null;
   diff: DiffPayload;
   /** Lists that hit the page cap. Never omitted, so a consumer cannot forget. */

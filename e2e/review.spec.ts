@@ -19,7 +19,8 @@
  * from a fixture and aborts anything it does not recognize.
  */
 
-import { FILES, THREADS } from './fixture';
+import { REACHED } from '@/ui/currentFile';
+import { BASE_SHA, FILES, FIRST_SHA, PRIOR_SHA, THREADS } from './fixture';
 import { expect, reviewUrl, test } from './extension';
 import type { Page } from '@playwright/test';
 
@@ -101,10 +102,13 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
   await expect(page.getByText('new src/app.ts')).toBeVisible();
 
   // An anchored thread is drawn in the diff; the ones that cannot be are listed
-  // in their own file's card instead, which is the whole safety net. Each file
-  // is selected in the tree before it is looked for — the column virtualizes,
-  // so what is mounted depends on how much of it fits, and this used to depend
-  // on the exact height of everything above it.
+  // in their own file's card instead, which is the whole safety net.
+  //
+  // Each file is brought into the column before it is looked for. The section
+  // is drawn by `renderCustomHeader`, so it exists only for files `CodeView`
+  // has virtualized in — a function of the viewport height rather than of
+  // anything this test is about. It happened to be on screen at 720px, and one
+  // extra row of chrome above the column was enough to make it not.
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
@@ -325,6 +329,38 @@ test('each file in the diff is a block of its own', async ({ context, extensionI
   expect(style.bg).not.toBe(body);
 });
 
+test('the two header rows keep their height and do not overlap the body', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // `.shell` is a flex column exactly one viewport tall, and the diff inside it
+  // is enormous — so every child that does not refuse to shrink gets shrunk.
+  // The top bar lost 21px of its declared 52 the moment a second header row was
+  // added, and the scope bar, which sticks itself at `--topbar-height`, then sat
+  // 21px over the top of the body. Only a layout engine can see any of that.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const box = (selector: string) =>
+    page.locator(selector).evaluate((node) => {
+      const r = node.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+    });
+
+  const declared = await page.evaluate(() =>
+    parseInt(getComputedStyle(document.documentElement).getPropertyValue('--topbar-height'), 10),
+  );
+  const topbar = await box('.topbar');
+  const scope = await box('.scope-bar');
+  const body = await box('.shell-body');
+
+  expect(topbar.height).toBe(declared);
+  expect(scope.top).toBe(topbar.bottom);
+  expect(body.top).toBe(scope.bottom);
+});
+
 test('switching views and back leaves the diff exactly where it was', async ({
   context,
   extensionId,
@@ -401,9 +437,13 @@ test('scrolling the diff column walks the tree selection forward, in file order'
   }, VIEW);
   await page.waitForTimeout(300);
 
+  // The same tolerance the page uses, imported rather than restated. Written
+  // out as a literal here it silently stopped matching the moment a row of
+  // chrome was added above the column, and this test then disagreed with the
+  // implementation about which file was on top rather than about anything real.
   const tops = await cardTops(page);
   const reached = tops
-    .filter((card) => card.top <= 1)
+    .filter((card) => card.top <= REACHED)
     .sort((a, b) => a.top - b.top)
     .at(-1);
   expect(reached).toBeDefined();
@@ -477,9 +517,8 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
   // the review is opened, written to, and submitted in one go — and this
   // asserts the third round trip really happens, in a real browser, because
   // the version that did not looked identical on screen.
-  const mutations = api.operations.filter(
-    (name) => name !== 'PullRequestReview' && name !== 'ViewerPendingReview',
-  );
+  const reads = ['PullRequestReview', 'ViewerPendingReview', 'PullRequestCommits'];
+  const mutations = api.operations.filter((name) => !reads.includes(name));
   expect(mutations).toEqual(['StartReview', 'AddThread', 'SubmitReview']);
   expect(api.variables[api.operations.indexOf('SubmitReview')]?.['event']).toBe(
     'COMMENT',
@@ -773,6 +812,96 @@ test('a comment expanded into view survives narrowing the diff', async ({
   // from the expansion above, so the column's standing request for the line is
   // granted immediately. Either surface is correct — being on neither is not.
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
+});
+
+test('scoping the diff to one commit never draws a comment on the wrong line', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The worst failure this feature can produce, and it is silent. A thread's
+  // `line` is a position in the *pull request's* diff. Scoped to the first
+  // commit, the additions side is numbered against the file as it stood then,
+  // so line 2 is a different line — one that exists, so Pierre would draw the
+  // annotation there and raise nothing. Only a real renderer can show whether
+  // it did, which is why this is here and not in jsdom.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Anchored in the diff to begin with.
+  await expect(
+    page.getByLabel('Diff').getByText('This allocates on every call.'),
+  ).toBeVisible();
+  await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'whole');
+  await expect(page.locator('.scope-bar')).toContainText('all 3 commits');
+
+  await page.getByRole('button', { name: 'Choose commits…' }).click();
+  const picker = page.getByRole('dialog', { name: 'Commits' });
+  await expect(picker).toBeVisible();
+  await picker.getByRole('button', { name: /Select commit ccccccc/ }).click();
+
+  await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'narrowed');
+  await expect(page.locator('.scope-bar')).toContainText('ccccccc');
+  // Three-dot, from that commit's own parent, which is the pull request's base
+  // here. `..` is not routed because the real API answers it 404.
+  expect(
+    api.urls.some((url) => url.includes(`/compare/${BASE_SHA}...${FIRST_SHA}`)),
+  ).toBe(true);
+
+  // The one file that commit touched, and nothing else.
+  await expect(page.locator('[data-file-card="src/app.ts"]')).toHaveCount(1);
+  await expect(page.locator('[data-file-card="src/beta.ts"]')).toHaveCount(0);
+
+  // The comment is not drawn in the diff — and it is not gone either. Stated
+  // as "there is exactly one card for that thread, and it is the listed one",
+  // because both surfaces sit inside the column and counting text alone cannot
+  // tell them apart.
+  const listed = page.locator('[data-unanchored="src/app.ts"]');
+  await expect(listed.locator('[data-listed-reason="other-commit"]')).toHaveCount(2);
+  await expect(page.locator('[data-thread="PRRT_anchored"]')).toHaveCount(1);
+  await expect(
+    listed.locator('[data-thread="PRRT_anchored"]'),
+  ).toHaveCount(1);
+  // Listed means reachable: the disclosure is closed until asked. `.first()`
+  // because the resolved thread beside it carries its own.
+  await listed.locator('summary').first().click();
+  await expect(listed.getByText('This allocates on every call.')).toBeVisible();
+
+  // And commenting is refused on the side whose numbers are not the pull
+  // request's, rather than posting against a line the reviewer never read.
+  // Selected in the gutter and opened with `c`, which is the same path the
+  // posting test uses: the "+" only appears on hover, inside the shadow root.
+  await page
+    .locator('diffs-container')
+    .first()
+    .locator('[data-column-number][data-line-type="change-addition"]')
+    .first()
+    .click();
+  await page.locator('body').press('c');
+  await expect(page.getByRole('alert')).toContainText('Show all commits');
+  await expect(page.getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0);
+
+  // A range, chosen as two clicks rather than a modifier drag, so it is
+  // reachable from the keyboard. Its base is the parent of the *first*
+  // selection, which is what makes one commit and a one-commit range the same
+  // request.
+  await page.getByRole('button', { name: 'Choose commits…' }).click();
+  const again = page.getByRole('dialog', { name: 'Commits' });
+  await again.getByRole('button', { name: /Compare from ccccccc/ }).click();
+  await again.getByRole('button', { name: /Select commit bbbbbbb/ }).click();
+
+  await expect(page.locator('.scope-bar')).toContainText('2 commits');
+  expect(
+    api.urls.some((url) => url.includes(`/compare/${BASE_SHA}...${PRIOR_SHA}`)),
+  ).toBe(true);
+  await expect(page.locator('[data-file-card="src/beta.ts"]')).toHaveCount(1);
+
+  // Back to everything, and the comment is drawn again.
+  await page.getByRole('button', { name: 'Show all commits' }).click();
+  await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'whole');
+  await expect(
+    page.getByLabel('Diff').getByText('This allocates on every call.'),
+  ).toBeVisible();
 });
 
 test('clearing the token stops the cache serving the pull request', async ({

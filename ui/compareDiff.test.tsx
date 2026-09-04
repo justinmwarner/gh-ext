@@ -1,28 +1,38 @@
 /**
- * "Changes since my last review".
+ * Scoping the diff to commits.
  *
- * The reviewer has already read some of this pull request. Re-reading all of it
- * to find the three files that moved is the tax this toggle removes: the column
- * is re-rendered from `thatSha...headSha` instead of from the whole diff.
+ * The reviewer has already read some of this pull request, or wants to read it
+ * one commit at a time. Either way the column is re-rendered from a compare
+ * between two commits instead of from the whole diff, and "changes since my
+ * last review" is one preset over that machinery rather than a feature of its
+ * own.
  *
- * Two things it must not get wrong, and both are about losing information:
+ * Four things it must not get wrong, and every one of them is about losing
+ * information or inventing it:
  *
- * - A first-time reviewer has no earlier commit, so the control is disabled
+ * - A first-time reviewer has no earlier commit, so the preset is disabled
  *   rather than offered and then explained.
  * - A thread whose line is not in the narrowed diff is **listed**, not dropped.
  *   Losing review feedback is the worst thing this application can do, and a
  *   narrowed diff is exactly the situation that would do it quietly.
+ * - A thread whose line number belongs to a different commit is listed too.
+ *   That one is worse: the line usually exists, so the comment would be drawn
+ *   against text it was never written about.
+ * - A commit the reviewer picked can be force-pushed away. Showing the diff
+ *   anyway — GitHub keeps the orphan reachable, so it would work — is the
+ *   worst outcome of all.
  */
 
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrPayload } from '@/lib/messages';
 import { Shell } from './Shell';
 import { request } from './background';
-import { fileShadow } from './pierreDom.fixture';
+import { clickHunkExpander, fileShadow } from './pierreDom.fixture';
 import {
   fileFixture,
+  prCommit,
   prPayloadWithFiles,
   pullRequestNode,
   reviewThread,
@@ -38,7 +48,16 @@ beforeEach(() => {
 });
 
 const HEAD = 'f'.repeat(40);
-const REVIEWED_AT = 'a'.repeat(40);
+const BASE = 'a'.repeat(40);
+const REVIEWED_AT = 'b'.repeat(40);
+const MIDDLE = 'c'.repeat(40);
+
+/** base — MIDDLE — REVIEWED_AT — HEAD, which is an ordinary pull request. */
+const COMMITS = [
+  prCommit({ oid: MIDDLE, parentOid: BASE, messageHeadline: 'Add the parser' }),
+  prCommit({ oid: REVIEWED_AT, parentOid: MIDDLE, messageHeadline: 'Handle renames' }),
+  prCommit({ oid: HEAD, parentOid: REVIEWED_AT, messageHeadline: 'Fix the cache key' }),
+];
 
 /** Two hunks, so lines 1–3 and 20–22 are drawn and everything between is not. */
 const widePatch = [
@@ -69,7 +88,13 @@ const sincePatch = [
   ' twentytwo',
 ].join('\n');
 
-function payloadWith(options: { reviewed: boolean }): PrPayload {
+interface PayloadOptions {
+  reviewed?: boolean;
+  commits?: PrPayload['commits'];
+  commitsTruncated?: boolean;
+}
+
+function payloadWith(options: PayloadOptions = {}): PrPayload {
   const base = prPayloadWithFiles([
     fileFixture({ path: 'src/app.ts', patch: widePatch }),
   ]);
@@ -77,10 +102,13 @@ function payloadWith(options: { reviewed: boolean }): PrPayload {
   return {
     ...base,
     headSha: HEAD,
+    commits: options.commits ?? COMMITS,
+    truncated: { ...base.truncated, commits: options.commitsTruncated === true },
     pullRequest: pullRequestNode({
       ...base.pullRequest,
       headRefOid: HEAD,
-      ...(options.reviewed
+      baseRefOid: BASE,
+      ...(options.reviewed === true
         ? {
             viewerLatestReview: {
               id: 'PRR_old',
@@ -94,9 +122,16 @@ function payloadWith(options: { reviewed: boolean }): PrPayload {
   };
 }
 
-const compareButton = () => screen.getByRole('button', { name: /since my last review/i });
+const sinceButton = () => screen.getByRole('button', { name: /since my last review/i });
+const pickerButton = () => screen.getByRole('button', { name: /choose commits/i });
+const showAll = () => screen.getByRole('button', { name: /show all commits/i });
+const scopeBar = (): HTMLElement => {
+  const bar = document.querySelector<HTMLElement>('[data-scope]');
+  if (bar === null) throw new Error('the scope bar is not on the page');
+  return bar;
+};
 
-/** The reply the worker gives for a `compare-diff` request. */
+/** The reply the worker gives for any `compare-diff` request in these tests. */
 const compareReply = {
   ok: true,
   data: {
@@ -114,31 +149,49 @@ const compareReply = {
   },
 };
 
-describe('the compare toggle', () => {
+const columnLines = (): string[] =>
+  [...fileShadow('src/app.ts').querySelectorAll('[data-column-number]')].map((node) =>
+    String(node.getAttribute('data-column-number')),
+  );
+
+describe('the scope bar', () => {
+  it('says the whole pull request is on screen before anything is narrowed', () => {
+    // The whole diff and a diff scoped to one commit must not look the same,
+    // and the only way to guarantee that is to state the ordinary case too.
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    expect(scopeBar().getAttribute('data-scope')).toBe('whole');
+    expect(scopeBar().textContent).toMatch(/all 3 commits/i);
+  });
+
+  it('says the commit list is short when GitHub did not send all of it', () => {
+    // GitHub stops `commits` at 250 and reports the walk complete, so a
+    // reviewer with a longer pull request would be picking from a list that
+    // silently is not the history.
+    render(<Shell retry={() => {}} payload={payloadWith({ commitsTruncated: true })} />);
+
+    expect(screen.getByRole('status').textContent).toMatch(/not the whole history|short/i);
+  });
+});
+
+describe('the "since my last review" preset', () => {
   it('is disabled when the viewer has never reviewed this pull request', () => {
     // There is no earlier commit to compare against, so there is nothing
     // honest the control could do.
-    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: false })} />);
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
 
-    const button = compareButton();
+    const button = sinceButton();
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.getAttribute('title')).toMatch(/not reviewed|no earlier/i);
   });
 
   it('asks for nothing when it is disabled', async () => {
     const user = userEvent.setup();
-    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: false })} />);
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
 
     expect(requestMock).not.toHaveBeenCalled();
-  });
-
-  it('is offered once the viewer has a review with a commit on it', () => {
-    render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
-
-    expect((compareButton() as HTMLButtonElement).disabled).toBe(false);
-    expect(compareButton().getAttribute('aria-pressed')).toBe('false');
   });
 
   it('asks the worker for base...head rather than fetching anything itself', async () => {
@@ -146,7 +199,7 @@ describe('the compare toggle', () => {
     requestMock.mockResolvedValue(compareReply);
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
 
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalledWith({
@@ -173,7 +226,7 @@ describe('the compare toggle', () => {
     });
     expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
 
     await waitFor(() => {
       expect(document.querySelector('[data-unanchored="src/app.ts"]')).not.toBeNull();
@@ -194,24 +247,19 @@ describe('the compare toggle', () => {
     requestMock.mockResolvedValue(compareReply);
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    const rows = (): string[] =>
-      [...fileShadow('src/app.ts').querySelectorAll('[data-column-number]')].map(
-        (node) => String(node.getAttribute('data-column-number')),
-      );
-
     await waitFor(() => {
-      expect(rows()).toContain('1');
+      expect(columnLines()).toContain('1');
     });
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
 
     // Both halves in one wait: the viewer is remounted, so there is a frame
     // where it has drawn nothing and "line 1 is gone" is true for the wrong
     // reason.
     await waitFor(() => {
-      expect(rows()).toContain('21');
+      expect(columnLines()).toContain('21');
     });
-    expect(rows()).not.toContain('1');
+    expect(columnLines()).not.toContain('1');
   });
 
   it('goes back to the whole diff when it is switched off', async () => {
@@ -219,24 +267,20 @@ describe('the compare toggle', () => {
     requestMock.mockResolvedValue(compareReply);
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
     await waitFor(() => {
-      expect(compareButton().getAttribute('aria-pressed')).toBe('true');
+      expect(sinceButton().getAttribute('aria-pressed')).toBe('true');
     });
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
 
     await waitFor(() => {
       expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
     });
-    expect(compareButton().getAttribute('aria-pressed')).toBe('false');
+    expect(sinceButton().getAttribute('aria-pressed')).toBe('false');
     // And the first hunk is back on screen, not just back in the file list.
     await waitFor(() => {
-      expect(
-        [...fileShadow('src/app.ts').querySelectorAll('[data-column-number]')].map(
-          (node) => String(node.getAttribute('data-column-number')),
-        ),
-      ).toContain('1');
+      expect(columnLines()).toContain('1');
     });
   });
 
@@ -248,11 +292,244 @@ describe('the compare toggle', () => {
     });
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    await user.click(compareButton());
+    await user.click(sinceButton());
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/No commit/);
     // The reviewer keeps a diff to read rather than an empty column.
     expect(document.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
+    // And the bar describes *that* diff. Saying "showing changes since your
+    // last review" over the whole pull request is the one thing this row
+    // exists to make impossible.
+    expect(scopeBar().getAttribute('data-scope')).toBe('failed');
+    expect(scopeBar().textContent).toMatch(/all 3 commits/i);
+  });
+
+  it('asks for nothing when the reviewer has already reviewed the head commit', async () => {
+    // `head...head` is a valid request answering an empty diff, which reads as
+    // "every file in this pull request vanished".
+    const user = userEvent.setup();
+    const payload = payloadWith({ reviewed: true });
+    render(
+      <Shell
+        retry={() => {}}
+        payload={{
+          ...payload,
+          pullRequest: pullRequestNode({
+            ...payload.pullRequest,
+            viewerLatestReview: { id: 'PRR_old', state: 'COMMENTED', commit: { oid: HEAD } },
+          }),
+        }}
+      />,
+    );
+
+    await user.click(sinceButton());
+
+    expect(
+      requestMock.mock.calls.filter(([m]) => m?.kind === 'compare-diff'),
+    ).toHaveLength(0);
+    expect(screen.getByRole('status').textContent).toMatch(/nothing has landed/i);
   });
 });
+
+describe('picking commits', () => {
+  const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(pickerButton());
+    return screen.getByRole('dialog', { name: /commits/i });
+  };
+
+  it('lists the pull request’s commits, oldest first', async () => {
+    const user = userEvent.setup();
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    const dialog = await openPicker(user);
+    const rows = within(dialog).getAllByRole('button', { name: /select commit/i });
+
+    expect(rows.map((row) => row.getAttribute('data-commit'))).toEqual([
+      MIDDLE,
+      REVIEWED_AT,
+      HEAD,
+    ]);
+    expect(dialog.textContent).toContain('Add the parser');
+  });
+
+  it('compares one commit against its own parent', async () => {
+    const user = userEvent.setup();
+    requestMock.mockResolvedValue(compareReply);
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    const dialog = await openPicker(user);
+    await user.click(within(dialog).getByRole('button', { name: /select commit ccccccc/i }));
+
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenCalledWith({
+        kind: 'compare-diff',
+        pr: { owner: 'acme', repo: 'widgets', number: 42 },
+        base: BASE,
+        head: MIDDLE,
+      });
+    });
+    expect(scopeBar().getAttribute('data-scope')).toBe('narrowed');
+    expect(scopeBar().textContent).toMatch(/ccccccc/);
+  });
+
+  it('compares a range from the first selection’s parent to the last', async () => {
+    // So that selecting one commit and selecting a one-commit range are the
+    // same request. Anything else and the two controls disagree about what
+    // "selected" means.
+    const user = userEvent.setup();
+    requestMock.mockResolvedValue(compareReply);
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    const dialog = await openPicker(user);
+    await user.click(
+      within(dialog).getByRole('button', { name: /compare from ccccccc/i }),
+    );
+    await user.click(within(dialog).getByRole('button', { name: /select commit bbbbbbb/i }));
+
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenCalledWith({
+        kind: 'compare-diff',
+        pr: { owner: 'acme', repo: 'widgets', number: 42 },
+        base: BASE,
+        head: REVIEWED_AT,
+      });
+    });
+    expect(scopeBar().textContent).toMatch(/2 commits/i);
+  });
+
+  it('lists every thread when the diff is of a commit that is not the head', async () => {
+    // A thread's line is a position in the pull request's diff. On a diff
+    // ending at an older commit that number counts against a different file,
+    // so the comment must not be drawn — it would land on whatever text
+    // happens to be there, and nothing would say so.
+    const user = userEvent.setup();
+    requestMock.mockResolvedValue(compareReply);
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    const dialog = await openPicker(user);
+    await user.click(within(dialog).getByRole('button', { name: /select commit ccccccc/i }));
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-listed-reason="other-commit"]'),
+      ).not.toBeNull();
+    });
+  });
+
+  it('goes back to the whole diff on demand', async () => {
+    const user = userEvent.setup();
+    requestMock.mockResolvedValue(compareReply);
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    const dialog = await openPicker(user);
+    await user.click(within(dialog).getByRole('button', { name: /select commit ccccccc/i }));
+    await waitFor(() => {
+      expect(scopeBar().getAttribute('data-scope')).toBe('narrowed');
+    });
+
+    await user.click(showAll());
+
+    await waitFor(() => {
+      expect(scopeBar().getAttribute('data-scope')).toBe('whole');
+    });
+    // Waited for rather than asserted: the viewer is remounted when the file
+    // list is replaced, so there is a frame where it has drawn nothing at all.
+    await waitFor(() => {
+      expect(columnLines()).toContain('1');
+    });
+  });
+});
+
+describe('expanding unchanged context on a narrowed diff', () => {
+  /**
+   * The whole file, on both sides, consistent with `sincePatch`.
+   *
+   * Which commit each side is read at is the point of the test below, so the
+   * two texts differ by more than their changed line: a loader still pointed
+   * at the pull request's own base and head would splice these in under hunk
+   * headers that still line up, and the reviewer would be reading context from
+   * a diff they are not looking at.
+   */
+  const GAP = Array.from({ length: 16 }, (_, index) => `context ${index + 4}`);
+  const wholeFile = (marker: string): string =>
+    ['one', marker, 'three', ...GAP, 'twenty', marker, 'twentytwo'].join('\n');
+
+  it('reads both sides at the commits the diff on screen is between', async () => {
+    // Scoped to the middle commit, so neither end is the pull request's own —
+    // the case where reading a blob at the wrong ref cannot be right by
+    // accident.
+    const user = userEvent.setup();
+    const refs: string[] = [];
+    requestMock.mockImplementation((msg: { kind: string; ref?: string }) => {
+      if (msg.kind === 'compare-diff') return Promise.resolve(compareReply);
+      if (msg.kind === 'get-blob') {
+        refs.push(String(msg.ref));
+        return Promise.resolve({ ok: true, data: { status: 'ok', text: wholeFile('x') } });
+      }
+      return Promise.resolve({ ok: true, data: { data: {} } });
+    });
+
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+    await user.click(pickerButton());
+    const dialog = screen.getByRole('dialog', { name: /commits/i });
+    await user.click(within(dialog).getByRole('button', { name: /select commit bbbbbbb/i }));
+    await waitFor(() => {
+      expect(columnLines()).toContain('21');
+    });
+
+    await act(async () => {
+      clickHunkExpander('src/app.ts');
+    });
+
+    await waitFor(() => {
+      expect([...new Set(refs)].sort()).toEqual([MIDDLE, REVIEWED_AT].sort());
+    });
+  });
+});
+
+describe('a commit that was force-pushed away', () => {
+  it('says so and shows the whole diff rather than the orphan’s', async () => {
+    // GitHub keeps a commit that has left a branch reachable for a while, so
+    // the compare would succeed and the reviewer would read a diff against
+    // history this pull request no longer has, with nothing to say so.
+    const user = userEvent.setup();
+    requestMock.mockResolvedValue(compareReply);
+    const { rerender } = render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    const dialog = await openPickerOn(user);
+    await user.click(within(dialog).getByRole('button', { name: /select commit ccccccc/i }));
+    await waitFor(() => {
+      expect(scopeBar().getAttribute('data-scope')).toBe('narrowed');
+    });
+    requestMock.mockClear();
+
+    // The author force-pushed: MIDDLE is gone from the history.
+    rerender(
+      <Shell
+        retry={() => {}}
+        payload={payloadWith({
+          commits: [prCommit({ oid: HEAD, parentOid: BASE, messageHeadline: 'Squashed' })],
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(scopeBar().getAttribute('data-scope')).toBe('lost');
+    });
+    expect(scopeBar().textContent).toMatch(/no longer in this pull request/i);
+    // And nothing was asked for on its behalf.
+    expect(
+      requestMock.mock.calls.filter(([m]) => m?.kind === 'compare-diff'),
+    ).toHaveLength(0);
+    // The whole diff is what is on screen, so line 1 is back.
+    await waitFor(() => {
+      expect(columnLines()).toContain('1');
+    });
+  });
+});
+
+async function openPickerOn(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(pickerButton());
+  return screen.getByRole('dialog', { name: /commits/i });
+}

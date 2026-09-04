@@ -157,10 +157,15 @@ code {
 
 /* ---------------------------------------------------------------- top bar */
 
+/* `flex: 0 0 auto` and it has to be. `.shell` is a flex column exactly one
+   viewport tall holding a diff of arbitrary height, so anything that does not
+   refuse to shrink gets shrunk — this bar lost 21px of its declared 52 the day
+   a second header row joined it. */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 10;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: calc(var(--gap) * 2);
@@ -298,6 +303,180 @@ code {
 
 .reviewer.reviewer-bad {
   box-shadow: 0 0 0 2px light-dark(#cf222e, #f85149);
+}
+
+/* -------------------------------------------------------------- scope bar */
+
+/*
+ * Which commits the column is showing.
+ *
+ * Its own row under the top bar rather than a chip inside it, and present in
+ * every state including "all of them". A diff scoped to one commit and the
+ * whole pull request are the same picture, and the difference between them is
+ * the difference between "nobody changed that" and "nobody changed that in
+ * this commit" — so this is not allowed to be something the reviewer has to
+ * remember to look for.
+ *
+ * Sticky beneath the bar above it, not scrolled away with the diff, for the
+ * same reason.
+ */
+/* The same refusal, and for a sharper reason: this bar sticks itself at
+   `--topbar-height`, so a top bar that has been squeezed below its declared
+   height leaves this one sitting over the top of the body. */
+.scope-bar {
+  position: sticky;
+  top: var(--topbar-height);
+  z-index: 9;
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap);
+  padding: 6px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#ffffff, #0d1117);
+}
+
+/* The whole point of the row: narrowed does not look like whole. A tinted
+   band and a left rule, so it reads as a state the page is in rather than as
+   a message about something that happened. */
+.scope-bar[data-scope='narrowed'] {
+  border-left: 4px solid light-dark(#0969da, #4493f8);
+  background: light-dark(#ddf4ff, #121d2f);
+}
+
+.scope-bar[data-scope='lost'],
+.scope-bar[data-scope='failed'] {
+  border-left: 4px solid light-dark(#bf8700, #d29922);
+  background: light-dark(#fff8c5, #272115);
+}
+
+.scope-showing {
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scope-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  margin-left: auto;
+}
+
+/* Wraps onto its own line rather than squeezing the controls, which all
+   refuse to shrink. */
+.scope-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.scope-note[role='alert'] {
+  color: light-dark(#cf222e, #f85149);
+}
+
+/* --------------------------------------------------------- commit picker */
+
+.commit-picker-hint {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.commit-list {
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* Each row is the commit button plus its range affordance, so the two sit on
+   one line and the second never pushes the first onto another. */
+.commit-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.commit-list li:last-child {
+  border-bottom: 0;
+}
+
+.commit-row {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--gap);
+  min-width: 0;
+  padding: 8px 8px 8px 0;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.commit-row:hover,
+.commit-row:focus-visible {
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.commit-row[data-selected] {
+  background: light-dark(#ddf4ff, #121d2f);
+}
+
+.commit-oid {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+/* The headline is the part worth reading, so it is what gets the room and
+   what ellipsises last. */
+.commit-headline {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.commit-meta {
+  flex: none;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.commit-anchor {
+  flex: none;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: light-dark(#59636e, #9198a1);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.commit-anchor:hover,
+.commit-anchor[aria-pressed='true'] {
+  color: inherit;
+  border-color: light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #212830);
 }
 
 /* ----------------------------------------------------------------- layout */

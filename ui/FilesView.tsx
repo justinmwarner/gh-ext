@@ -23,6 +23,7 @@ import { DiffColumn, type DiffColumnHandle, type ThreadJump } from './DiffColumn
 import { FileTree } from './FileTree';
 import { Resizer } from './Resizer';
 import type { BlobRefs } from './blobLoader';
+import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { CurrentFile } from './currentFile';
 import { fileComments } from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
@@ -32,25 +33,12 @@ import { useDragSize } from './useDragSize';
 /** Wide enough for a deep path, narrow enough to leave the diff its width. */
 const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
 
-const NEVER_REVIEWED =
-  'You have not reviewed this pull request yet, so there is no earlier commit ' +
-  'to compare against.';
-
-export interface CompareToggleProps {
-  /** Whether the column is showing the narrowed diff. */
-  active: boolean;
-  /** False for a first-time reviewer: there is nothing to compare from. */
-  available: boolean;
-  busy: boolean;
-  onToggle: () => void;
-}
-
 /**
  * How much is on screen, which is not always how much is in the pull request.
  *
- * Counted from the list the column is actually drawing, so while the
- * comparison is showing this describes the comparison. Totalling the whole
- * pull request here would contradict the diff directly underneath it.
+ * Counted from the list the column is actually drawing, so while a narrowed
+ * diff is showing this describes that. Totalling the whole pull request here
+ * would contradict the diff directly underneath it.
  */
 function Summary({ files }: { files: readonly ReviewFile[] }) {
   const totals = useMemo(
@@ -76,28 +64,6 @@ function Summary({ files }: { files: readonly ReviewFile[] }) {
   );
 }
 
-/**
- * Narrow the column to what has landed since the viewer's own last review.
- *
- * Disabled rather than hidden when there is no prior review. A control that
- * appears and disappears with the pull request is one the reviewer has to
- * rediscover; a disabled one with the reason on it explains itself.
- */
-function CompareToggle({ active, available, busy, onToggle }: CompareToggleProps) {
-  return (
-    <button
-      type="button"
-      className="button"
-      aria-pressed={active}
-      disabled={!available || busy}
-      title={available ? undefined : NEVER_REVIEWED}
-      onClick={onToggle}
-    >
-      {busy ? 'Comparing…' : 'Since my last review'}
-    </button>
-  );
-}
-
 export interface FilesViewProps {
   payload: PrPayload;
   files: readonly ReviewFile[];
@@ -108,9 +74,12 @@ export interface FilesViewProps {
   jump: ThreadJump | null;
   blobs: BlobRefs | null;
   diff: { source: PrPayload['diff']['source']; truncated: boolean };
-  compare: CompareToggleProps;
-  /** Why the comparison could not be shown. Null when nothing went wrong. */
-  compareError: string | null;
+  /**
+   * Which sides of what is on screen number their lines the way the pull
+   * request's own diff does. Passed straight through: the column is what has
+   * to refuse an anchor on a side that does not.
+   */
+  sides: AnchorableSides;
   columnRef?: Ref<DiffColumnHandle>;
 }
 
@@ -123,8 +92,7 @@ export function FilesView({
   jump,
   blobs,
   diff,
-  compare,
-  compareError,
+  sides,
   columnRef,
 }: FilesViewProps) {
   const session = useReviewSession();
@@ -164,14 +132,7 @@ export function FilesView({
     <div className="filesview">
       <div className="filesview-bar">
         <Summary files={files} />
-        <CompareToggle {...compare} />
       </div>
-
-      {compareError !== null && (
-        <p className="filesview-error" role="alert">
-          {`That comparison could not be loaded: ${compareError} Showing the whole pull request.`}
-        </p>
-      )}
 
       <div className="filesview-body">
         <nav
@@ -202,6 +163,7 @@ export function FilesView({
           ref={columnRef}
           files={files}
           diff={diff}
+          sides={sides}
           current={current}
           onScrollTo={onSelectFromScroll}
           jump={jump}

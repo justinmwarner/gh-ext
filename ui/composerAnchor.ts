@@ -9,9 +9,13 @@
  */
 
 import type { SelectedLineRange } from '@pierre/diffs';
+import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { CommentAnchor } from '@/lib/review/selection';
 import { normalizeSelection } from '@/lib/review/selection';
 import type { AnnotationSide } from '@/lib/review/threads';
+
+/** Why a selection cannot be turned into a comment. */
+export type ComposerRejection = 'cross-side' | 'invalid-range' | 'other-commit';
 
 export interface ComposerTarget {
   path: string;
@@ -21,26 +25,39 @@ export interface ComposerTarget {
   lineNumber: number;
   /** What to post, or null when the selection cannot be posted at all. */
   anchor: CommentAnchor | null;
-  rejection: 'cross-side' | 'invalid-range' | null;
+  rejection: ComposerRejection | null;
 }
 
 /**
  * Returns null when there is nowhere on screen to put even the explanation, so
  * the caller can say so somewhere the reviewer will still see it.
+ *
+ * `sides` is the third refusal and the one that is not about the gesture.
+ * A comment is posted as a line number in the *pull request's* diff —
+ * `addPullRequestReviewThread` takes `path`, `line` and `side` and nothing to
+ * say which commit they are counted in — so a line picked off a diff between
+ * two other commits would attach to whatever occupies that number in the pull
+ * request's own diff. The comment would look posted, on code the reviewer
+ * never read. Nothing here can repair that, so it is refused where they can
+ * see why.
  */
 export function composerFor(
   path: string,
   range: SelectedLineRange,
+  sides: AnchorableSides,
 ): ComposerTarget | null {
   const result = normalizeSelection(range);
 
   if (result.ok) {
+    const side: AnnotationSide = result.value.side === 'LEFT' ? 'deletions' : 'additions';
     return {
       path,
-      side: result.value.side === 'LEFT' ? 'deletions' : 'additions',
+      side,
       lineNumber: result.value.line,
-      anchor: result.value,
-      rejection: null,
+      // Placed either way. The reviewer selected a line they can see, and an
+      // explanation attached to it beats a control that does nothing.
+      anchor: sides[side] ? result.value : null,
+      rejection: sides[side] ? null : 'other-commit',
     };
   }
 

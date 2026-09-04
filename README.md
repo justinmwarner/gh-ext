@@ -8,8 +8,8 @@ review actions you perform constantly and deliberately nothing else.
 Comments with reply and resolve. The pending-review flow. Status checks.
 Approve and request changes. Plus keyboard navigation, viewed state, drafts that
 survive a failed post, multi-line comments, suggestion authoring, noise
-filtering, diff search, expand-unchanged-context, and "changes since my last
-review".
+filtering, diff search, expand-unchanged-context, and scoping the diff to one
+commit, a range of commits, or "changes since my last review".
 
 Anything it does not do hands off to GitHub through an **Open in GitHub**
 escape hatch.
