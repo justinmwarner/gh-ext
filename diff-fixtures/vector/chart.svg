@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140" width="240" height="140">
+  <rect width="240" height="140" fill="#ffffff"/>
+  <g fill="#0969da">
+    <rect x="20"  y="70" width="30" height="50"/>
+    <rect x="60"  y="40" width="30" height="80"/>
+    <rect x="100" y="85" width="30" height="35"/>
+    <rect x="140" y="60" width="30" height="60"/>
+  </g>
+  <text x="20" y="136" font-family="sans-serif" font-size="10">before: q3 draft</text>
+</svg>

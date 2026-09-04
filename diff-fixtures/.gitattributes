@@ -1,0 +1,20 @@
+# Bytes exactly as written, on every platform.
+#
+# Several fixtures here exist *because* of their bytes — one file is CRLF
+# throughout, one ends without a newline, one is full of combining marks and
+# zero-width joiners. Letting git normalise line endings on checkout would
+# quietly delete the thing each of them is testing.
+* -text
+
+# What GitHub's linguist calls generated.
+#
+# `PullRequestChangedFile` has no field for this — GitHub computes it for its
+# own UI and does not expose it through the API — so `.gitattributes` is the
+# part of linguist's answer a client can actually read. These entries exist so
+# the review page has something real to read it from.
+generated/** linguist-generated=true
+data/package-lock.json linguist-generated=true
+
+# And what it calls vendored, which is a different claim: not machine-written,
+# just not this project's code to review.
+binary/** linguist-vendored=true
