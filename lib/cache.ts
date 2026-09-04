@@ -22,15 +22,25 @@ export type PrCacheRef = PrRef & { headSha: string };
  * - `diff` — the parsed unified diff, or the files-endpoint fallback.
  * - `threads` — review threads and their comments. Mutable.
  * - `checks` — the head commit's status check rollup. Mutable.
- * - `truncated` — which paginated lists hit the page cap. Derived from `pr`
- *   and `threads`, and cached with them so a payload served entirely from
- *   storage still admits what it is missing.
+ * - `commits` — the pull request's own commits, which the reviewer scopes the
+ *   diff by. Mutable: a push adds to the list, and a force-push can take
+ *   commits out of it.
+ * - `truncated` — which paginated lists hit the page cap. Derived from `pr`,
+ *   `threads` and `commits`, and cached with them so a payload served entirely
+ *   from storage still admits what it is missing.
  * - `denied` — the fields GitHub refused to resolve. Cached for the same
  *   reason `truncated` is: a payload served from storage that had forgotten
  *   the refusal would render "No checks" over checks the token simply cannot
  *   see, which is the lie this slot exists to prevent.
  */
-export type CacheSlot = 'pr' | 'diff' | 'threads' | 'checks' | 'truncated' | 'denied';
+export type CacheSlot =
+  | 'pr'
+  | 'diff'
+  | 'threads'
+  | 'commits'
+  | 'checks'
+  | 'truncated'
+  | 'denied';
 
 /**
  * Which slots cannot change for a given head SHA.
@@ -45,6 +55,10 @@ const IMMUTABLE: Record<CacheSlot, boolean> = {
   pr: false,
   diff: true,
   threads: false,
+  // Keyed on the head SHA, so a push already gets a fresh key — but a pull
+  // request's commit list is `base..head`, and it also changes when the *base*
+  // branch moves under a head this cache still considers current.
+  commits: false,
   checks: false,
   truncated: false,
   // A permission can be granted while the page is open, and the reviewer will

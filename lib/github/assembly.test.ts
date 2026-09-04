@@ -117,11 +117,37 @@ function prData(options: PrDataOptions = {}) {
   };
 }
 
+/** One `PullRequestCommit` node, as PR_COMMIT_FIELDS selects it. */
+const commit = (oid: string, parent: string | null = 'p'.repeat(40)) => ({
+  commit: {
+    oid,
+    abbreviatedOid: oid.slice(0, 7),
+    messageHeadline: `Commit ${oid}`,
+    committedDate: '2026-08-30T09:15:00Z',
+    author: { name: 'Rowan', user: { login: 'rowan' } },
+    parents: { nodes: parent === null ? [] : [{ oid: parent }] },
+  },
+});
+
+const commitPage = (
+  nodes: ReturnType<typeof commit>[],
+  cursor: string | null,
+  totalCount = nodes.length,
+) => ({
+  totalCount,
+  nodes,
+  pageInfo: { hasNextPage: cursor !== null, endCursor: cursor },
+});
+
 /** Which document a call carries, read off its operation name. */
-function operationOf(document: string): 'pr' | 'files' | 'threads' | 'pending' {
+function operationOf(
+  document: string,
+): 'pr' | 'files' | 'threads' | 'pending' | 'commits' | 'commitsPage' {
   if (document.includes('query PullRequestFilesPage')) return 'files';
   if (document.includes('query PullRequestReviewThreadsPage')) return 'threads';
   if (document.includes('query ViewerPendingReview')) return 'pending';
+  if (document.includes('query PullRequestCommitsPage')) return 'commitsPage';
+  if (document.includes('query PullRequestCommits')) return 'commits';
   return 'pr';
 }
 
@@ -138,7 +164,16 @@ interface StubOptions {
   pendingReview?: unknown;
   /** A lookup that fails — which must cost the lookup and nothing else. */
   pendingReviewError?: Error;
+  /** What PULL_REQUEST_COMMITS_QUERY answers. */
+  commits?: unknown;
+  commitsPage?: (after: string) => unknown;
+  /** A commit list that could not be read, which must not fail the page. */
+  commitsError?: Error;
 }
+
+const commitsData = (page: ReturnType<typeof commitPage>) => ({
+  repository: { pullRequest: { commits: page } },
+});
 
 /** A `GitHubPort` that answers from fixtures and records what it was asked. */
 function stubGitHub(options: StubOptions = {}) {
@@ -169,6 +204,14 @@ function stubGitHub(options: StubOptions = {}) {
         return (options.pendingReview ?? {
           repository: { pullRequest: { viewerLatestReview: null, reviews: { nodes: [] } } },
         }) as T;
+      }
+      if (operation === 'commits') {
+        if (options.commitsError) throw options.commitsError;
+        return (options.commits ??
+          commitsData(commitPage([commit(HEAD, 'p'.repeat(40))], null))) as T;
+      }
+      if (operation === 'commitsPage') {
+        return options.commitsPage?.(String(variables['after'])) as T;
       }
       return (options.pr ?? prData()) as T;
     },
@@ -247,9 +290,11 @@ describe('assemblePullRequest — the two cold-start round trips', () => {
     // through — so anything issued by now was issued concurrently.
     await settleAll();
 
-    // Three, not two: the pending-review lookup needs only the coordinates the
-    // caller already had, so it rides along rather than waiting its turn.
+    // Four, not two: the pending-review lookup and the commit list both need
+    // only the coordinates the caller already had, so they ride along rather
+    // than waiting their turn.
     expect(gate.urls).toEqual([
+      'https://api.github.com/graphql',
       'https://api.github.com/graphql',
       'https://api.github.com/graphql',
       'https://api.github.com/repos/acme/widgets/pulls/42',
@@ -257,7 +302,8 @@ describe('assemblePullRequest — the two cold-start round trips', () => {
 
     gate.gates[0]?.(new Response(JSON.stringify({ data: prData() }), { status: 200 }));
     gate.gates[1]?.(new Response(JSON.stringify({ data: {} }), { status: 200 }));
-    gate.gates[2]?.(new Response(SAMPLE_DIFF, { status: 200 }));
+    gate.gates[2]?.(new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    gate.gates[3]?.(new Response(SAMPLE_DIFF, { status: 200 }));
 
     const resolved = await payload;
     expect(resolved.headSha).toBe(HEAD);
@@ -452,7 +498,108 @@ describe('assemblePullRequest — pagination', () => {
     await flushWrites();
 
     const cached = await payloadFromCache(ports, PR);
-    expect(cached?.truncated).toEqual({ files: true, threads: false });
+    expect(cached?.truncated).toEqual({ files: true, threads: false, commits: false });
+  });
+});
+
+/**
+ * The pull request's own commits, which is what the reviewer scopes the diff by.
+ *
+ * Its own document, issued alongside the batched read rather than folded into
+ * it: it is not needed to paint the diff, and the batched read is where the
+ * cold-start budget goes. Settled rather than unwrapped for the same reason the
+ * pending-review lookup is — a commit list that could not be read costs the
+ * commit picker and must not cost the review page.
+ */
+describe('assemblePullRequest — the commit list', () => {
+  it('puts the pull request’s commits in the payload, oldest first', async () => {
+    const stub = stubGitHub({
+      commits: commitsData(commitPage([commit('c1'), commit('c2', 'c1')], null)),
+    });
+    const { ports } = testPorts(stub.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.commits.map((c) => c.oid)).toEqual(['c1', 'c2']);
+    expect(payload.commits[1]).toMatchObject({ parentOid: 'c1', authorLogin: 'rowan' });
+    expect(payload.truncated.commits).toBe(false);
+  });
+
+  it('follows the commit cursor to the last page', async () => {
+    const stub = stubGitHub({
+      commits: commitsData(commitPage([commit('c1')], 'k1', 3)),
+      commitsPage: (after) =>
+        commitsData(
+          after === 'k1'
+            ? commitPage([commit('c2')], 'k2', 3)
+            : commitPage([commit('c3')], null, 3),
+        ),
+    });
+    const { ports } = testPorts(stub.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.commits.map((c) => c.oid)).toEqual(['c1', 'c2', 'c3']);
+    expect(payload.truncated.commits).toBe(false);
+  });
+
+  it('says the list is short when GitHub finished the walk without sending it all', async () => {
+    // The 250 ceiling, in miniature. `hasNextPage` is false and `totalCount`
+    // is the only thing that knows better — a picker that trusted the cursor
+    // would offer the reviewer a history it had quietly cut in half.
+    const stub = stubGitHub({
+      commits: commitsData(commitPage([commit('c1'), commit('c2')], null, 626)),
+    });
+    const { ports } = testPorts(stub.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.commits).toHaveLength(2);
+    expect(payload.truncated.commits).toBe(true);
+  });
+
+  it('stops at the page cap and says so', async () => {
+    const endless = commitsData(commitPage([commit('x')], 'more', 9999));
+    const stub = stubGitHub({
+      commits: commitsData(commitPage([commit('c1')], 'k1', 9999)),
+      commitsPage: () => endless,
+    });
+    const { ports } = testPorts(stub.port);
+    ports.maxPages = 3;
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.truncated.commits).toBe(true);
+    expect(stub.calls.filter((c) => c === 'graphql:commitsPage')).toHaveLength(2);
+  });
+
+  it('renders the pull request even when the commit list could not be read', async () => {
+    // The picker is a way to read the diff more closely. Losing it must not
+    // lose the diff.
+    const stub = stubGitHub({ commitsError: new Error('commits unavailable') });
+    const { ports } = testPorts(stub.port);
+
+    const payload = await assemblePullRequest(ports, PR);
+
+    expect(payload.diff.files).toHaveLength(1);
+    expect(payload.commits).toEqual([]);
+    // Short by all of them, which is the same fact the notice reports for a
+    // list GitHub cut off: what is on screen is not the whole history.
+    expect(payload.truncated.commits).toBe(true);
+  });
+
+  it('carries the commits through the cache', async () => {
+    const stub = stubGitHub({
+      commits: commitsData(commitPage([commit('c1'), commit('c2', 'c1')], null)),
+    });
+    const { ports, flushWrites } = testPorts(stub.port);
+
+    await assemblePullRequest(ports, PR);
+    await flushWrites();
+
+    const cached = await payloadFromCache(ports, PR);
+    expect(cached?.commits.map((c) => c.oid)).toEqual(['c1', 'c2']);
+    expect(cached?.truncated.commits).toBe(false);
   });
 });
 
@@ -601,9 +748,10 @@ describe('the viewer’s open pending review', () => {
     await assemblePullRequest(ports, PR);
 
     // Issued in the first wave, beside the pull request itself — it needs only
-    // the coordinates the caller already had.
-    expect(github.calls.slice(0, 3).sort()).toEqual(
-      ['diff', 'graphql:pending', 'graphql:pr'].sort(),
+    // the coordinates the caller already had, as do the diff and the commit
+    // list next to it.
+    expect(github.calls.slice(0, 4).sort()).toEqual(
+      ['diff', 'graphql:commits', 'graphql:pending', 'graphql:pr'].sort(),
     );
   });
 });

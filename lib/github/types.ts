@@ -51,6 +51,35 @@ export interface ReviewThread {
   comments: ReviewCommentConnection;
 }
 
+/**
+ * One commit in a pull request's history, as the picker and the scope need it.
+ *
+ * `parentOid` is the first parent and is what makes "show me just this commit"
+ * expressible: the only diff endpoint this extension may use compares two
+ * commits, so a single commit is the compare between it and what came before
+ * it. Taking the previous *entry in the list* instead would be wrong twice —
+ * the first commit of a pull request has no previous entry, and a list that
+ * interleaves commits merged in from the base branch can put a commit next to
+ * one that is not its parent.
+ *
+ * Nullable because GraphQL nulls out what it could not resolve, and because a
+ * root commit genuinely has none. Either way there is no earlier point to
+ * compare against, which the caller has to say rather than guess at.
+ */
+export interface PrCommit {
+  oid: string;
+  /** GitHub's own abbreviation. Its length varies with the repository's size. */
+  abbreviatedOid: string;
+  messageHeadline: string;
+  /** ISO 8601, as GitHub sends it. */
+  committedDate: string;
+  /** The author's GitHub login, or null for a commit by a non-user email. */
+  authorLogin: string | null;
+  /** The name on the commit itself. Null when GitHub resolved neither. */
+  authorName: string | null;
+  parentOid: string | null;
+}
+
 export interface PullRequestFile {
   path: string;
   additions: number;

@@ -151,6 +151,80 @@ ${REVIEW_THREAD_FIELDS}
 `;
 
 /**
+ * One commit in the pull request's own history.
+ *
+ * `parents(first: 1)` is what makes "show me just this commit" answerable at
+ * all. The only diff endpoint available here compares two commits, so a single
+ * commit is the compare between its parent and itself — and the parent has to
+ * come from the commit rather than from its neighbour in the list, because the
+ * first commit of a pull request has no neighbour and a list carrying commits
+ * merged in from the base branch can put a commit beside one that is not its
+ * parent.
+ *
+ * `author` is a `GitActor`: `name` is the string on the commit itself and
+ * `user` is null whenever GitHub could not match the address to an account,
+ * which is ordinary. Both are selected so a commit is still nameable either
+ * way.
+ *
+ * Executed against live GitHub on 2026-09-04 (pierrecomputer/pierre#1).
+ */
+export const PR_COMMIT_FIELDS = `fragment PrCommitFields on PullRequestCommit {
+  commit {
+    oid abbreviatedOid messageHeadline committedDate
+    author { name user { login } }
+    parents(first: 1) { nodes { oid } }
+  }
+}`;
+
+/**
+ * The pull request's commits, oldest first.
+ *
+ * Its own document rather than four more lines on PULL_REQUEST_QUERY, for the
+ * reason the pending-review lookup is: this is not needed to paint the diff,
+ * and the batched read is what the 400ms budget is spent on. It is issued
+ * alongside and settled, so a pull request whose commits could not be read
+ * still renders — with the commit picker unavailable and saying so, rather
+ * than with no page at all.
+ *
+ * `first`, not `last`: the connection is oldest-first, which is why the query
+ * beside it reaches the head commit's checks with `commits(last: 1)`.
+ *
+ * `totalCount` is not decoration. **GitHub stops this connection at 250 nodes
+ * and then reports `hasNextPage: false`** — observed on 2026-09-04 against
+ * NixOS/nixpkgs#554614, whose `totalCount` is 626 — so following the cursors is
+ * not enough to know the list is complete, and `totalCount` is the only field
+ * that can say otherwise. See `lib/github/commits.ts`.
+ */
+export const PULL_REQUEST_COMMITS_QUERY = `query PullRequestCommits($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      commits(first: 100) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes { ...PrCommitFields }
+      }
+    }
+  }
+}
+${PR_COMMIT_FIELDS}
+`;
+
+/** The next page of `commits`, from the cursor the previous page ended on. */
+export const COMMITS_PAGE_QUERY = `query PullRequestCommitsPage($owner: String!, $repo: String!, $number: Int!, $after: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      commits(first: 100, after: $after) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes { ...PrCommitFields }
+      }
+    }
+  }
+}
+${PR_COMMIT_FIELDS}
+`;
+
+/**
  * The viewer's own PENDING review on this pull request, if they have one.
  *
  * GitHub allows exactly one, and refuses `addPullRequestReview` with "User can

@@ -49,7 +49,7 @@ describe('Shell', () => {
     // The worst outcome is a reviewer who cannot tell "no more comments" from
     // "we dropped them", so a capped list is announced rather than absorbed.
     render(
-      <Shell retry={() => {}} payload={prPayload({ truncated: { files: true, threads: true } })} />,
+      <Shell retry={() => {}} payload={prPayload({ truncated: { files: true, threads: true, commits: false } })} />,
     );
 
     const notice = screen.getByRole('alert');
@@ -180,7 +180,7 @@ describe('the unresolved thread jump list', () => {
         payload={{
           ...prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })]),
           threads: [reviewThread({ path: 'lib/dropped.ts', line: 3 })],
-          truncated: { files: true, threads: false },
+          truncated: { files: true, threads: false, commits: false },
         }}
       />,
     );

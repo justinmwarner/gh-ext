@@ -11,10 +11,31 @@ import type { FallbackDiffFile } from '@/lib/github/files-fallback';
 import type {
   FileViewedState,
   PatchStatus,
+  PrCommit,
   ReviewComment,
   ReviewThread,
 } from '@/lib/github/types';
 import type { PrPayload, PullRequestNode } from '@/lib/messages';
+
+/**
+ * One commit in the pull request's history.
+ *
+ * `parentOid` defaults to a real-looking commit rather than to null, because
+ * null is the case where a commit cannot be scoped to at all — a fixture that
+ * defaulted to it would make every "show me this commit" test exercise the
+ * failure path by accident.
+ */
+export function prCommit(overrides: Partial<PrCommit> & { oid: string }): PrCommit {
+  return {
+    abbreviatedOid: overrides.oid.slice(0, 7),
+    messageHeadline: 'Cache the diff on head SHA',
+    committedDate: '2026-08-30T09:15:00Z',
+    authorLogin: 'rowan',
+    authorName: 'Rowan',
+    parentOid: 'p'.repeat(40),
+    ...overrides,
+  };
+}
 
 export function pullRequestNode(
   overrides: Partial<PullRequestNode> = {},
@@ -61,9 +82,10 @@ export function prPayload(overrides: Partial<PrPayload> = {}): PrPayload {
     headSha: 'f'.repeat(40),
     pullRequest: pullRequestNode(),
     threads: [],
+    commits: [prCommit({ oid: 'f'.repeat(40), parentOid: 'a'.repeat(40) })],
     checks: { state: 'SUCCESS' },
     diff: { source: 'unified', files: [], truncated: false },
-    truncated: { files: false, threads: false },
+    truncated: { files: false, threads: false, commits: false },
     denied: [],
     ...overrides,
   };
