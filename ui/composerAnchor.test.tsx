@@ -12,7 +12,13 @@ import { composerFor } from './composerAnchor';
 
 describe('composerFor', () => {
   it('places a single-line selection on the added side', () => {
-    expect(composerFor('src/app.ts', { start: 4, end: 4, side: 'additions' }, BOTH_SIDES)).toEqual({
+    const placed = composerFor(
+      'src/app.ts',
+      { start: 4, end: 4, side: 'additions' },
+      BOTH_SIDES,
+    );
+
+    expect(placed).toEqual({
       path: 'src/app.ts',
       side: 'additions',
       lineNumber: 4,
@@ -22,7 +28,13 @@ describe('composerFor', () => {
   });
 
   it('places a selection on the removed side', () => {
-    expect(composerFor('src/app.ts', { start: 4, end: 4, side: 'deletions' }, BOTH_SIDES)).toEqual({
+    const placed = composerFor(
+      'src/app.ts',
+      { start: 4, end: 4, side: 'deletions' },
+      BOTH_SIDES,
+    );
+
+    expect(placed).toEqual({
       path: 'src/app.ts',
       side: 'deletions',
       lineNumber: 4,
@@ -33,7 +45,11 @@ describe('composerFor', () => {
 
   it('rights a selection dragged upwards', () => {
     // Pierre preserves drag direction: `start` is the anchor, not the top.
-    const placed = composerFor('src/app.ts', { start: 9, end: 5, side: 'additions' }, BOTH_SIDES);
+    const placed = composerFor(
+      'src/app.ts',
+      { start: 9, end: 5, side: 'additions' },
+      BOTH_SIDES,
+    );
 
     expect(placed?.anchor).toEqual({
       line: 9,

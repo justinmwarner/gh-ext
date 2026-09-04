@@ -95,23 +95,6 @@ export type ResolvedScope =
 
 const WHOLE: ResolvedScope = { kind: 'whole' };
 
-/**
- * A key that changes exactly when the request would.
- *
- * The fetching hook depends on this rather than on the scope object, which the
- * shell rebuilds on renders that did not move it.
- */
-export function scopeKey(scope: DiffScope): string {
-  switch (scope.kind) {
-    case 'whole':
-      return 'whole';
-    case 'since-review':
-      return 'since-review';
-    case 'commits':
-      return `commits:${scope.from}:${scope.to}`;
-  }
-}
-
 /** How a commit is named wherever one has to be named. */
 export function commitLabel(commit: PrCommit): string {
   return `${commit.abbreviatedOid} ${commit.messageHeadline}`;
@@ -152,13 +135,15 @@ const NEVER_REVIEWED =
 /**
  * Turn a scope into the two commits to compare, or into a reason it cannot be.
  *
- * The force-push case is the point of the `lost` arm. GitHub keeps a commit
- * that has been pushed off a branch reachable for some time afterwards, so the
- * compare would happily succeed and the reviewer would be reading a diff
- * against history this pull request no longer contains, with nothing on screen
- * to say so. Membership of the current commit list is the check that catches
- * it, and it has to happen here rather than in the request, because a request
- * that succeeds is the failure.
+ * The force-push case is the point of the `lost` arm, and it is not a
+ * precaution. Observed against NixOS/nixpkgs#550556 six days after its
+ * force-push: the pre-push commit is gone from `PullRequest.commits`, still
+ * answers 200 on its own, and `compare/{orphan}...{new head}` still returns 200
+ * with `"status": "diverged"`. So the request does not fail — it succeeds, and
+ * the reviewer reads a diff against history this pull request no longer has
+ * with nothing on screen to say so. Membership of the current commit list is
+ * the check, and it has to happen here rather than in the request, because a
+ * request that succeeds is the failure.
  */
 export function resolveScope(scope: DiffScope, context: ScopeContext): ResolvedScope {
   if (scope.kind === 'whole') return WHOLE;

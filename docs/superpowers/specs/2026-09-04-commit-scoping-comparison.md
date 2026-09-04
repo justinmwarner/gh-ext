@@ -254,6 +254,18 @@ answers the question from the merge base. This is the one place a diff against
 departed history is deliberately shown. If that turns out to mislead, the fix
 is a note on the bar rather than disabling the preset.
 
+**Comparisons are not cached, and the reason is weaker than it was.** The
+worker's comment used to say the reviewer asks for one comparison by pressing a
+toggle; with a picker they may walk a history and come back, and each visit is a
+fresh request. A compare between two commits is immutable, so it could be cached
+forever — but not in `PrCache` as it stands, whose keys end in a single head SHA
+and whose `forgetOtherCommits` sweep would treat every compare entry as
+belonging to a superseded commit and delete it on the next assembly. One request
+per selection is well inside the hour's quota, so this was left alone rather
+than bolted on. If stepping through commits feels slow, the cheap fix is a
+bounded in-page cache in `useCompareDiff` — bounded, because 250 file lists is
+not a thing to hold in a tab.
+
 **The scope bar is always on screen, including for the whole diff.** It costs
 ~35px of the column permanently. The alternative — showing it only when
 narrowed — makes it a control the reviewer stops looking for, which is the

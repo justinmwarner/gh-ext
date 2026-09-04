@@ -19,6 +19,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { PrCommit } from '@/lib/github/types';
+import { commitLabel } from '@/lib/review/diffScope';
 
 export interface CommitPickerProps {
   commits: readonly PrCommit[];
@@ -122,7 +123,7 @@ export function CommitPicker({
                   // Named rather than merely labelled, because the accessible
                   // name is the whole of what a screen reader gets and
                   // "830bef0" on its own says nothing about which change it is.
-                  aria-label={`Select commit ${commit.abbreviatedOid} ${commit.messageHeadline}`}
+                  aria-label={`Select commit ${commitLabel(commit)}`}
                   aria-pressed={inRange}
                   onClick={() => {
                     choose(commit.oid);
@@ -139,7 +140,7 @@ export function CommitPicker({
                 <button
                   type="button"
                   className="commit-anchor"
-                  aria-label={`Compare from ${commit.abbreviatedOid} ${commit.messageHeadline}`}
+                  aria-label={`Compare from ${commitLabel(commit)}`}
                   aria-pressed={anchor === commit.oid}
                   onClick={() => {
                     setAnchor((current) => (current === commit.oid ? null : commit.oid));

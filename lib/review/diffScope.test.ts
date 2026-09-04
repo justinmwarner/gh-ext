@@ -16,13 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { PrCommit } from '../github/types';
-import {
-  type DiffScope,
-  WHOLE_DIFF,
-  commitLabel,
-  resolveScope,
-  scopeKey,
-} from './diffScope';
+import { WHOLE_DIFF, commitLabel, resolveScope } from './diffScope';
 
 const sha = (letter: string): string => letter.repeat(40);
 
@@ -92,9 +86,12 @@ describe('resolveScope', () => {
   });
 
   it('reports a commit that is no longer in this pull request rather than comparing it', () => {
-    // The force-push case. GitHub keeps the orphaned commit reachable for a
-    // while, so the compare would succeed and show a diff against history this
-    // pull request no longer has.
+    // The force-push case, and the reason the check is here rather than on the
+    // response. Observed against NixOS/nixpkgs#550556 six days after its
+    // force-push: the pre-push commit is gone from `PullRequest.commits`, still
+    // answers 200 on its own, and still compares successfully against the new
+    // head as "diverged". The request is not what fails — it succeeds, on
+    // history this pull request no longer has.
     const resolved = resolveScope({ kind: 'commits', from: sha('9'), to: sha('9') }, CONTEXT);
 
     expect(resolved.kind).toBe('lost');
@@ -185,26 +182,6 @@ describe('which sides of a narrowed diff share the pull request’s line numbers
     // A range starting at the first commit is based on the pull request's own
     // base commit, so the deletion side does line up.
     expect(wholeRange).toMatchObject({ sides: { deletions: true } });
-  });
-});
-
-describe('scopeKey', () => {
-  it('is stable for the same scope so a re-render does not re-fetch', () => {
-    const a: DiffScope = { kind: 'commits', from: sha('1'), to: sha('3') };
-    const b: DiffScope = { kind: 'commits', from: sha('1'), to: sha('3') };
-
-    expect(scopeKey(a)).toBe(scopeKey(b));
-  });
-
-  it('separates the presets from each other and from the whole diff', () => {
-    const keys = new Set([
-      scopeKey(WHOLE_DIFF),
-      scopeKey({ kind: 'since-review' }),
-      scopeKey({ kind: 'commits', from: sha('1'), to: sha('1') }),
-      scopeKey({ kind: 'commits', from: sha('1'), to: sha('3') }),
-    ]);
-
-    expect(keys.size).toBe(4);
   });
 });
 
