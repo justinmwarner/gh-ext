@@ -89,6 +89,14 @@ The cases that break renderers rather than the ones that exercise them.
 `app.js`, `server.py`, `main.go` — ordinary diffs in three languages, for
 syntax highlighting and for a baseline to compare the smart renderers against.
 
+## Regenerating
+
+`tools/generate.py <before|after> diff-fixtures` writes every text and binary
+fixture; `tools/generate-images.ps1 -Variant <before|after> -Out
+diff-fixtures/images` writes the images through `System.Drawing`. Both states
+live in one script each, on purpose — kept apart, the two sides of a fixture
+drift and stop testing what they claim to.
+
 ## Commits
 
 The changes are split across several commits so the commit picker has a real
