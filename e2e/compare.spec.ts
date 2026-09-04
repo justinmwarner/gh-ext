@@ -88,6 +88,35 @@ test('an image is compared as pixels, from bytes that never touched the page', a
   expect(api.urls.filter((url) => url.includes('logo.png')).length).toBeGreaterThan(1);
 });
 
+test('an image card has its height before the bytes have decoded', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // Side by side is the default and so the view most often scrolled past. An
+  // `<img>` with no width and height attributes reserves nothing: it is zero
+  // pixels tall until it decodes and then jumps to its full height — after the
+  // card is on screen, so the diff column moves out from under anyone scrolling
+  // through it. The dimensions come from the PNG header, not from a decoder.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await reach(page, IMAGE_FILE);
+
+  const img = page.locator('img.image-plate-img').first();
+  await expect(img).toHaveAttribute('width', '8');
+  await expect(img).toHaveAttribute('height', '8');
+
+  expect(await img.evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+
+  // And the overlay modes, whose stage carries the same answer as an aspect
+  // ratio because its layers are absolutely positioned and give it no height.
+  await page.getByRole('button', { name: 'Onion skin', exact: true }).first().click();
+  const stage = page.locator('.image-stage').first();
+  await expect(stage).toHaveAttribute('data-sized', 'true');
+  expect(await stage.evaluate((node) => getComputedStyle(node).aspectRatio)).toBe('8 / 8');
+});
+
 test('the difference blend is applied, and is contained by its own stage', async ({
   context,
   extensionId,

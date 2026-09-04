@@ -20,9 +20,19 @@
  * aligned, which is where a diffing tool has to anchor because it is the only
  * corner both images certainly share.
  *
- * Natural dimensions come from `onLoad`, so everything geometric here is
- * invisible to jsdom, which lays nothing out and reports every image as zero by
- * zero. The browser test is what checks this renders.
+ * Dimensions come from the file's header, read the moment the bytes arrive,
+ * and `onLoad` only corrects them. That order matters more than it looks: the
+ * layers are absolutely positioned so they can share one coordinate space,
+ * which means the stage has no height of its own — waiting for the browser to
+ * decode left every image card **zero pixels tall until it was already on
+ * screen**, and then inflating by the full height of the image. Underneath a
+ * reviewer scrolling through a virtualized column that reads as the scroll
+ * sticking and bouncing.
+ *
+ * `onLoad` stays as the correction and as the answer for formats the header
+ * reader does not know. It is also invisible to jsdom, which lays nothing out
+ * and reports every image as zero by zero; the browser test is what checks
+ * this renders.
  */
 
 import { useState } from 'react';
@@ -83,6 +93,13 @@ function Plate({
           className="image-plate-img"
           src={image.url}
           alt={alt}
+          // The attributes, not just the CSS. With `max-width: 100%` and
+          // `height: auto` beside them the browser reserves the right box from
+          // the header before a single byte is decoded — which is the whole
+          // difference between a card that is the right size on its first paint
+          // and one that grows once it is already on screen.
+          width={size?.width}
+          height={size?.height}
           onLoad={(event) =>
             onMeasure({
               width: event.currentTarget.naturalWidth,
@@ -96,8 +113,14 @@ function Plate({
 }
 
 export function ImageCompare({ variant, path, before, after }: ImageCompareProps) {
-  const [beforeSize, setBeforeSize] = useState<Measured | null>(null);
-  const [afterSize, setAfterSize] = useState<Measured | null>(null);
+  // What the browser eventually reported, which is authoritative but late.
+  const [beforeLoaded, setBeforeSize] = useState<Measured | null>(null);
+  const [afterLoaded, setAfterSize] = useState<Measured | null>(null);
+
+  // The header's answer until then, so the stage is the right size on its very
+  // first paint rather than growing once the bytes have decoded.
+  const beforeSize = beforeLoaded ?? before?.size ?? null;
+  const afterSize = afterLoaded ?? after?.size ?? null;
   /** Where the swipe divider sits, and how much of the new image shows. */
   const [position, setPosition] = useState(50);
 
@@ -141,7 +164,10 @@ export function ImageCompare({ variant, path, before, after }: ImageCompareProps
 
   return (
     <div className="image-compare" data-variant={variant}>
-      <div className="image-stage" style={stage}>
+      {/* `data-sized` is what the stylesheet reads to reserve a default box.
+          An AVIF or an ICO has no header reader here, so it arrives unsized and
+          would otherwise be zero pixels tall until it decoded. */}
+      <div className="image-stage" data-sized={measured} style={stage}>
         <img
           className="image-layer"
           src={before.url}

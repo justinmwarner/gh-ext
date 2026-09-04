@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { type ImageSize, imageSize } from '@/lib/compare/imageSize';
 import type { ChangeSides } from '@/lib/compare/modes';
 import { decodeBase64 } from '@/lib/github/binary-blobs';
 import { type PrRef, message } from '@/lib/messages';
@@ -44,6 +45,17 @@ export interface LoadedImage {
   /** An object URL. Same-process, never remote. */
   url: string;
   byteLength: number;
+  /**
+   * Read from the file's header, not from a decoder, and null for a format
+   * `imageSize` does not know.
+   *
+   * The comparison stage draws its layers absolutely positioned, so it has no
+   * height of its own. Without this it stays zero pixels tall until the browser
+   * decodes something and then inflates by the whole height of the image —
+   * after the card is already on screen, which in a virtualized column reads as
+   * the scroll sticking.
+   */
+  size: ImageSize | null;
 }
 
 type Loaded<T> = { ok: true; value: T } | { ok: false; reason: string };
@@ -136,7 +148,10 @@ async function loadImage(
   // belongs to us. An SVG served this way is loaded by <img> in the mode that
   // runs no script and fetches nothing.
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mediaType }));
-  return { ok: true, value: { url, byteLength: response.data.byteLength } };
+  return {
+    ok: true,
+    value: { url, byteLength: response.data.byteLength, size: imageSize(bytes) },
+  };
 }
 
 export interface SidesRequest {

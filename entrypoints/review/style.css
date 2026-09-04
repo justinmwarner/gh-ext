@@ -2152,6 +2152,14 @@ code {
 /* The box the two images share. `isolation` is load-bearing: without it the
    difference blend reaches through to whatever is painted behind the card,
    and "anything unchanged goes black" stops being true. */
+/* A default box for an image whose dimensions we could not read, so the card
+   is never zero pixels tall while it waits to decode. A stage that grows after
+   it is on screen pushes the diff column out from under whoever is scrolling
+   through it. */
+.image-stage:not([data-sized='true']) {
+  min-height: 120px;
+}
+
 .image-stage {
   position: relative;
   width: 100%;
