@@ -15,6 +15,7 @@ import {
   comparisonKind,
   changeSides,
   defaultModeFor,
+  imageMediaType,
   modeIndex,
   modesFor,
   resolveMode,
@@ -77,6 +78,22 @@ describe('comparisonKind', () => {
         file({ path: '', oldPath: 'assets/old.png', isBinary: true, changeType: 'DELETED' }),
       ),
     ).toBe('image');
+  });
+});
+
+describe('imageMediaType', () => {
+  it('names every kind it claims to render', () => {
+    for (const name of ['a.png', 'a.jpg', 'a.gif', 'a.webp', 'a.avif', 'a.bmp', 'a.ico']) {
+      expect(imageMediaType(name)).toMatch(/^image\//);
+    }
+  });
+
+  it('labels SVG as SVG, which is what keeps it in the safe <img> mode', () => {
+    expect(imageMediaType('logo.svg')).toBe('image/svg+xml');
+  });
+
+  it('has nothing to say about a file that is not an image', () => {
+    expect(imageMediaType('app.ts')).toBeNull();
   });
 });
 

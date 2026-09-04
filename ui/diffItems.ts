@@ -20,6 +20,7 @@
 
 import { parsePatchFiles } from '@pierre/diffs';
 import type { CodeViewItem, DiffLineAnnotation, FileDiffMetadata } from '@pierre/diffs';
+import { MODE_SLOTS, RAW, changeSides, modeIndex } from '@/lib/compare/modes';
 import type { ReviewFile } from './reviewFiles';
 import type { AnnotationMetadata } from './reviewThreads';
 
@@ -56,7 +57,21 @@ export function fileBody(file: ReviewFile): FileBody {
   }
 
   if (file.isBinary) {
-    return { kind: 'binary', message: 'Binary file. There is no text diff to show.' };
+    // Named by what happened to it. "Binary file changed" on a file that was
+    // added is not wrong, exactly, but it is the least of what is known — and
+    // for a reviewer scanning a card with nothing else in it, the difference
+    // between a new asset and an edited one is most of the review.
+    const sides = changeSides(file);
+    const what =
+      sides === 'added'
+        ? 'Binary file added.'
+        : sides === 'deleted'
+          ? 'Binary file removed.'
+          : 'Binary file changed.';
+    return {
+      kind: 'binary',
+      message: `${what} There is no text diff to show — open it on GitHub to see it.`,
+    };
   }
 
   if (hasHunks(file.patch)) return { kind: 'diff', message: null };
@@ -300,22 +315,58 @@ const revisionOf = (
   return nextRevision;
 };
 
+/**
+ * The mode is folded in beside the diff and the annotations for a reason.
+ *
+ * `CodeView` reuses the record it holds for an item id and only reconsiders it
+ * when `version` moves. Switching a file from its grid to the raw diff changes
+ * `collapsed`, which this already watched — but switching between two *rich*
+ * modes changes neither the diff nor the annotations nor the collapsed flag,
+ * and the card's whole body has still been replaced.
+ *
+ * Today that would very likely repaint anyway: `SlotPortals` memoizes on the
+ * identity of `renderCustomHeader` as well as on the item versions, and the
+ * column passes an inline arrow, so the portals are rebuilt on every render
+ * regardless. Which is exactly why this is here. Memoizing that callback is a
+ * natural optimization for somebody to make later, and the day it happens the
+ * mode buttons would stop changing what the card shows — with no error, in one
+ * file type at a time, and nothing in the diff to suggest the cause.
+ */
 const versionOf = (
   fileDiff: object,
   collapsed: boolean,
   annotations: readonly unknown[] | undefined,
-): number => revisionOf(fileDiff, annotations) * 2 + (collapsed ? 1 : 0);
+  mode: string,
+): number =>
+  (revisionOf(fileDiff, annotations) * MODE_SLOTS + modeIndex(mode)) * 2 + (collapsed ? 1 : 0);
+
+/**
+ * Does this card show Pierre's own diff in its body?
+ *
+ * Only in the raw mode, and only when there is a patch to draw. Every rich
+ * comparison renders in the card header instead — which is the same route the
+ * "binary file changed" sentence has always taken, and the reason it is
+ * available at all: `CodeView` has no hook for replacing an item's body, and
+ * a collapsed item is one whose header is the whole of it.
+ */
+export function showsTextDiff(file: ReviewFile, mode: string): boolean {
+  return mode === RAW.id && fileBody(file).kind === 'diff';
+}
 
 export function codeViewItems(
   files: readonly ReviewFile[],
   collapsedPaths: ReadonlySet<string>,
   annotationsByPath: ReadonlyMap<string, DiffLineAnnotation<AnnotationMetadata>[]> = new Map(),
+  modes: ReadonlyMap<string, string> = new Map(),
 ): CodeViewItem<AnnotationMetadata>[] {
   return files.map((file) => {
-    // A file with no diff is collapsed whatever the reviewer chose: expanding
-    // it would reveal an empty rectangle where its message used to be.
-    const collapsed =
-      fileBody(file).kind !== 'diff' || collapsedPaths.has(file.path);
+    const mode = modes.get(file.path) ?? RAW.id;
+    // A file with no diff to draw is collapsed whatever the reviewer chose:
+    // expanding it would reveal an empty rectangle where its message used to
+    // be. A file in a rich mode is collapsed for the same reason — its body is
+    // the comparison in the header, and the text diff underneath would be the
+    // thing the reviewer just chose not to look at.
+    const collapsed = !showsTextDiff(file, mode) || collapsedPaths.has(file.path);
     const annotations = annotationsByPath.get(file.path);
     const fileDiff = fileDiffFor(file);
 
@@ -325,7 +376,7 @@ export function codeViewItems(
       fileDiff,
       collapsed,
       ...(annotations !== undefined ? { annotations } : {}),
-      version: versionOf(fileDiff, collapsed, annotations),
+      version: versionOf(fileDiff, collapsed, annotations, mode),
     };
   });
 }

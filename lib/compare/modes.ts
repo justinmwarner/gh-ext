@@ -216,6 +216,34 @@ export function comparisonKind(file: ComparableFile): ComparisonKind {
 }
 
 /**
+ * What to tell the browser a file's bytes are.
+ *
+ * Derived from the path rather than taken from GitHub's `content-type`, because
+ * this is what decides how the browser will interpret bytes we are about to
+ * hand it and that decision belongs here. An SVG labelled this way is loaded
+ * through `<img>`, which is the mode that runs no script and fetches nothing —
+ * whereas the same markup inlined into the document would be a page on
+ * github.com's content executing inside the extension.
+ */
+const MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png',
+  apng: 'image/apng',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  jfif: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  svg: 'image/svg+xml',
+};
+
+export function imageMediaType(path: string): string | null {
+  return MEDIA_TYPES[extensionOf(path)] ?? null;
+}
+
+/**
  * How much of a patch to read looking for its mode header.
  *
  * `new file mode` and `deleted file mode` sit immediately under `diff --git`,

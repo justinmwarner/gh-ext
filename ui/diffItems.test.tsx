@@ -139,6 +139,42 @@ describe('codeViewItems', () => {
     expect(open[0]?.version).not.toBe(shut[0]?.version);
   });
 
+  it('changes an item’s version when only the comparison mode changed', () => {
+    // Between two rich modes nothing else about the item moves — same diff,
+    // same annotations, still collapsed — and the whole body of the card has
+    // been replaced. `SlotPortals` also memoizes on the identity of
+    // `renderCustomHeader`, which the column passes inline, so today this would
+    // repaint anyway; memoizing that callback is a natural optimization and the
+    // day somebody makes it the mode buttons stop working silently.
+    const csv = file({ path: 'data/rows.csv' });
+    const grid = codeViewItems([csv], new Set(), new Map(), new Map([[csv.path, 'table:grid']]));
+    const rows = codeViewItems(
+      [csv],
+      new Set(),
+      new Map(),
+      new Map([[csv.path, 'table:changed-rows']]),
+    );
+
+    expect(grid[0]?.collapsed).toBe(true);
+    expect(rows[0]?.collapsed).toBe(true);
+    expect(grid[0]?.version).not.toBe(rows[0]?.version);
+  });
+
+  it('collapses a file whose body is a comparison rather than a diff', () => {
+    // Expanded, the card would carry Pierre's line-by-line diff of the same
+    // file underneath the grid the reviewer chose instead of it.
+    const csv = file({ path: 'data/rows.csv' });
+    const items = codeViewItems(
+      [csv],
+      new Set(),
+      new Map(),
+      new Map([[csv.path, 'table:grid']]),
+    );
+
+    expect(items[0]?.collapsed).toBe(true);
+    expect(codeViewItems([csv], new Set())[0]?.collapsed).toBe(false);
+  });
+
   it('collapses a file that has no diff to show, whatever the reviewer chose', () => {
     const items = codeViewItems(
       [file({ path: 'logo.png', isBinary: true, patch: '' })],

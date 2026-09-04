@@ -17,6 +17,7 @@ import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MARK_VIEWED, UNMARK_VIEWED } from '@/lib/github/mutations';
 import type { FileViewedState } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
+import { RAW } from '@/lib/compare/modes';
 import { FileCard } from './FileCard';
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
@@ -52,6 +53,9 @@ function mount(viewedState: FileViewedState) {
         onToggleCollapsed={() => {}}
         onHeaderRef={() => {}}
         unanchored={[]}
+        mode={RAW.id}
+        onChangeMode={() => {}}
+        blobs={null}
       />
     </ReviewSessionProvider>,
   );

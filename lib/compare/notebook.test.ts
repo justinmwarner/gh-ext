@@ -81,6 +81,32 @@ describe('parseNotebook', () => {
     expect(parsed.cells[0]?.outputs[0]?.text).toContain('ZeroDivisionError');
   });
 
+  it('reads the notebook’s own language, so a cell can be highlighted as it', () => {
+    const declared = JSON.stringify({
+      nbformat: 4,
+      cells: [],
+      metadata: { language_info: { name: 'python', file_extension: '.py' } },
+    });
+
+    expect(parseNotebook(declared).languageExtension).toBe('py');
+  });
+
+  it('falls back to the kernel when the notebook was never run', () => {
+    // `language_info` is written by the kernel on execution, so a notebook
+    // committed straight from an editor has only `kernelspec`.
+    const unrun = JSON.stringify({
+      nbformat: 4,
+      cells: [],
+      metadata: { kernelspec: { language: 'julia' } },
+    });
+
+    expect(parseNotebook(unrun).languageExtension).toBe('jl');
+  });
+
+  it('says plain text rather than guessing Python', () => {
+    expect(parseNotebook(notebook([])).languageExtension).toBe('txt');
+  });
+
   it('refuses a file that is not a notebook rather than showing an empty one', () => {
     expect(parseNotebook('{"a":1}').status).toBe('unreadable');
     expect(parseNotebook('not json').status).toBe('unreadable');

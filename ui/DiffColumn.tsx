@@ -39,6 +39,7 @@ import {
 import { CodeView } from '@pierre/diffs/react';
 import type { CodeViewHandle, CodeViewReactOptions } from '@pierre/diffs/react';
 import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from '@pierre/diffs';
+import { RAW, resolveModeForFile } from '@/lib/compare/modes';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnnotationSide } from '@/lib/review/threads';
 import { Composer } from './Composer';
@@ -194,6 +195,23 @@ export function DiffColumn({
 }: DiffColumnProps) {
   const session = useReviewSession();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * How each file is being compared, for the files the reviewer has moved.
+   *
+   * Per file rather than per type, because two images in one pull request are
+   * answering different questions — one was redrawn and wants side by side, the
+   * next moved four pixels and wants the difference blend. A single mode would
+   * make each choice undo the last.
+   *
+   * Sparse, and deliberately not seeded with every file's default. The default
+   * is a function of the file, so writing it down would only create a second
+   * copy to keep in step with the first — and the file list is replaced
+   * wholesale by "changes since my last review", which would leave that copy
+   * describing files that are no longer here.
+   */
+  const [chosenModes, setChosenModes] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
   const [expansionError, setExpansionError] = useState<string | null>(null);
@@ -322,9 +340,34 @@ export function DiffColumn({
     return built;
   }, [layouts, composer]);
 
+  /**
+   * The mode every file is actually in, resolved rather than stored.
+   *
+   * `resolveModeForFile` is what makes the sparse map above safe: a file the
+   * reviewer never touched gets its default, and a stored mode that the file no
+   * longer offers — the list was replaced, a path that used to be a PNG is now
+   * a CSV — falls back to the default rather than rendering a control the file
+   * does not have.
+   */
+  const modes = useMemo(() => {
+    const built = new Map<string, string>();
+    for (const file of files) {
+      built.set(file.path, resolveModeForFile(file, chosenModes.get(file.path)));
+    }
+    return built;
+  }, [files, chosenModes]);
+
+  const changeMode = useCallback((path: string, mode: string) => {
+    setChosenModes((previous) => {
+      const next = new Map(previous);
+      next.set(path, mode);
+      return next;
+    });
+  }, []);
+
   const items = useMemo(
-    () => codeViewItems(files, collapsed, annotationsByPath),
-    [files, collapsed, annotationsByPath],
+    () => codeViewItems(files, collapsed, annotationsByPath, modes),
+    [files, collapsed, annotationsByPath, modes],
   );
   const byPath = useMemo(
     () => new Map(files.map((file) => [file.path, file])),
@@ -757,6 +800,9 @@ export function DiffColumn({
                 onToggleCollapsed={toggleCollapsed}
                 onHeaderRef={registerHeader}
                 unanchored={layouts.get(file.path)?.listed ?? []}
+                mode={modes.get(file.path) ?? RAW.id}
+                onChangeMode={changeMode}
+                blobs={blobs}
               />
             );
           }}
