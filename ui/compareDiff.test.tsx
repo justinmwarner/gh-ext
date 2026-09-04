@@ -298,6 +298,11 @@ describe('the "since my last review" preset', () => {
     expect(alert.textContent).toMatch(/No commit/);
     // The reviewer keeps a diff to read rather than an empty column.
     expect(document.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
+    // And the bar describes *that* diff. Saying "showing changes since your
+    // last review" over the whole pull request is the one thing this row
+    // exists to make impossible.
+    expect(scopeBar().getAttribute('data-scope')).toBe('failed');
+    expect(scopeBar().textContent).toMatch(/all 3 commits/i);
   });
 
   it('asks for nothing when the reviewer has already reviewed the head commit', async () => {

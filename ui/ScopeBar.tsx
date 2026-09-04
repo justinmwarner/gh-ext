@@ -53,12 +53,19 @@ export interface ScopeBarProps {
 }
 
 /**
- * One word for the state, on a data attribute.
+ * One word for what is on screen, on a data attribute.
  *
  * Read by the stylesheet so a narrowed column is visibly not the whole one,
  * and by the tests, which is the same guarantee stated twice.
+ *
+ * `failed` is a separate state from `narrowed` and not a decoration on it. A
+ * comparison that could not be loaded leaves the *whole* diff on screen, so a
+ * bar still reading "showing commit 830bef0" would be describing a diff the
+ * reviewer is not looking at — which is the one thing this row exists to make
+ * impossible.
  */
-function scopeState(scope: ResolvedScope): string {
+function scopeState(scope: ResolvedScope, failed: boolean): string {
+  if (failed) return 'failed';
   switch (scope.kind) {
     case 'whole':
       return 'whole';
@@ -71,21 +78,17 @@ function scopeState(scope: ResolvedScope): string {
   }
 }
 
-function showing(scope: ResolvedScope, commitCount: number): string {
-  switch (scope.kind) {
-    case 'whole':
-      return commitCount === 0
-        ? 'Showing the whole pull request'
-        : `Showing all ${commitCount} commits`;
-    case 'lost':
-    case 'unchanged':
-      // The whole diff is what is actually on screen in both of these, and the
-      // reason sits beside it. Saying "showing commit abc1234" here would name
-      // a diff the reviewer is not looking at.
-      return `Showing all ${commitCount} commits`;
-    case 'narrowed':
-      return `Showing ${scope.label}`;
-  }
+const allCommits = (commitCount: number): string =>
+  commitCount === 0
+    ? 'Showing the whole pull request'
+    : `Showing all ${commitCount} commits`;
+
+function showing(scope: ResolvedScope, commitCount: number, failed: boolean): string {
+  // Every arm but `narrowed` leaves the whole diff on screen, and so does a
+  // narrowed one whose request did not answer. Only name the commits when the
+  // column is actually showing them.
+  if (failed || scope.kind !== 'narrowed') return allCommits(commitCount);
+  return `Showing ${scope.label}`;
 }
 
 export function ScopeBar({
@@ -100,10 +103,12 @@ export function ScopeBar({
   onSinceReview,
   onShowAll,
 }: ScopeBarProps) {
+  const failed = requestError !== null;
+
   return (
-    <div className="scope-bar" data-scope={scopeState(scope)}>
+    <div className="scope-bar" data-scope={scopeState(scope, failed)}>
       <p className="scope-showing">
-        {busy ? 'Comparing…' : showing(scope, commitCount)}
+        {busy ? 'Comparing…' : showing(scope, commitCount, failed)}
       </p>
 
       <div className="scope-actions">
@@ -131,7 +136,7 @@ export function ScopeBar({
         >
           Since my last review
         </button>
-        {scope.kind !== 'whole' && (
+        {(scope.kind !== 'whole' || failed) && (
           <button type="button" className="button" onClick={onShowAll}>
             Show all commits
           </button>
@@ -141,10 +146,15 @@ export function ScopeBar({
       {/* `status` rather than `alert`: none of these is a failure of something
           the reviewer just did, and an assertive announcement on every toggle
           would talk over them while they read. */}
-      {(scope.kind === 'lost' || scope.kind === 'unchanged' || commitsTruncated) && (
+      {(scope.kind === 'lost' ||
+        scope.kind === 'unchanged' ||
+        commitsTruncated ||
+        // A pull request has at least one commit, so an empty list is never
+        // the honest answer — it means the lookup came back with nothing.
+        commitCount === 0) && (
         <p className="scope-note" role="status">
           {scope.kind === 'lost' || scope.kind === 'unchanged' ? scope.message : null}
-          {commitsTruncated && (commitCount === 0 ? NO_LIST : SHORT_LIST)}
+          {commitCount === 0 ? NO_LIST : commitsTruncated ? SHORT_LIST : null}
         </p>
       )}
 

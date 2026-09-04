@@ -21,7 +21,11 @@ import { fileURLToPath } from 'node:url';
 import { type BrowserContext, type Route, test as base } from '@playwright/test';
 import {
   BASE_SHA,
+  COMMIT_NODES,
   COMPARE_DIFF,
+  FIRST_COMMIT_DIFF,
+  FIRST_SHA,
+  RANGE_DIFF,
   HEAD_SHA,
   PRIOR_SHA,
   POSTED_THREAD,
@@ -92,6 +96,38 @@ function graphqlReply(
 
     case 'PullRequestReview':
       return { data: { repository: { pullRequest: PULL_REQUEST_NODE } } };
+
+    case 'PullRequestCommits':
+      // `totalCount` matches what is sent, so this fixture is not silently
+      // exercising the "GitHub stopped at 250" notice on every test.
+      return {
+        data: {
+          repository: {
+            pullRequest: {
+              commits: {
+                totalCount: COMMIT_NODES.length,
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: COMMIT_NODES,
+              },
+            },
+          },
+        },
+      };
+
+    case 'PullRequestCommitsPage':
+      return {
+        data: {
+          repository: {
+            pullRequest: {
+              commits: {
+                totalCount: COMMIT_NODES.length,
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [],
+              },
+            },
+          },
+        },
+      };
 
     case 'PullRequestFilesPage':
     case 'PullRequestReviewThreadsPage':
@@ -208,13 +244,30 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
       return;
     }
 
-    // "Changes since my last review". A different endpoint from the pull
-    // request's own diff, answering a narrower patch between two commits.
-    if (url.pathname === `/repos/${PR.owner}/${PR.repo}/compare/${PRIOR_SHA}...${HEAD_SHA}`) {
+    // Every narrowing the page offers lands on this endpoint — a single
+    // commit, a range, and "changes since my last review" alike — because all
+    // three are the same request between two commits. Only three-dot is
+    // routed, because only three-dot exists: `/compare/{a}..{b}` answers 404
+    // on the real API.
+    const compares: Record<string, string> = {
+      [`${PRIOR_SHA}...${HEAD_SHA}`]: COMPARE_DIFF,
+      [`${BASE_SHA}...${FIRST_SHA}`]: FIRST_COMMIT_DIFF,
+      [`${BASE_SHA}...${PRIOR_SHA}`]: RANGE_DIFF,
+    };
+    const compare = /^\/repos\/[^/]+\/[^/]+\/compare\/(.+)$/.exec(url.pathname);
+    if (compare !== null) {
+      const body = compares[decodeURIComponent(compare[1] ?? '')];
+      if (body === undefined) {
+        // A range this fixture did not expect. Refused loudly rather than
+        // answered emptily, which would read as "those commits changed
+        // nothing" and pass a test that should fail.
+        await route.fulfill({ status: 404, body: 'no such comparison' });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/vnd.github.diff',
-        body: COMPARE_DIFF,
+        body,
       });
       return;
     }
@@ -309,4 +362,4 @@ export const reviewUrl = (extensionId: string): string =>
   `chrome-extension://${extensionId}/review.html#/pr/${PR.owner}/${PR.repo}/${PR.number}`;
 
 export { expect } from '@playwright/test';
-export { HEAD_SHA, BASE_SHA, PRIOR_SHA, PR };
+export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR };

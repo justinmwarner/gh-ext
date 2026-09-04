@@ -23,6 +23,14 @@ export const BASE_SHA = 'a'.repeat(40);
  * two commits that are each somewhere in the middle of the pull request.
  */
 export const PRIOR_SHA = 'b'.repeat(40);
+/**
+ * The pull request's first commit.
+ *
+ * Its parent is the pull request's own base, so scoping to it is the case
+ * where the deletions side lines up and the additions side does not — which is
+ * the pair every thread on screen is then judged against.
+ */
+export const FIRST_SHA = 'c'.repeat(40);
 
 /** In column order: this is the order the diff sends them, which the UI keeps. */
 export const FILES = [
@@ -241,6 +249,71 @@ export const PULL_REQUEST_NODE = {
     nodes: THREADS,
   },
 };
+
+/**
+ * The pull request's history, oldest first, as `PullRequestCommits` returns it.
+ *
+ * Three commits so a range is a real range and a middle one exists to pick.
+ * Each carries its own parent, because that is what makes "just this commit"
+ * expressible: the only diff endpoint available compares two commits.
+ */
+export const COMMITS = [
+  { oid: FIRST_SHA, parent: BASE_SHA, headline: 'Add the parser' },
+  { oid: PRIOR_SHA, parent: FIRST_SHA, headline: 'Handle renames' },
+  { oid: HEAD_SHA, parent: PRIOR_SHA, headline: 'Cache the diff on head SHA' },
+] as const;
+
+export const COMMIT_NODES = COMMITS.map((commit) => ({
+  commit: {
+    oid: commit.oid,
+    abbreviatedOid: commit.oid.slice(0, 7),
+    messageHeadline: commit.headline,
+    committedDate: '2026-08-30T09:15:00Z',
+    author: { name: 'Rowan', user: { login: 'rowan' } },
+    parents: { nodes: [{ oid: commit.parent }] },
+  },
+}));
+
+/**
+ * What the first commit alone changed: one file, one hunk.
+ *
+ * Deliberately `src/app.ts`, which carries the anchored thread. On this diff
+ * the additions side is numbered against the file as it stood at that commit,
+ * not at the head, so line 2 is not the line that thread was written on — and
+ * the page has to list the comment rather than draw it there.
+ */
+export const FIRST_COMMIT_DIFF = [
+  'diff --git a/src/app.ts b/src/app.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/app.ts',
+  '+++ b/src/app.ts',
+  '@@ -1,3 +1,3 @@',
+  ' first line',
+  '-old src/app.ts',
+  '+new src/app.ts',
+  ' third line',
+].join('\n');
+
+/**
+ * What the first two commits changed together.
+ *
+ * Two files, so a range is distinguishable on screen from the single commit
+ * above it rather than only in the URL. The base is the *parent* of the first
+ * selection, which here is the pull request's own base — which is why the two
+ * assertions about which side lines up differ between this and the diff above.
+ */
+export const RANGE_DIFF = [
+  FIRST_COMMIT_DIFF,
+  'diff --git a/src/beta.ts b/src/beta.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/beta.ts',
+  '+++ b/src/beta.ts',
+  '@@ -1,3 +1,3 @@',
+  ' first line',
+  '-old src/beta.ts',
+  '+new src/beta.ts',
+  ' third line',
+].join('\n');
 
 /** The thread `AddThread` invents, so a posted comment appears on the page. */
 export const POSTED_THREAD = thread({

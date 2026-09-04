@@ -359,7 +359,8 @@ code {
   background: light-dark(#ddf4ff, #121d2f);
 }
 
-.scope-bar[data-scope='lost'] {
+.scope-bar[data-scope='lost'],
+.scope-bar[data-scope='failed'] {
   border-left: 4px solid light-dark(#bf8700, #d29922);
   background: light-dark(#fff8c5, #272115);
 }
