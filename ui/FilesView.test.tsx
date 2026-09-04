@@ -7,9 +7,10 @@
  * what the column is showing, so it belongs to the column.
  */
 
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ReviewThread } from '@/lib/github/types';
+import { MARK_VIEWED } from '@/lib/github/mutations';
+import type { FileViewedState, ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { FilesView } from './FilesView';
 import { request } from './background';
@@ -32,10 +33,13 @@ function mount(
     threads?: ReviewThread[];
     compare?: Partial<typeof COMPARE>;
     compareError?: string | null;
+    viewedState?: FileViewedState;
   } = {},
 ) {
   const payload = {
-    ...prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })]),
+    ...prPayloadWithFiles([
+      fileFixture({ path: 'src/app.ts', viewedState: options.viewedState ?? 'UNVIEWED' }),
+    ]),
     threads: options.threads ?? [],
   };
   return render(
@@ -143,5 +147,54 @@ describe('FilesView', () => {
       container.querySelector('file-tree-container')?.shadowRoot?.textContent ?? '';
     expect(shadow).toContain('○');
     expect(shadow).not.toContain('●');
+  });
+});
+
+describe('ticking a file off from the tree', () => {
+  const shadow = (container: HTMLElement) =>
+    container.querySelector('file-tree-container')?.shadowRoot ?? null;
+
+  const box = (container: HTMLElement, glyph: string) =>
+    [
+      ...(shadow(container)?.querySelectorAll(
+        '[data-item-section="decoration"] span span',
+      ) ?? []),
+    ].find((element) => element.textContent === glyph);
+
+  it('shows the state the payload arrived with', () => {
+    const { container } = mount({ viewedState: 'VIEWED' });
+
+    expect(shadow(container)?.textContent).toContain('☑');
+  });
+
+  it('marks the file viewed on GitHub when the box is clicked', async () => {
+    (request as unknown as Mock).mockResolvedValue({ ok: true, data: { data: {} } });
+    const { container } = mount();
+
+    await act(async () => {
+      box(container, '☐')?.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
+      );
+    });
+
+    // The real mutation, not a local flag: a tick here shows up on github.com.
+    expect((request as unknown as Mock).mock.calls[0]?.[0]?.document).toBe(MARK_VIEWED);
+    expect(shadow(container)?.textContent).toContain('☑');
+  });
+
+  it('puts the box back when GitHub refuses', async () => {
+    // Optimistic, with a real rollback. A tick that stays after the mutation
+    // failed is a file the reviewer believes they have signed off.
+    (request as unknown as Mock).mockResolvedValue({ ok: false, error: 'nope' });
+    const { container } = mount();
+
+    await act(async () => {
+      box(container, '☐')?.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
+      );
+    });
+
+    expect(shadow(container)?.textContent).toContain('☐');
+    expect(shadow(container)?.textContent).not.toContain('☑');
   });
 });

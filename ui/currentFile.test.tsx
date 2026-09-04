@@ -118,6 +118,34 @@ describe('topmostFile', () => {
     ).toBe('src/b.ts');
   });
 
+  it('counts the file the column just scrolled to, not the one above it', () => {
+    // Scrolling the column to a file does not leave that file's header flush
+    // with the top: the gap between one file's last line and the next one's
+    // header belongs to the file below it, and the scroll lands on top of the
+    // gap. Measured at 26px in a real browser.
+    //
+    // With a tighter tolerance, clicking a file in the tree reported the file
+    // *above* it — which then drove the tree to select that one instead, so
+    // the row the reviewer had just clicked came back deselected.
+    expect(
+      topmostFile([
+        { path: 'lib/util/clamp.ts', top: -20 },
+        { path: 'lib/util/debounce.ts', top: 26 },
+      ]),
+    ).toBe('lib/util/debounce.ts');
+  });
+
+  it('still prefers a header that has actually passed the top', () => {
+    // The tolerance is for the gap above a header, not licence to skip ahead
+    // while the previous file still fills the viewport.
+    expect(
+      topmostFile([
+        { path: 'src/a.ts', top: -300 },
+        { path: 'src/b.ts', top: 400 },
+      ]),
+    ).toBe('src/a.ts');
+  });
+
   it('has no answer when nothing is mounted', () => {
     expect(topmostFile([])).toBeNull();
   });

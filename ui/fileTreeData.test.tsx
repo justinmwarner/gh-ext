@@ -14,7 +14,10 @@ import {
   DELETION_COLOR,
   NOISE_COLOR,
   SEPARATOR,
+  UNVIEWED_BOX,
+  VIEWED_BOX,
   fileComments,
+  isViewedBox,
   gitStatusFor,
   rowDecoration,
   treeGitStatus,
@@ -91,12 +94,14 @@ describe('rowDecoration', () => {
     const decoration = rowDecoration(file({ additions: 12, deletions: 3 }));
 
     expect(decoration).toEqual({
-      text: '+12 −3',
-      title: '12 additions, 3 deletions',
+      text: `+12 −3 ${UNVIEWED_BOX}`,
+      title: '12 additions, 3 deletions — not viewed',
       parts: [
         { text: '+12', color: ADDITION_COLOR },
         { text: SEPARATOR },
         { text: '−3', color: DELETION_COLOR },
+        { text: SEPARATOR },
+        { text: UNVIEWED_BOX, color: NOISE_COLOR },
       ],
     });
   });
@@ -108,11 +113,19 @@ describe('rowDecoration', () => {
     // together as `+12−3`.
     const parts = rowDecoration(file())?.parts ?? [];
 
-    expect(parts.map((part) => part.text)).toEqual(['+12', ' ', '−3']);
+    expect(parts.map((part) => part.text)).toEqual([
+      '+12',
+      ' ',
+      '−3',
+      ' ',
+      UNVIEWED_BOX,
+    ]);
   });
 
   it('still reads as a decoration when nothing was added or removed', () => {
-    expect(rowDecoration(file({ additions: 0, deletions: 0 }))?.text).toBe('+0 −0');
+    expect(rowDecoration(file({ additions: 0, deletions: 0 }))?.text).toBe(
+      `+0 −0 ${UNVIEWED_BOX}`,
+    );
   });
 
   it('mutes a noise file’s counts and says why', () => {
@@ -165,9 +178,9 @@ describe('rowDecoration with comments', () => {
   it('marks an open conversation with a filled dot after the counts', () => {
     const decoration = rowDecoration(file(), { total: 2, unresolved: 1 });
 
-    expect(decoration?.text).toBe('+12 −3 ●');
-    expect(decoration?.parts.at(-1)).toEqual({ text: '●', color: COMMENT_COLOR });
-    expect(decoration?.title).toMatch(/1 unresolved comment$/);
+    expect(decoration?.text).toBe(`+12 −3 ● ${UNVIEWED_BOX}`);
+    expect(decoration?.parts.at(-3)).toEqual({ text: '●', color: COMMENT_COLOR });
+    expect(decoration?.title).toContain('1 unresolved comment');
   });
 
   it('marks a settled conversation with a hollow dot instead', () => {
@@ -175,22 +188,25 @@ describe('rowDecoration with comments', () => {
     // can still tell a ring from a disc.
     const decoration = rowDecoration(file(), { total: 3, unresolved: 0 });
 
-    expect(decoration?.text).toBe('+12 −3 ○');
-    expect(decoration?.parts.at(-1)).toEqual({ text: '○', color: NOISE_COLOR });
-    expect(decoration?.title).toMatch(/3 comments, all resolved$/);
+    expect(decoration?.text).toBe(`+12 −3 ○ ${UNVIEWED_BOX}`);
+    expect(decoration?.parts.at(-3)).toEqual({ text: '○', color: NOISE_COLOR });
+    expect(decoration?.title).toContain('3 comments, all resolved');
   });
 
-  it('puts the dot last so a narrow rail clips the counts and not the dot', () => {
-    // The decoration lane is right-aligned with overflow hidden, so it is the
-    // start of the cell that disappears first. The counts are already on the
-    // row twice over; the dot is the only place this information exists.
-    const decoration = rowDecoration(file(), { total: 1, unresolved: 1 });
+  it('orders the cell so a narrow rail clips the least important run first', () => {
+    // The lane is right-aligned with overflow hidden, so it is the start of the
+    // cell that disappears. Counts first — they are already on the row twice
+    // over — then the conversation mark, then the box, which is the only part
+    // of this cell anyone can click.
+    const decoration = rowDecoration(file(), { total: 1, unresolved: 1 }, 'UNVIEWED');
 
-    expect(decoration?.text.endsWith('●')).toBe(true);
+    expect(decoration?.parts.map((part) => part.text).filter((t) => t !== SEPARATOR)).toEqual(
+      ['+12', '−3', '●', UNVIEWED_BOX],
+    );
   });
 
   it('says nothing extra about a file with no conversations', () => {
-    expect(rowDecoration(file(), undefined)?.text).toBe('+12 −3');
+    expect(rowDecoration(file(), undefined)?.text).toBe(`+12 −3 ${UNVIEWED_BOX}`);
   });
 
   it('dots a noise file too, because a comment on one still matters', () => {
@@ -199,6 +215,62 @@ describe('rowDecoration with comments', () => {
       { total: 1, unresolved: 1 },
     );
 
-    expect(decoration?.parts.at(-1)).toEqual({ text: '●', color: COMMENT_COLOR });
+    expect(decoration?.parts.at(-3)).toEqual({ text: '●', color: COMMENT_COLOR });
+  });
+});
+
+describe('rowDecoration with a viewed state', () => {
+  it('offers an empty box for a file the reviewer has not looked at', () => {
+    const decoration = rowDecoration(file(), undefined, 'UNVIEWED');
+
+    expect(decoration?.parts.at(-1)).toEqual({
+      text: UNVIEWED_BOX,
+      color: NOISE_COLOR,
+    });
+    expect(decoration?.title).toMatch(/not viewed$/);
+  });
+
+  it('ticks the box for a file the reviewer has marked', () => {
+    const decoration = rowDecoration(file(), undefined, 'VIEWED');
+
+    expect(decoration?.parts.at(-1)).toEqual({ text: VIEWED_BOX, color: NOISE_COLOR });
+    expect(decoration?.title).toMatch(/viewed$/);
+  });
+
+  it('un-ticks a file that changed after the reviewer marked it', () => {
+    // DISMISSED is the state that matters. Drawn ticked it would claim they
+    // have seen the current version; drawn as a plain empty box it would lose
+    // that they ever looked. Empty, in the colour that means "look again".
+    const decoration = rowDecoration(file(), undefined, 'DISMISSED');
+
+    expect(decoration?.parts.at(-1)).toEqual({
+      text: UNVIEWED_BOX,
+      color: COMMENT_COLOR,
+    });
+    expect(decoration?.title).toMatch(/changed since/i);
+  });
+
+  it('falls back to the file’s own state when nothing overrides it', () => {
+    expect(rowDecoration(file({ viewedState: 'VIEWED' }))?.parts.at(-1)?.text).toBe(
+      VIEWED_BOX,
+    );
+  });
+
+  it('puts the box last, after the counts and the conversation mark', () => {
+    // Last because it is the one part of this cell you can click: the lane is
+    // right-aligned with its overflow hidden, so a narrow rail eats the start.
+    const decoration = rowDecoration(file(), { total: 1, unresolved: 1 }, 'UNVIEWED');
+
+    expect(decoration?.text).toBe(`+12 −3 ● ${UNVIEWED_BOX}`);
+  });
+
+  it('recognizes its own box, whichever state it is in', () => {
+    // How the click handler tells a tick from the counts beside it. Matching on
+    // the glyph rather than on a position in the DOM, because the glyph is ours
+    // and the DOM is the library's.
+    expect(isViewedBox(UNVIEWED_BOX)).toBe(true);
+    expect(isViewedBox(VIEWED_BOX)).toBe(true);
+    expect(isViewedBox('+12')).toBe(false);
+    expect(isViewedBox('●')).toBe(false);
   });
 });

@@ -78,10 +78,27 @@ export interface CardTop {
 }
 
 /**
- * A card counts as reached once its header is within a line or so of the top.
- * An exact `<= 0` flickers between two files while a header sits on the seam.
+ * How far below the top of the scrollport a header may sit and still be the
+ * file the reviewer is on.
+ *
+ * Not slack, and not a guess. Two things put a header below the top even when
+ * its file is the one being read: an exact `<= 0` flickers between two files
+ * while a header sits on the seam, and — the larger of the two — the gap
+ * between one file's last line and the next one's header belongs to the file
+ * *below* it, so scrolling the column to a file lands on top of that gap
+ * rather than on the header. Measured at 26px.
+ *
+ * Under it, clicking a file in the tree reported the file above the one that
+ * was clicked, which drove the tree to select *that* one — so the row the
+ * reviewer had just clicked came back deselected.
+ *
+ * It is bounded on the other side by how close two headers can get, which is
+ * two collapsed cards and a gap: comfortably more than this.
+ *
+ * Coupled to `--diffs-gap-block` in the stylesheet. Change the space between
+ * files and this has to be measured again.
  */
-const REACHED = 1;
+const REACHED = 36;
 
 /**
  * Which file the reviewer is looking at, given where the cards are.

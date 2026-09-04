@@ -16,7 +16,7 @@
  */
 
 import type { GitStatus, GitStatusEntry } from '@pierre/trees';
-import type { PatchStatus, ReviewThread } from '@/lib/github/types';
+import type { FileViewedState, PatchStatus, ReviewThread } from '@/lib/github/types';
 import type { ReviewFile } from './reviewFiles';
 
 /**
@@ -131,6 +131,44 @@ const MINUS = '−';
  */
 export const SEPARATOR = ' ';
 
+/** U+2610 BALLOT BOX, and U+2611 with a check in it. */
+export const UNVIEWED_BOX = '☐';
+export const VIEWED_BOX = '☑';
+
+/**
+ * Whether a piece of decoration text is the viewed box.
+ *
+ * How the click handler tells a tick apart from the counts sitting beside it
+ * in the same cell. Matched on the glyph rather than on a position in the DOM,
+ * because the glyph is ours and the DOM belongs to `@pierre/trees` — the row is
+ * a `<button>` it renders, and the parts are anonymous `<span>`s inside it.
+ */
+export function isViewedBox(text: string): boolean {
+  return text === UNVIEWED_BOX || text === VIEWED_BOX;
+}
+
+/**
+ * The box, and what to say about it.
+ *
+ * `DISMISSED` is the state that matters: the reviewer marked this file viewed
+ * and then it changed underneath them. Ticked, the row would claim they have
+ * seen the current version; empty and grey, it would lose that they ever
+ * looked. Empty, in the colour that means "come back to this".
+ */
+function viewedMark(state: FileViewedState): { text: string; color: string; title: string } {
+  if (state === 'VIEWED') {
+    return { text: VIEWED_BOX, color: NOISE_COLOR, title: 'viewed' };
+  }
+  if (state === 'DISMISSED') {
+    return {
+      text: UNVIEWED_BOX,
+      color: COMMENT_COLOR,
+      title: 'you marked this viewed, and it has changed since',
+    };
+  }
+  return { text: UNVIEWED_BOX, color: NOISE_COLOR, title: 'not viewed' };
+}
+
 /** U+25CF BLACK CIRCLE: something here is still open. */
 const OPEN_DOT = '●';
 /** U+25CB WHITE CIRCLE: discussed and settled. */
@@ -183,6 +221,8 @@ function commentMark(
 export function rowDecoration(
   file: ReviewFile | undefined,
   comments?: FileComments,
+  /** The live state, which the session may have moved ahead of the payload. */
+  viewed?: FileViewedState,
 ): CountsDecoration | null {
   if (file === undefined) return null;
 
@@ -199,9 +239,22 @@ export function rowDecoration(
   // the only thing here that is also somewhere else.
   const mark = commentMark(comments);
 
+  // Last of all, and that is deliberate twice over. It is the one part of this
+  // cell the reviewer can click, and the lane clips from the start — so
+  // everything informational gives way before the control does.
+  const box = viewedMark(viewed ?? file.viewedState);
+
+  const runs = [`${added} ${removed}`];
+  if (mark !== null) runs.push(mark.text);
+  runs.push(box.text);
+
+  const notes = [base];
+  if (mark !== null) notes.push(mark.title);
+  notes.push(box.title);
+
   return {
-    text: mark === null ? `${added} ${removed}` : `${added} ${removed} ${mark.text}`,
-    title: mark === null ? base : `${base} — ${mark.title}`,
+    text: runs.join(' '),
+    title: notes.join(' — '),
     parts: [
       { text: added, color: countColor },
       { text: SEPARATOR },
@@ -209,6 +262,8 @@ export function rowDecoration(
       ...(mark === null
         ? []
         : [{ text: SEPARATOR }, { text: mark.text, color: mark.color }]),
+      { text: SEPARATOR },
+      { text: box.text, color: box.color },
     ],
   };
 }

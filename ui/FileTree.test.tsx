@@ -18,6 +18,7 @@ import {
   type FileTreeSources,
   fileTreeOptions,
 } from './FileTree';
+import { UNVIEWED_BOX, VIEWED_BOX } from './fileTreeData';
 import { NO_FILE } from './currentFile';
 import type { ReviewFile } from './reviewFiles';
 
@@ -109,7 +110,7 @@ describe('fileTreeOptions', () => {
   it('decorates a row with the counts for that row’s file', () => {
     const options = fileTreeOptions(FILES, { files: FILES });
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3' });
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ${UNVIEWED_BOX}` });
   });
 
   it('reads the decoration from the current file list, not the one it was built with', () => {
@@ -119,7 +120,7 @@ describe('fileTreeOptions', () => {
     const options = fileTreeOptions(FILES, live);
     live.files = [file({ path: 'src/app.ts', additions: 99, deletions: 0 })];
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+99 −0' });
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+99 −0 ${UNVIEWED_BOX}` });
   });
 
   it('decorates a row with the conversations on that row’s file', () => {
@@ -128,7 +129,7 @@ describe('fileTreeOptions', () => {
       comments: new Map([['src/app.ts', { total: 2, unresolved: 1 }]]),
     });
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3 ●' });
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ● ${UNVIEWED_BOX}` });
   });
 
   it('leaves a row alone when nobody has commented on that file', () => {
@@ -137,7 +138,7 @@ describe('fileTreeOptions', () => {
       comments: new Map([['src/new.ts', { total: 1, unresolved: 1 }]]),
     });
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3' });
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ${UNVIEWED_BOX}` });
   });
 
   it('reads conversations from the current tally, not the one it was built with', () => {
@@ -147,7 +148,7 @@ describe('fileTreeOptions', () => {
     const options = fileTreeOptions(FILES, live);
     live.comments = new Map([['src/app.ts', { total: 1, unresolved: 1 }]]);
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: '+12 −3 ●' });
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ● ${UNVIEWED_BOX}` });
   });
 
   it('leaves a directory row undecorated', () => {
@@ -355,5 +356,130 @@ describe('FileTree', () => {
     );
 
     expect(container.textContent).toMatch(/no changed files/i);
+  });
+});
+
+describe('the viewed box', () => {
+  const shadow = (container: HTMLElement) =>
+    container.querySelector('file-tree-container')?.shadowRoot ?? null;
+
+  /** A decoration run, found by the glyph it carries rather than by position. */
+  const run = (container: HTMLElement, text: string): Element | undefined =>
+    [
+      ...(shadow(container)?.querySelectorAll(
+        '[data-item-section="decoration"] span span',
+      ) ?? []),
+    ].find((element) => element.textContent === text);
+
+  const clickIn = (element: Element) => {
+    act(() => {
+      // `composed`, because the handler is delegated to the host in the light
+      // DOM and an uncomposed event never leaves the shadow root.
+      element.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
+      );
+    });
+  };
+
+  it('draws the state the session is holding, not the payload’s', () => {
+    const options = fileTreeOptions(FILES, {
+      files: FILES,
+      viewed: new Map([['src/app.ts', 'VIEWED']]),
+    });
+
+    expect(decorationFor(options, 'src/app.ts')).toMatchObject({
+      text: `+12 −3 ${VIEWED_BOX}`,
+    });
+  });
+
+  it('redraws when a file is marked viewed underneath it', () => {
+    // The same inferred refresh lever as the counts and the conversation mark.
+    // Viewed state lives in the session, so nothing about the file list moves
+    // when a box is ticked.
+    const { container, rerender } = mount({
+      viewed: new Map([['src/app.ts', 'UNVIEWED']]),
+    });
+
+    expect(shadow(container)?.textContent).toContain(UNVIEWED_BOX);
+
+    rerender(
+      <FileTree
+        files={FILES}
+        current={NO_FILE}
+        onSelect={vi.fn()}
+        viewed={new Map([['src/app.ts', 'VIEWED']])}
+      />,
+    );
+
+    expect(shadow(container)?.textContent).toContain(VIEWED_BOX);
+  });
+
+  it('toggles viewed when its box is clicked', () => {
+    const onToggleViewed = vi.fn();
+    const { container } = mount({ onToggleViewed });
+
+    const box = run(container, UNVIEWED_BOX);
+    expect(box).toBeDefined();
+    clickIn(box as Element);
+
+    expect(onToggleViewed).toHaveBeenCalledWith('src/app.ts');
+  });
+
+  it('does not also select the file it just ticked', () => {
+    // The row is a `<button>`, so every click in it is a click on the row. A
+    // tick that also navigated would move the diff column out from under the
+    // reviewer every time they ticked something off.
+    const { container, onSelect } = mount({ onToggleViewed: vi.fn() });
+    onSelect.mockClear();
+
+    clickIn(run(container, UNVIEWED_BOX) as Element);
+
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('leaves a click on the counts alone', () => {
+    // Only the box is a control. The rest of the cell belongs to the row.
+    const onToggleViewed = vi.fn();
+    const { container } = mount({ onToggleViewed });
+
+    clickIn(run(container, '+12') as Element);
+
+    expect(onToggleViewed).not.toHaveBeenCalled();
+  });
+});
+
+describe('the row tooltip', () => {
+  const rowFor = (container: HTMLElement, path: string) =>
+    container
+      .querySelector('file-tree-container')
+      ?.shadowRoot?.querySelector(`[data-item-path="${path}"]`) ?? null;
+
+  const hover = (element: Element) => {
+    act(() => {
+      element.dispatchEvent(
+        new MouseEvent('pointerover', { bubbles: true, composed: true }),
+      );
+    });
+  };
+
+  it('names the whole path on hover, which the row does not', () => {
+    // The row's own `aria-label` is the bare file name, and it carries no
+    // `title` at all — so a path truncated to `…ce/Thing.tsx` had nowhere to
+    // tell the reviewer which one it was.
+    const { container } = mount();
+    const row = rowFor(container, 'src/app.ts');
+
+    hover(row as Element);
+
+    expect(row?.getAttribute('title')).toBe('src/app.ts');
+  });
+
+  it('names a directory without the slash the tree keys it by', () => {
+    const { container } = mount();
+    const row = rowFor(container, 'src/');
+
+    hover(row as Element);
+
+    expect(row?.getAttribute('title')).toBe('src');
   });
 });

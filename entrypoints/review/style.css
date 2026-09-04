@@ -53,6 +53,9 @@
 diffs-container {
   --diffs-bg: var(--page-bg);
   --diffs-fg: var(--page-fg);
+  /* Space between one file and the next, so the banded headers read as the
+     tops of separate blocks rather than as rules ruled across one. */
+  --diffs-gap-block: 16px;
 }
 
 /* Links had no rule at all, so every one of them rendered in Chrome's
@@ -582,12 +585,20 @@ code {
 
 /* Header content is ordinary light DOM projected into the shadow row through a
    slot, so it is styled from here like anything else on the page. */
+
+/* Opaque, and that is the whole point. `stickyHeaders` is on, so this element
+   stays pinned while its file scrolls — and with no background of its own the
+   code scrolled *through* it. Between that and no border, a pull request read
+   as one enormous file rather than as several. */
 .file-card {
   display: flex;
   flex-direction: column;
   gap: 6px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 12px;
+  background: light-dark(#f6f8fa, #161b22);
+  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
 }
 
 .file-card-head {
@@ -595,6 +606,12 @@ code {
   align-items: center;
   gap: var(--gap);
   min-width: 0;
+}
+
+/* The file's name is the thing this band exists to say. */
+.file-card-head .file-path {
+  flex: 1 1 auto;
+  font-weight: 600;
 }
 
 .collapse-toggle {
@@ -1277,6 +1294,38 @@ code {
 
 .thread-entry-replies {
   color: light-dark(#0969da, #4493f8);
+}
+
+/* ------------------------------------------------------- tree context menu */
+
+/* Slotted into the tree's own popover as light DOM, so it is styled from here
+   — but the popover around it is the library's, and this only fills it. */
+.tree-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 4px;
+}
+
+.tree-menu-item {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: inherit;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.tree-menu-item:not(:disabled):hover {
+  background: light-dark(#eef1f4, #262c36);
+}
+
+.tree-menu-item:disabled {
+  color: light-dark(#818b98, #656c76);
+  cursor: default;
 }
 
 /* --------------------------------------------------- pending review footer */

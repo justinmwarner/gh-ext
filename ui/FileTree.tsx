@@ -18,16 +18,26 @@
  * single-letter review shortcut whenever the tree held focus.
  */
 
-import { type Ref, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
+import type { FileViewedState } from '@/lib/github/types';
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type {
   FileTree as FileTreeModel,
   FileTreeIcons,
   FileTreeOptions,
 } from '@pierre/trees';
+import { FileTreeMenu } from './FileTreeMenu';
 import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import {
   type FileComments,
+  isViewedBox,
   rowDecoration,
   treeGitStatus,
   treePaths,
@@ -63,7 +73,13 @@ export interface FileTreeSources {
    * leaves the file list exactly as it was.
    */
   comments?: ReadonlyMap<string, FileComments>;
+  /**
+   * Viewed state per path, as the session currently holds it — which is ahead
+   * of the payload for as long as an optimistic toggle is in flight.
+   */
+  viewed?: ReadonlyMap<string, FileViewedState>;
   onSelect?: (path: string) => void;
+  onToggleViewed?: (path: string) => void;
   lastReported?: string | null;
 }
 
@@ -99,12 +115,28 @@ export function fileTreeOptions(
     gitStatus: treeGitStatus(files),
     // §16.5. We own the file filter on Mod+K instead.
     search: false,
+    // The baseline the React component builds its composition on top of: it
+    // forces `enabled` and supplies the content, and leaves the rest alone.
+    // The button is what a keyboard can reach — the tick in the decoration is
+    // a glyph inside a `<button>` row and cannot be focused.
+    // Right-click only. With `both` the row itself becomes the trigger — it
+    // grows `aria-haspopup="menu"` — and a plain left-click stops selecting the
+    // file, which is the tree's whole job. The keyboard loses nothing: `v`
+    // toggles viewed on the focused file already, and Shift+F10 raises a
+    // context menu on whatever has focus.
+    composition: {
+      contextMenu: { triggerMode: 'right-click' },
+    },
     initialExpansion: 'open',
     icons: TREE_ICONS,
     renderRowDecoration: ({ item }) =>
       item.kind === 'directory'
         ? null
-        : rowDecoration(lookup(item.path), sources.comments?.get(item.path)),
+        : rowDecoration(
+            lookup(item.path),
+            sources.comments?.get(item.path),
+            sources.viewed?.get(item.path),
+          ),
     onSelectionChange(selectedPaths) {
       report(sources, selectedPaths.find(isFilePath) ?? null);
     },
@@ -152,6 +184,61 @@ export interface FileTreeHandle {
   model: FileTreeModel;
 }
 
+/**
+ * The one control the tree cannot give us, delegated onto the host.
+ *
+ * A row is a `<button role="treeitem">` — which is exactly why `@pierre/trees`
+ * documents no per-row control: an `<input>` inside a `<button>` is invalid,
+ * and the single decoration slot renders as an inert `<span>`. So the tick is
+ * a glyph, and this is what makes it a control.
+ *
+ * `composedPath` rather than `event.target`, because a listener on the host
+ * sees a target retargeted to the host itself. The run is found by its glyph
+ * rather than by its position among its siblings: the glyph is ours, the DOM
+ * around it is the library's, and only one of those two is a promise.
+ *
+ * Capture phase and `stopPropagation`, because the row is a button and every
+ * click inside it is a click on the row. A tick that also navigated would move
+ * the diff column out from under the reviewer each time they ticked one off.
+ */
+function viewedBoxClick(event: Event): string | null {
+  let path: string | null = null;
+  let onBox = false;
+
+  for (const node of event.composedPath()) {
+    if (!(node instanceof Element)) continue;
+    if (!onBox && isViewedBox(node.textContent ?? '')) onBox = true;
+    const item = node.getAttribute('data-item-path');
+    if (item !== null) {
+      path = item;
+      break;
+    }
+  }
+
+  return onBox && path !== null && !path.endsWith('/') ? path : null;
+}
+
+/**
+ * The full path, on hover.
+ *
+ * The row carries no `title` of its own and its `aria-label` is the bare file
+ * name, so a path the content lane truncated had nowhere left to say which
+ * file it was. Written on hover rather than once, because the rows are
+ * recycled by virtualization — the element under the pointer a moment ago is
+ * a different file now.
+ */
+function titleOnHover(event: Event): void {
+  for (const node of event.composedPath()) {
+    if (!(node instanceof Element)) continue;
+    const path = node.getAttribute('data-item-path');
+    if (path === null) continue;
+    // Directories are keyed with a trailing slash. Nobody calls them that.
+    const label = path.endsWith('/') ? path.slice(0, -1) : path;
+    if (node.getAttribute('title') !== label) node.setAttribute('title', label);
+    return;
+  }
+}
+
 export interface FileTreeProps {
   files: readonly ReviewFile[];
   /**
@@ -160,20 +247,34 @@ export interface FileTreeProps {
    * re-render the whole tree on every keystroke anywhere on the page.
    */
   comments?: ReadonlyMap<string, FileComments>;
+  /** Viewed state per path, stable between renders for the same reason. */
+  viewed?: ReadonlyMap<string, FileViewedState>;
   /** The file the review is on, and which surface last moved it. */
   current: CurrentFile;
   /** The reviewer selected or arrow-keyed onto a file. */
   onSelect: (path: string) => void;
+  /** The reviewer clicked a row's tick. */
+  onToggleViewed?: (path: string) => void;
   ref?: Ref<FileTreeHandle>;
 }
 
-export function FileTree({ files, comments, current, onSelect, ref }: FileTreeProps) {
+export function FileTree({
+  files,
+  comments,
+  viewed,
+  current,
+  onSelect,
+  onToggleViewed,
+  ref,
+}: FileTreeProps) {
   // One object for the whole lifetime of the tree, mutated in place: the
   // options it was constructed from hold this exact reference.
   const [sources] = useState<FileTreeSources>(() => ({ files, onSelect }));
   sources.files = files;
   sources.comments = comments;
+  sources.viewed = viewed;
   sources.onSelect = onSelect;
+  sources.onToggleViewed = onToggleViewed;
 
   const [options] = useState(() => fileTreeOptions(files, sources));
   const { model } = useFileTree(options);
@@ -208,6 +309,15 @@ export function FileTree({ files, comments, current, onSelect, ref }: FileTreePr
     model.setIcons(TREE_ICONS);
   }, [model, comments]);
 
+  // And once more for the ticks, which move on a third clock again.
+  const appliedViewed = useRef(viewed);
+  useEffect(() => {
+    if (appliedViewed.current === viewed) return;
+    appliedViewed.current = viewed;
+    model.setIcons(TREE_ICONS);
+  }, [model, viewed]);
+
+
   // Follow the keyboard. Arrow keys move focus and change no selection, so this
   // is the only channel that sees them. `subscribe` fires on every model emit,
   // not just focus, so the previous value is compared rather than trusted.
@@ -237,5 +347,60 @@ export function FileTree({ files, comments, current, onSelect, ref }: FileTreePr
     return <p className="placeholder">No changed files.</p>;
   }
 
-  return <PierreFileTree model={model} className="filetree-host" />;
+  /**
+   * Memoized, and it has to be. The React component re-derives its composition
+   * whenever this identity changes and re-renders the whole tree when it does
+   * — so a fresh closure each render would rebuild every visible row on every
+   * keystroke anywhere on the page. It reads through `sources` instead, which
+   * is the same live box the decoration renderer uses.
+   */
+  const renderContextMenu = useCallback(
+    (item: { kind: 'directory' | 'file'; path: string }, context: { close: () => void }) => (
+      <FileTreeMenu
+        item={item}
+        viewed={sources.viewed?.get(item.path) ?? 'UNVIEWED'}
+        onToggleViewed={(path) => sources.onToggleViewed?.(path)}
+        onClose={() => context.close()}
+      />
+    ),
+    [sources],
+  );
+
+  return (
+    <PierreFileTree
+      model={model}
+      className="filetree-host"
+      renderContextMenu={renderContextMenu}
+      // Everything that is not one of the tree's own four props is spread onto
+      // the host element, which is how these two reach a shadow tree we cannot
+      // otherwise attach anything to.
+      //
+      // Capture, and it has to be: the row is a `<button>`, so a tick that let
+      // the event through would also navigate the diff column.
+      //
+      // All three of them. The tree acts on the *pointer down*, not on the
+      // click — so stopping the click alone ticked the box and selected the
+      // file, which only a real browser was ever going to show.
+      onPointerDownCapture={(event) => {
+        if (viewedBoxClick(event.nativeEvent) === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onMouseDownCapture={(event) => {
+        if (viewedBoxClick(event.nativeEvent) === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClickCapture={(event) => {
+        const path = viewedBoxClick(event.nativeEvent);
+        if (path === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleViewed?.(path);
+      }}
+      onPointerOver={(event) => {
+        titleOnHover(event.nativeEvent);
+      }}
+    />
+  );
 }

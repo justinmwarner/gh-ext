@@ -17,7 +17,7 @@
  */
 
 import type { Ref } from 'react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { PrPayload } from '@/lib/messages';
 import { DiffColumn, type DiffColumnHandle, type ThreadJump } from './DiffColumn';
 import { FileTree } from './FileTree';
@@ -135,6 +135,31 @@ export function FilesView({
   // visible row on every keystroke anywhere on the page.
   const comments = useMemo(() => fileComments(session.threads), [session.threads]);
 
+  /**
+   * What each file's tick should show, which is not always what the payload
+   * says: the session holds an optimistic value for as long as a toggle is in
+   * flight, and puts back exactly what it displaced if GitHub refuses.
+   */
+  const viewed = useMemo(
+    () =>
+      new Map(
+        files.map((file) => [file.path, session.viewed.get(file.path) ?? file.viewedState]),
+      ),
+    [files, session.viewed],
+  );
+
+  const toggleViewed = useCallback(
+    (path: string) => {
+      const current = viewed.get(path);
+      if (current === undefined) return;
+      // `current`, not the payload's value: what goes back on failure is what
+      // the reviewer was actually looking at — including DISMISSED, which
+      // rolling back to UNVIEWED would quietly erase.
+      void session.setViewed(path, current !== 'VIEWED', current);
+    },
+    [session, viewed],
+  );
+
   return (
     <div className="filesview">
       <div className="filesview-bar">
@@ -157,8 +182,10 @@ export function FilesView({
           <FileTree
             files={files}
             comments={comments}
+            viewed={viewed}
             current={current}
             onSelect={onSelectFromTree}
+            onToggleViewed={toggleViewed}
           />
         </nav>
 

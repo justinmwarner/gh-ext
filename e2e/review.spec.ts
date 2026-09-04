@@ -198,8 +198,9 @@ test('the tree marks which files carry conversations, and follows a resolve', as
       (part) => part.getBoundingClientRect().width,
     );
   });
-  expect(widths).toHaveLength(5);
-  expect(widths.filter((width) => width > 0)).toHaveLength(5);
+  // Counts, mark and box, with a separator between each: seven runs.
+  expect(widths).toHaveLength(7);
+  expect(widths.filter((width) => width > 0)).toHaveLength(7);
 });
 
 test('the rail’s reviewer list is not wearing the avatar’s ring', async ({
@@ -221,6 +222,107 @@ test('the rail’s reviewer list is not wearing the avatar’s ring', async ({
   expect(await shadowOf('.reviewer-state.reviewer-good')).toBe('none');
   // And the avatar it belongs to still has it.
   expect(await shadowOf('.reviewer.reviewer-good')).not.toBe('none');
+});
+
+test('a file can be ticked off from the tree, and the card agrees', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The tick is a glyph in the row's one decoration slot with a delegated
+  // click handler, because a row is a `<button role="treeitem">` and nothing
+  // focusable may nest inside one. Whether a click on it reaches us at all —
+  // and whether it reaches the row underneath as well — is a question about a
+  // real shadow tree and a real capture phase.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const row = (path: string) => page.locator(`[data-item-path="${path}"]`);
+
+  await expect(row('src/app.ts')).toContainText('☐');
+  await row('src/app.ts').getByText('☐', { exact: true }).click();
+
+  await expect(row('src/app.ts')).toContainText('☑');
+  expect(api.operations).toContain('MarkViewed');
+
+  // The same state, not a second one: this is GitHub's viewed flag, so the
+  // checkbox on the file's own card has to have moved with it.
+  await expect(
+    filesView(page).getByRole('checkbox', { name: /src\/app\.ts/ }),
+  ).toBeChecked();
+
+  // And ticking a file off did not also navigate to it. Every click inside the
+  // row is a click on the row, so this only holds if the capture handler
+  // stopped it.
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', '');
+});
+
+test('the tree offers the same tick to a right-click', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The keyboard's route to it. The context menu is the one per-row affordance
+  // `@pierre/trees` sanctions, its trigger button is focusable, and all of that
+  // plumbing is the library's — none of it exists in jsdom.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('[data-item-path="src/beta.ts"]').click({ button: 'right' });
+  await page.getByRole('button', { name: 'Mark as viewed' }).click();
+
+  await expect(page.locator('[data-item-path="src/beta.ts"]')).toContainText('☑');
+});
+
+test('hovering a tree row names the whole path', async ({ context, extensionId, api }) => {
+  void api;
+  // The row carries no `title` of its own and its `aria-label` is the bare
+  // file name, so a truncated path had nowhere to say which file it was.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const row = page.locator('[data-item-path="src/components/Button.tsx"]');
+  await row.hover();
+
+  await expect(row).toHaveAttribute('title', 'src/components/Button.tsx');
+});
+
+test('each file in the diff is a block of its own', async ({ context, extensionId, api }) => {
+  void api;
+  // `stickyHeaders` is on, so a file's header stays pinned while its body
+  // scrolls — and with no background of its own the code scrolled straight
+  // through it. Only a layout engine composites, so nothing until here could
+  // see that a pull request was reading as one enormous file.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const head = page.locator('.file-card').first();
+  const style = await head.evaluate((node) => {
+    const css = getComputedStyle(node);
+    return {
+      bg: css.backgroundColor,
+      top: css.borderTopWidth,
+      bottom: css.borderBottomWidth,
+    };
+  });
+
+  expect(style.bg).not.toBe('rgba(0, 0, 0, 0)');
+  expect(style.bg).not.toBe('transparent');
+  expect(style.top).not.toBe('0px');
+  expect(style.bottom).not.toBe('0px');
+
+  // And the header's background differs from the code beneath it, or being
+  // opaque buys nothing.
+  const body = await page
+    .locator('diffs-container')
+    .first()
+    .evaluate((node) => {
+      const inner = (node as Element & { shadowRoot?: ShadowRoot }).shadowRoot
+        ?.firstElementChild;
+      return inner == null ? null : getComputedStyle(inner).backgroundColor;
+    });
+  expect(style.bg).not.toBe(body);
 });
 
 test('switching views and back leaves the diff exactly where it was', async ({
