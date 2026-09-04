@@ -74,7 +74,67 @@ const patchFor = (path: string): string =>
     ' line twentytwo',
   ].join('\n');
 
-export const UNIFIED_DIFF = FILES.map(patchFor).join('\n');
+/**
+ * The two files that exist to be compared as something other than text.
+ *
+ * Kept out of `FILES` because everything that reads that list — the tree
+ * assertions, the hunk counts, the thread anchors — is counting text files
+ * with two hunks each, and none of that is true of these.
+ */
+export const IMAGE_FILE = 'assets/logo.png';
+export const TABLE_FILE = 'data/rows.csv';
+
+/**
+ * Two eight-by-eight PNGs, generated rather than borrowed.
+ *
+ * Both are solid red; the head one has a blue square in its top-left quarter.
+ * That is enough for the difference blend to have something to show and for
+ * the swipe to have somewhere for the seam to matter, and small enough that
+ * the whole fixture stays readable.
+ */
+export const IMAGE_BYTES: Record<'base' | 'head', string> = {
+  base:
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mO4o6GBFTEMLQkA' +
+    'e3tLAYZNzu4AAAAASUVORK5CYII=',
+  head:
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAGklEQVR42mPQCLgDR3c0NOCI' +
+    'gYoSyBwaSQAA6wpNgeu19H0AAAAASUVORK5CYII=',
+};
+
+/** One cell edited, so exactly one cell of the grid should light up. */
+export const TABLE_TEXT: Record<'base' | 'head', string> = {
+  base: 'part,qty,price\nbolt,4,1.20\nnut,9,0.30\n',
+  head: 'part,qty,price\nbolt,5,1.20\nnut,9,0.30\n',
+};
+
+/**
+ * A binary patch, as git writes one: a header, no hunks, and a line saying the
+ * two blobs differ. Which is the whole of what a text diff has to say about a
+ * PNG, and the reason the image modes exist.
+ */
+const IMAGE_PATCH = [
+  `diff --git a/${IMAGE_FILE} b/${IMAGE_FILE}`,
+  'index 1111111..2222222 100644',
+  `Binary files a/${IMAGE_FILE} and b/${IMAGE_FILE} differ`,
+].join('\n');
+
+const TABLE_PATCH = [
+  `diff --git a/${TABLE_FILE} b/${TABLE_FILE}`,
+  'index 1111111..2222222 100644',
+  `--- a/${TABLE_FILE}`,
+  `+++ b/${TABLE_FILE}`,
+  '@@ -1,3 +1,3 @@',
+  ' part,qty,price',
+  '-bolt,4,1.20',
+  '+bolt,5,1.20',
+  ' nut,9,0.30',
+].join('\n');
+
+export const UNIFIED_DIFF = [
+  ...FILES.map(patchFor),
+  IMAGE_PATCH,
+  TABLE_PATCH,
+].join('\n');
 
 /** The whole file, consistent with the patch above, for expanding context. */
 export const wholeFile = (path: string, side: 'base' | 'head'): string =>

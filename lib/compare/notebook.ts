@@ -1,0 +1,353 @@
+/**
+ * Comparing two Jupyter notebooks.
+ *
+ * A notebook is JSON, so the structural view would technically work on one —
+ * and it would be almost as useless as the text diff, because both of them are
+ * dominated by the same thing. A notebook's outputs are base64 PNGs, HTML
+ * tables and execution counters; every one of them is rewritten whenever the
+ * notebook is run; and they are the overwhelming majority of the file. The one
+ * line of Python that changed is somewhere underneath a megabyte of image data
+ * in both views.
+ *
+ * So a notebook gets its own comparison, in the units a notebook is written in:
+ * cells. Cells are aligned on their **source**, which is the part a reviewer
+ * is reviewing, and outputs are carried alongside rather than folded into that
+ * identity. A cell whose code held still while its plot moved is therefore an
+ * unchanged cell that is flagged as having new output — which is a different
+ * fact from "this cell changed" and is worth a different mark on screen.
+ *
+ * That split is what makes the two modes possible: suppress the outputs and
+ * the diff is the code, show them and the same alignment holds while each cell
+ * gains its result underneath.
+ */
+
+import { alignRows, pairRows } from './rows';
+
+export interface NotebookLimits {
+  /** Cells materialized per side. */
+  maxCells: number;
+  /** Characters kept from one text output before it is cut short. */
+  maxOutputChars: number;
+  /** Base64 characters an image output may have before it is described instead. */
+  maxImageChars: number;
+}
+
+/**
+ * The caps a card renders with.
+ *
+ * The image cap is the one that matters: a notebook arrives as a single blob
+ * already capped at a megabyte, and one 700 KB inline plot inside that budget
+ * would be handed to an `<img>` as a data URL the length of the rest of the
+ * page. Described rather than drawn is the better trade at that size.
+ */
+export const NOTEBOOK_LIMITS: NotebookLimits = {
+  maxCells: 500,
+  maxOutputChars: 4000,
+  maxImageChars: 400_000,
+};
+
+export interface NotebookImage {
+  mediaType: string;
+  base64: string;
+}
+
+export interface NotebookOutput {
+  kind: 'text' | 'image' | 'error';
+  /** What to show as text: the stream, the error, or a note about the image. */
+  text: string;
+  /** Present only for an image small enough to be worth drawing. */
+  image: NotebookImage | null;
+}
+
+export interface NotebookCell {
+  /** `code`, `markdown`, `raw`, or whatever else the file claims. */
+  type: string;
+  source: string;
+  outputs: NotebookOutput[];
+}
+
+export interface ParsedNotebook {
+  status: 'ok' | 'unreadable';
+  cells: NotebookCell[];
+  /** Cells in the file, including any past the cap. */
+  totalCells: number;
+  truncated: boolean;
+  /**
+   * The notebook's own language, as a file extension without the dot.
+   *
+   * Read so that a code cell can be handed to the diff renderer under a name it
+   * can infer a grammar from. A notebook whose cells are highlighted as plain
+   * text is a notebook nobody wants to read, and the format states its language
+   * — there is no reason to guess Python.
+   */
+  languageExtension: string;
+}
+
+/** The image types worth drawing, in the order they are preferred. */
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+
+/** Source and stream text are both `string | string[]` in the format. */
+const asText = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.filter((part) => typeof part === 'string').join('');
+  return '';
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const clip = (text: string, limit: number): string =>
+  text.length <= limit ? text : `${text.slice(0, limit)}\n… (${text.length - limit} more characters)`;
+
+function readOutput(raw: unknown, limits: NotebookLimits): NotebookOutput | null {
+  if (!isRecord(raw)) return null;
+  const type = raw['output_type'];
+
+  if (type === 'stream') {
+    return { kind: 'text', text: clip(asText(raw['text']), limits.maxOutputChars), image: null };
+  }
+
+  if (type === 'error') {
+    const traceback = Array.isArray(raw['traceback'])
+      ? raw['traceback'].filter((line): line is string => typeof line === 'string').join('\n')
+      : '';
+    const headline = `${String(raw['ename'] ?? 'Error')}: ${String(raw['evalue'] ?? '')}`;
+    return {
+      kind: 'error',
+      text: clip(traceback === '' ? headline : `${headline}\n${traceback}`, limits.maxOutputChars),
+      image: null,
+    };
+  }
+
+  if (type === 'execute_result' || type === 'display_data') {
+    const data = raw['data'];
+    if (!isRecord(data)) return null;
+
+    for (const mediaType of IMAGE_TYPES) {
+      const encoded = data[mediaType];
+      if (typeof encoded !== 'string') continue;
+      // The format stores base64 wrapped across lines in some writers.
+      const base64 = encoded.replace(/\s+/g, '');
+      if (base64.length > limits.maxImageChars) {
+        return {
+          kind: 'image',
+          text: `${mediaType}, too large to draw here (${Math.round((base64.length * 3) / 4 / 1024)} KB)`,
+          image: null,
+        };
+      }
+      return { kind: 'image', text: mediaType, image: { mediaType, base64 } };
+    }
+
+    const plain = data['text/plain'];
+    if (plain !== undefined) {
+      return { kind: 'text', text: clip(asText(plain), limits.maxOutputChars), image: null };
+    }
+
+    const first = Object.keys(data)[0];
+    return first === undefined
+      ? null
+      : { kind: 'text', text: `${first} output`, image: null };
+  }
+
+  return null;
+}
+
+const UNREADABLE: ParsedNotebook = {
+  status: 'unreadable',
+  cells: [],
+  totalCells: 0,
+  truncated: false,
+  languageExtension: 'txt',
+};
+
+/**
+ * The notebook's language, as an extension.
+ *
+ * `metadata.language_info.file_extension` is the authoritative field and
+ * carries its own dot; `kernelspec.language` is the fallback for a notebook
+ * that was written but never run, which has no `language_info` at all.
+ *
+ * Anything unrecognized becomes `txt` rather than a guess. A cell highlighted
+ * as the wrong language is more confusing than one highlighted as none.
+ */
+const LANGUAGE_EXTENSIONS: Record<string, string> = {
+  python: 'py',
+  r: 'r',
+  julia: 'jl',
+  scala: 'scala',
+  javascript: 'js',
+  typescript: 'ts',
+  ruby: 'rb',
+  sql: 'sql',
+  bash: 'sh',
+};
+
+function languageOf(document: Record<string, unknown>): string {
+  const metadata = document['metadata'];
+  if (!isRecord(metadata)) return 'txt';
+
+  const info = metadata['language_info'];
+  if (isRecord(info)) {
+    const declared = info['file_extension'];
+    if (typeof declared === 'string' && /^\.[A-Za-z0-9]+$/.test(declared)) {
+      return declared.slice(1).toLowerCase();
+    }
+    const named = info['name'];
+    if (typeof named === 'string') {
+      const known = LANGUAGE_EXTENSIONS[named.toLowerCase()];
+      if (known !== undefined) return known;
+    }
+  }
+
+  const kernel = metadata['kernelspec'];
+  if (isRecord(kernel) && typeof kernel['language'] === 'string') {
+    return LANGUAGE_EXTENSIONS[kernel['language'].toLowerCase()] ?? 'txt';
+  }
+
+  return 'txt';
+}
+
+/**
+ * Read one notebook.
+ *
+ * Nothing here trusts the file. `.ipynb` is a format a hundred tools write and
+ * this one runs against whatever a pull request contains, so every field is
+ * checked rather than asserted — a notebook missing `outputs`, or carrying a
+ * source that is neither a string nor a list, renders as much as it honestly
+ * can rather than throwing inside a render and blanking the card.
+ */
+export function parseNotebook(
+  text: string,
+  limits: NotebookLimits = NOTEBOOK_LIMITS,
+): ParsedNotebook {
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    return UNREADABLE;
+  }
+
+  if (!isRecord(document) || !Array.isArray(document['cells'])) return UNREADABLE;
+
+  const raw = document['cells'];
+  const cells: NotebookCell[] = [];
+
+  for (const entry of raw.slice(0, limits.maxCells)) {
+    if (!isRecord(entry)) continue;
+    const outputs = Array.isArray(entry['outputs'])
+      ? entry['outputs']
+          .map((output) => readOutput(output, limits))
+          .filter((output): output is NotebookOutput => output !== null)
+      : [];
+
+    cells.push({
+      type: typeof entry['cell_type'] === 'string' ? entry['cell_type'] : 'unknown',
+      source: asText(entry['source']),
+      outputs,
+    });
+  }
+
+  return {
+    status: 'ok',
+    cells,
+    totalCells: raw.length,
+    truncated: raw.length > limits.maxCells,
+    languageExtension: languageOf(document),
+  };
+}
+
+export interface ComparedNotebookCell {
+  kind: 'equal' | 'changed' | 'added' | 'removed';
+  before: NotebookCell | null;
+  after: NotebookCell | null;
+  /**
+   * The source is identical and the outputs are not.
+   *
+   * A distinct fact from "this cell changed": nothing a reviewer has to read
+   * moved, but the result of running it did, which is sometimes the whole point
+   * of the pull request and is sometimes only that the author re-ran it.
+   */
+  outputsOnly: boolean;
+  /** The cell's position in the notebook, one-based, on the side it exists on. */
+  number: number;
+}
+
+export interface NotebookComparison {
+  status: 'ok' | 'unreadable';
+  cells: ComparedNotebookCell[];
+  /** Either side was cut short at the cell cap. */
+  truncated: boolean;
+  reason: string | null;
+}
+
+/**
+ * The identity a cell is aligned on.
+ *
+ * Source and type, and deliberately not outputs or the execution counter.
+ * Including the counter would mean a notebook that was merely re-run compares
+ * as entirely rewritten, which is the exact failure of the text diff.
+ */
+const identityOf = (cell: NotebookCell): string => `${cell.type}\n${cell.source}`;
+
+const outputsOf = (cell: NotebookCell): string =>
+  cell.outputs.map((output) => `${output.kind} ${output.image?.base64 ?? output.text}`).join('');
+
+export function compareNotebooks(
+  before: ParsedNotebook,
+  after: ParsedNotebook,
+): NotebookComparison {
+  if (before.status === 'unreadable' || after.status === 'unreadable') {
+    return {
+      status: 'unreadable',
+      cells: [],
+      truncated: false,
+      reason:
+        'This file does not read as a notebook — it has no `cells` array, or it ' +
+        'is not valid JSON. The raw diff is the only honest view of it.',
+    };
+  }
+
+  const { ops } = alignRows(before.cells.map(identityOf), after.cells.map(identityOf));
+
+  const cells = pairRows(ops).map((pair): ComparedNotebookCell => {
+    if (pair.kind === 'added') {
+      return {
+        kind: 'added',
+        before: null,
+        after: after.cells[pair.newIndex] ?? null,
+        outputsOnly: false,
+        number: pair.newIndex + 1,
+      };
+    }
+    if (pair.kind === 'removed') {
+      return {
+        kind: 'removed',
+        before: before.cells[pair.oldIndex] ?? null,
+        after: null,
+        outputsOnly: false,
+        number: pair.oldIndex + 1,
+      };
+    }
+
+    const was = before.cells[pair.oldIndex] ?? null;
+    const now = after.cells[pair.newIndex] ?? null;
+    return {
+      kind: pair.kind,
+      before: was,
+      after: now,
+      outputsOnly:
+        pair.kind === 'equal' &&
+        was !== null &&
+        now !== null &&
+        outputsOf(was) !== outputsOf(now),
+      number: pair.newIndex + 1,
+    };
+  });
+
+  return {
+    status: 'ok',
+    cells,
+    truncated: before.truncated || after.truncated,
+    reason: null,
+  };
+}

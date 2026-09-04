@@ -2012,3 +2012,432 @@ code {
   background: light-dark(#eef1f4, #262c36);
   text-decoration: none;
 }
+
+/* ------------------------------------------------- rich comparison modes */
+
+/* The per-file mode switcher. A segmented control rather than a row of
+   separate buttons: the choices are exclusive and adjacency is what says
+   so. Same greyscale and same 6px radius as `.button`, one step smaller,
+   because it sits inside a card header rather than in a toolbar. */
+.mode-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mode-button {
+  padding: 2px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: light-dark(#59636e, #9198a1);
+  border: 0;
+  border-left: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #212830);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.mode-button:first-child {
+  border-left: 0;
+}
+
+.mode-button:hover {
+  background: light-dark(#eef1f4, #262c36);
+}
+
+/* The selected mode carries a real colour change rather than a shade of
+   grey. This control decides what the whole card shows, and the page has
+   already learned once — in the search palette — that a 1.065:1 selected
+   row is a selection nobody can find. */
+.mode-button[aria-pressed='true'] {
+  color: #ffffff;
+  background: light-dark(#0969da, #316dca);
+}
+
+.mode-button[aria-pressed='true']:hover {
+  background: light-dark(#0860c8, #3a78d4);
+}
+
+.compare-summary {
+  margin: 0;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+/* -------------------------------------------------------------- images */
+
+.image-compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: 8px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+}
+
+.image-compare[data-variant='side-by-side'] {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.image-plate {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.image-caption {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.image-side {
+  font-weight: 600;
+  color: light-dark(#1f2328, #e6edf3);
+}
+
+/* The checkerboard is not decoration. A PNG whose change is in its alpha
+   channel is invisible against any flat colour, and against the page's own
+   background a transparent region reads as white or as black rather than
+   as absent. Painted from gradients rather than an asset, because an asset
+   would have to be listed in web_accessible_resources to be reachable —
+   which is exactly what this extension refuses to do. */
+.image-plate-img,
+.image-stage {
+  background-color: light-dark(#ffffff, #22272e);
+  background-image:
+    linear-gradient(45deg, light-dark(#eef1f4, #2d333b) 25%, transparent 25%),
+    linear-gradient(-45deg, light-dark(#eef1f4, #2d333b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, light-dark(#eef1f4, #2d333b) 75%),
+    linear-gradient(-45deg, transparent 75%, light-dark(#eef1f4, #2d333b) 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+
+.image-plate-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 4px;
+}
+
+.image-empty {
+  padding: 16px 8px;
+  font-size: 13px;
+  text-align: center;
+  color: light-dark(#59636e, #9198a1);
+  border: 1px dashed light-dark(#d1d9e0, #3d444d);
+  border-radius: 4px;
+}
+
+.image-absent {
+  font-style: italic;
+}
+
+/* The box the two images share. `isolation` is load-bearing: without it the
+   difference blend reaches through to whatever is painted behind the card,
+   and "anything unchanged goes black" stops being true. */
+.image-stage {
+  position: relative;
+  width: 100%;
+  isolation: isolate;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* Both layers anchor top-left, which is the only corner two images of
+   different sizes certainly share. */
+.image-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  max-width: 100%;
+}
+
+.image-compare[data-variant='difference'] .image-layer-top {
+  mix-blend-mode: difference;
+}
+
+/* Black rather than the page background, so what the reviewer sees is the
+   difference itself rather than a blend against #0d1117. */
+.image-compare[data-variant='difference'] .image-stage {
+  background: #000000;
+}
+
+.image-slider {
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.image-slider input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.image-slider output {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.image-hint {
+  margin: 0;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+/* --------------------------------------------------------------- tables */
+
+.table-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The grid scrolls sideways rather than squeezing its columns. A forty-column
+   export compressed into the card width is unreadable in a different way from
+   being cut off, and only one of the two can be scrolled back. */
+.table-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+}
+
+.grid {
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.grid th,
+.grid td {
+  padding: 2px 8px;
+  text-align: left;
+  border-right: 1px solid light-dark(#eef1f4, #2d333b);
+  border-bottom: 1px solid light-dark(#eef1f4, #2d333b);
+}
+
+.grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-weight: 600;
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.grid-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  font-weight: 400;
+  color: light-dark(#59636e, #9198a1);
+  text-align: right;
+  background: light-dark(#ffffff, #0d1117);
+}
+
+.grid-mark {
+  display: inline-block;
+  width: 1ch;
+  margin-right: 4px;
+}
+
+/* Row tints in the same greens and reds as Pierre's own diff lines, so a
+   changed row here and a changed line there read as the same event. */
+.grid-added td {
+  background: light-dark(#e6ffec, #12261e);
+}
+
+.grid-removed td {
+  background: light-dark(#ffebe9, #25171c);
+  text-decoration: line-through;
+  text-decoration-color: light-dark(#cf222e88, #f8514988);
+}
+
+/* A changed row is deliberately not tinted. Only the cells that moved are,
+   because the point of the whole mode is that the rest of the row did not. */
+.grid-cell-changed {
+  background: light-dark(#fff8c5, #2b2611);
+}
+
+.grid-was {
+  margin-right: 6px;
+  color: light-dark(#cf222e, #f85149);
+  text-decoration: line-through;
+}
+
+/* ----------------------------------------------------------------- JSON */
+
+.key-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 60vh;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+}
+
+.key-paths li {
+  display: flex;
+  gap: var(--gap);
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.key-added {
+  background: light-dark(#e6ffec, #12261e);
+}
+
+.key-removed {
+  background: light-dark(#ffebe9, #25171c);
+}
+
+.key-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: light-dark(#1f2328, #e6edf3);
+}
+
+.key-values {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.key-before {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.key-after {
+  color: light-dark(#1a7f37, #3fb950);
+}
+
+/* ------------------------------------------------------------ notebooks */
+
+.cells {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cell {
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cell-head,
+.cell summary {
+  display: flex;
+  gap: var(--gap);
+  align-items: baseline;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.cell summary {
+  cursor: pointer;
+}
+
+.cell-number {
+  font-weight: 600;
+  color: light-dark(#1f2328, #e6edf3);
+}
+
+.cell-state {
+  margin-left: auto;
+}
+
+.cell-added .cell-head {
+  color: light-dark(#1a7f37, #3fb950);
+}
+
+.cell-removed .cell-head {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.cell-source,
+.cell-output {
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cell-outputs {
+  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.cell-output {
+  max-height: 240px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.cell-output-error {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.cell-output-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  padding: 6px 8px;
+}
+
+/* A diff mounted inside a card header rather than as a CodeView item. It owns
+   its own shadow root and its own scrollport, and nothing virtualizes it, so
+   it needs a height it cannot exceed — otherwise one two-thousand-line cell
+   pushes the rest of the notebook off the bottom of the column. */
+.embedded-diff {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+/* Room to scroll past the last file, so its card can reach the top of the
+   column like every other one. Without it CodeView stops scrolling with the
+   final item's *bottom* level with the scrollport, which puts the top of that
+   card — where its controls are — below the fold with nowhere left to go. */
+.column-tail {
+  height: 40vh;
+}

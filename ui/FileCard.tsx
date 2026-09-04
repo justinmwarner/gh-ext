@@ -11,7 +11,11 @@
  * no diff behind it, the sentence explaining why.
  */
 
+import { RAW, modesForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
+import type { BlobRefs } from './blobLoader';
+import { ModeSwitcher } from './ModeSwitcher';
+import { RichCompare } from './RichCompare';
 import { UnanchoredThreads } from './UnanchoredThreads';
 import { fileBody } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
@@ -93,6 +97,11 @@ export interface FileCardProps {
    * and because the header is rendered even when the card is collapsed.
    */
   unanchored: readonly ListedThread[];
+  /** How this file is being compared. Already resolved against what it offers. */
+  mode: string;
+  onChangeMode: (path: string, mode: string) => void;
+  /** The two commits a rich comparison reads whole files from. */
+  blobs: BlobRefs | null;
 }
 
 export function FileCard({
@@ -101,11 +110,18 @@ export function FileCard({
   onToggleCollapsed,
   onHeaderRef,
   unanchored,
+  mode,
+  onChangeMode,
+  blobs,
 }: FileCardProps) {
   const body = fileBody(file);
+  const raw = mode === RAW.id;
   // Nothing to collapse: the card is already only its header, and a toggle that
-  // reveals an empty rectangle is a lie about there being more to see.
-  const collapsible = body.kind === 'diff';
+  // reveals an empty rectangle is a lie about there being more to see. A card in
+  // a rich mode is in exactly that state — its body is the comparison below,
+  // and the collapse toggle would be pointing at nothing.
+  const collapsible = raw && body.kind === 'diff';
+  const modes = modesForFile(file);
 
   return (
     <div
@@ -148,11 +164,24 @@ export function FileCard({
         <ViewedCheckbox path={file.path} state={file.viewedState} />
       </div>
 
-      {body.message !== null && (
+      <ModeSwitcher
+        path={file.path}
+        modes={modes}
+        current={mode}
+        onChange={onChangeMode}
+      />
+
+      {/* The sentence explaining an absent diff belongs to the raw view alone.
+          Left on, a PNG in its side-by-side comparison would carry "Binary
+          file changed. There is no text diff to show" directly above the two
+          images that are showing it. */}
+      {raw && body.message !== null && (
         <p className="file-note" role="note">
           {body.message}
         </p>
       )}
+
+      <RichCompare file={file} mode={mode} refs={blobs} />
 
       <UnanchoredThreads path={file.path} threads={unanchored} />
     </div>

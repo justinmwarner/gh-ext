@@ -56,8 +56,26 @@ export const MAX_BLOB_BYTES = 1_000_000;
  * the path and still escapes the `#`, `?` and space that a real repository
  * genuinely contains.
  */
-const encodePath = (path: string): string =>
+export const encodePath = (path: string): string =>
   path.split('/').map(encodeURIComponent).join('/');
+
+/**
+ * Whether a response is GitHub saying the quota is spent, and when it refills.
+ *
+ * A wrapper object rather than a bare `Date | null`, because "throttled, and
+ * GitHub sent no usable reset header" is a real answer and is not the same as
+ * "not throttled" — collapsing the two would turn a throttle into a 403 read as
+ * a fact about the file.
+ *
+ * Shared with the byte-reading sibling in `binary-blobs.ts`: both have to make
+ * this distinction before a 403 can mean "too large", or a throttled reviewer
+ * goes looking for a problem with their repository.
+ */
+export function rateLimitFrom(res: Response): { resetAt: Date | null } | null {
+  if (res.status !== 403 || res.headers.get('x-ratelimit-remaining') !== '0') return null;
+  const reset = Number(res.headers.get('x-ratelimit-reset'));
+  return { resetAt: Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000) : null };
+}
 
 /** A NUL byte cannot occur in text GitHub would let you diff. */
 const looksBinary = (text: string): boolean => text.includes('\u0000');
@@ -86,13 +104,8 @@ export async function fetchBlob(
   // Checked before the 403 below: a quota failure is about the request rather
   // than about the file, and reporting it as "too large" would send the
   // reviewer looking for a problem with their repository.
-  if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
-    const reset = Number(res.headers.get('x-ratelimit-reset'));
-    throw new RateLimitError(
-      'GitHub rate limit exceeded',
-      Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000) : null,
-    );
-  }
+  const limit = rateLimitFrom(res);
+  if (limit !== null) throw new RateLimitError('GitHub rate limit exceeded', limit.resetAt);
 
   // 404 is the ordinary answer for a side that does not exist at that commit.
   if (res.status === 404) return { status: 'absent' };
@@ -130,8 +143,8 @@ export const blobKey = (ref: string, path: string): string =>
  * forwards through a review, so the oldest entry really is the least likely to
  * be wanted again, and a `Map` gives that ordering for free.
  */
-export class BlobCache {
-  private readonly entries = new Map<string, BlobResult>();
+export class BlobCache<T extends CacheableBlob = BlobResult> {
+  private readonly entries = new Map<string, T>();
   private bytes = 0;
 
   constructor(
@@ -139,11 +152,11 @@ export class BlobCache {
     private readonly maxBytes = 16_000_000,
   ) {}
 
-  get(ref: string, path: string): BlobResult | undefined {
+  get(ref: string, path: string): T | undefined {
     return this.entries.get(blobKey(ref, path));
   }
 
-  set(ref: string, path: string, result: BlobResult): void {
+  set(ref: string, path: string, result: T): void {
     const key = blobKey(ref, path);
     const existing = this.entries.get(key);
     if (existing !== undefined) this.bytes -= sizeOf(existing);
@@ -184,5 +197,21 @@ export class BlobCache {
   }
 }
 
-const sizeOf = (result: BlobResult): number =>
-  result.status === 'ok' ? result.text.length : 0;
+/**
+ * What this cache can hold.
+ *
+ * Written structurally rather than as a union of the two result types, so the
+ * byte-reading sibling in `binary-blobs.ts` can use the same cache without this
+ * module having to import it — and so a third shape later needs only to carry
+ * one of these two fields rather than to be added here.
+ */
+export type CacheableBlob = { status: string; text?: string; base64?: string };
+
+/**
+ * How much room one entry takes.
+ *
+ * Only the `ok` results hold anything; `absent` and `too-large` are facts about
+ * the file and are cached for free, which is the point of caching them.
+ */
+const sizeOf = (result: CacheableBlob): number =>
+  result.status === 'ok' ? (result.text ?? result.base64 ?? '').length : 0;

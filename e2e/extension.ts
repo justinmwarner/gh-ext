@@ -27,10 +27,14 @@ import {
   FIRST_SHA,
   RANGE_DIFF,
   HEAD_SHA,
+  IMAGE_BYTES,
+  IMAGE_FILE,
   PRIOR_SHA,
   POSTED_THREAD,
   PR,
   PULL_REQUEST_NODE,
+  TABLE_FILE,
+  TABLE_TEXT,
   UNIFIED_DIFF,
   wholeFile,
 } from './fixture';
@@ -275,11 +279,29 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
     const contents = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(url.pathname);
     if (contents !== null) {
       const path = decodeURIComponent(contents[1] ?? '');
-      const ref = url.searchParams.get('ref');
+      const side = url.searchParams.get('ref') === BASE_SHA ? 'base' : 'head';
+
+      // The two files the rich comparisons are for. Answered as real bytes and
+      // real CSV rather than as the generic text every other path gets, because
+      // what is being tested is that a PNG survives the worker, the base64
+      // encoding, the message channel and the object URL intact.
+      if (path === IMAGE_FILE) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: Buffer.from(IMAGE_BYTES[side], 'base64'),
+        });
+        return;
+      }
+      if (path === TABLE_FILE) {
+        await route.fulfill({ status: 200, contentType: 'text/csv', body: TABLE_TEXT[side] });
+        return;
+      }
+
       await route.fulfill({
         status: 200,
         contentType: 'text/plain',
-        body: wholeFile(path, ref === BASE_SHA ? 'base' : 'head'),
+        body: wholeFile(path, side),
       });
       return;
     }
@@ -362,4 +384,4 @@ export const reviewUrl = (extensionId: string): string =>
   `chrome-extension://${extensionId}/review.html#/pr/${PR.owner}/${PR.repo}/${PR.number}`;
 
 export { expect } from '@playwright/test';
-export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR };
+export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR, IMAGE_FILE, TABLE_FILE };

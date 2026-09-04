@@ -193,9 +193,13 @@ describe('DiffColumn', () => {
   });
 
   it('says a binary file is binary rather than leaving a blank card', () => {
-    mount([file({ path: 'logo.png', isBinary: true, patch: '' })]);
+    // A binary with no rich comparison to offer. An image would open in its
+    // own view instead, which is what the comparison-mode tests cover.
+    mount([file({ path: 'build/app.wasm', isBinary: true, patch: '' })]);
 
-    expect(within(card('logo.png')).getByRole('note').textContent).toMatch(/binary/i);
+    expect(within(card('build/app.wasm')).getByRole('note').textContent).toMatch(
+      /binary/i,
+    );
   });
 
   it('says when GitHub withheld the patch', () => {
@@ -290,9 +294,9 @@ describe('DiffColumn', () => {
   });
 
   it('offers no collapse toggle for a file with nothing to collapse', () => {
-    mount([file({ path: 'logo.png', isBinary: true, patch: '' })]);
+    mount([file({ path: 'build/app.wasm', isBinary: true, patch: '' })]);
 
-    expect(within(card('logo.png')).queryByRole('button')).toBeNull();
+    expect(within(card('build/app.wasm')).queryByRole('button')).toBeNull();
   });
 
   it('warns when the file list came from the files endpoint', () => {

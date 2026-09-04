@@ -12,6 +12,7 @@
  * instants are epoch milliseconds and absence is `null`.
  */
 
+import type { BinaryBlobResult } from './github/binary-blobs';
 import type { BlobResult } from './github/blobs';
 import type { ParsedDiffFile } from './github/diff';
 import type { DeniedField } from './github/graphql-errors';
@@ -257,6 +258,23 @@ export interface ProtocolMap {
     response: BlobResult;
   };
 
+  /**
+   * Review page → worker: one file's whole contents at one commit, as bytes.
+   *
+   * How an image reaches an `<img>`. The page turns these bytes into an object
+   * URL, which is a same-process read and not a network call — the alternative,
+   * pointing the tag at a remote URL, would be both a fetch from a context that
+   * must not make one and a signal to github.com that this extension is here.
+   *
+   * Base64 rather than a buffer because this channel is JSON: a `Uint8Array`
+   * arrives as `{"0":137,"1":80,…}`, four times the size and no longer a
+   * buffer. The inflation is why the byte cap is what it is.
+   */
+  'get-blob-bytes': {
+    request: { pr: PrRef; path: string; ref: string };
+    response: BinaryBlobResult;
+  };
+
   /** Options page → worker: does the stored token work, and who is it? */
   'validate-token': { request: Record<string, never>; response: TokenValidation };
 
@@ -343,6 +361,7 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   mutate: true,
   'compare-diff': true,
   'get-blob': true,
+  'get-blob-bytes': true,
   'validate-token': true,
   'get-rate-limit': true,
 };
