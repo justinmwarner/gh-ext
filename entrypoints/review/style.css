@@ -1783,3 +1783,11 @@ code {
   max-height: 60vh;
   overflow: auto;
 }
+
+/* Room to scroll past the last file, so its card can reach the top of the
+   column like every other one. Without it CodeView stops scrolling with the
+   final item's *bottom* level with the scrollport, which puts the top of that
+   card — where its controls are — below the fold with nowhere left to go. */
+.column-tail {
+  height: 40vh;
+}

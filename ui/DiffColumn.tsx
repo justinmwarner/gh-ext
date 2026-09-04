@@ -142,6 +142,26 @@ export const CODE_VIEW_SAFE_PROPS = {
   options: CODE_VIEW_OPTIONS,
 } as const;
 
+/**
+ * Room to scroll past the last file.
+ *
+ * `CodeView` sizes its scroll region from the items it has measured, so at
+ * maximum scroll the final item's *bottom* is level with the bottom of the
+ * scrollport — which puts the top of that card, where all of its controls
+ * live, below the fold with nowhere further to scroll. Measured in Chrome: the
+ * last card's header sat 23px past the edge with the column already at its
+ * limit, and its mode buttons could not be clicked at all.
+ *
+ * That is latent in any column whose last card has a tall header, and rich
+ * comparisons are what made the headers tall. `renderCodeViewFooter` is the
+ * library's own answer: a non-virtualized element after the last item, whose
+ * height it measures and includes.
+ *
+ * A module constant rather than an inline arrow because `SlotPortals` memoizes
+ * on this callback's identity.
+ */
+const renderTail = () => <div className="column-tail" aria-hidden="true" />;
+
 const NO_ANNOTATIONS: DiffLineAnnotation<AnnotationMetadata>[] = [];
 const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: [] };
 
@@ -789,6 +809,7 @@ export function DiffColumn({
           items={items}
           onScroll={handleScroll}
           className="diff-view"
+          renderCodeViewFooter={renderTail}
           renderAnnotation={renderAnnotation}
           renderCustomHeader={(item) => {
             const file = byPath.get(item.id);
