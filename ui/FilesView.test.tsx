@@ -6,7 +6,8 @@
  * contains and so what the Conversations view calls "not in this diff".
  */
 
-import { act, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MARK_VIEWED } from '@/lib/github/mutations';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
@@ -30,11 +31,13 @@ function mount(
   options: {
     threads?: ReviewThread[];
     viewedState?: FileViewedState;
+    extraFiles?: Parameters<typeof prPayloadWithFiles>[0];
   } = {},
 ) {
   const payload = {
     ...prPayloadWithFiles([
       fileFixture({ path: 'src/app.ts', viewedState: options.viewedState ?? 'UNVIEWED' }),
+      ...(options.extraFiles ?? []),
     ]),
     threads: options.threads ?? [],
   };
@@ -100,9 +103,11 @@ describe('FilesView', () => {
       threads: [reviewThread({ path: 'src/app.ts', line: 2 })],
     });
 
-    const shadow =
-      container.querySelector('file-tree-container')?.shadowRoot?.textContent ?? '';
-    expect(shadow).toContain('●');
+    expect(
+      container
+        .querySelector('[data-path="src/app.ts"] .tree-comment')
+        ?.getAttribute('data-tone'),
+    ).toBe('open');
   });
 
   it('marks a file whose conversations are all settled differently', () => {
@@ -110,43 +115,33 @@ describe('FilesView', () => {
       threads: [reviewThread({ path: 'src/app.ts', line: 2, isResolved: true })],
     });
 
-    const shadow =
-      container.querySelector('file-tree-container')?.shadowRoot?.textContent ?? '';
-    expect(shadow).toContain('○');
-    expect(shadow).not.toContain('●');
+    expect(
+      container
+        .querySelector('[data-path="src/app.ts"] .tree-comment')
+        ?.getAttribute('data-tone'),
+    ).toBe('resolved');
   });
 });
 
 describe('ticking a file off from the tree', () => {
-  const shadow = (container: HTMLElement) =>
-    container.querySelector('file-tree-container')?.shadowRoot ?? null;
-
-  const box = (container: HTMLElement, glyph: string) =>
-    [
-      ...(shadow(container)?.querySelectorAll(
-        '[data-item-section="decoration"] span span',
-      ) ?? []),
-    ].find((element) => element.textContent === glyph);
+  const box = (container: HTMLElement, path: string) =>
+    container.querySelector(`[data-path="${path}"] [data-check]`);
 
   it('shows the state the payload arrived with', () => {
     const { container } = mount({ viewedState: 'VIEWED' });
 
-    expect(shadow(container)?.textContent).toContain('☑');
+    expect(box(container, 'src/app.ts')?.getAttribute('data-check')).toBe('checked');
   });
 
   it('marks the file viewed on GitHub when the box is clicked', async () => {
     (request as unknown as Mock).mockResolvedValue({ ok: true, data: { data: {} } });
     const { container } = mount();
 
-    await act(async () => {
-      box(container, '☐')?.dispatchEvent(
-        new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
-      );
-    });
+    await userEvent.click(box(container, 'src/app.ts') as Element);
 
     // The real mutation, not a local flag: a tick here shows up on github.com.
     expect((request as unknown as Mock).mock.calls[0]?.[0]?.document).toBe(MARK_VIEWED);
-    expect(shadow(container)?.textContent).toContain('☑');
+    expect(box(container, 'src/app.ts')?.getAttribute('data-check')).toBe('checked');
   });
 
   it('puts the box back when GitHub refuses', async () => {
@@ -155,13 +150,25 @@ describe('ticking a file off from the tree', () => {
     (request as unknown as Mock).mockResolvedValue({ ok: false, error: 'nope' });
     const { container } = mount();
 
-    await act(async () => {
-      box(container, '☐')?.dispatchEvent(
-        new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
-      );
+    await userEvent.click(box(container, 'src/app.ts') as Element);
+
+    expect(box(container, 'src/app.ts')?.getAttribute('data-check')).toBe('unchecked');
+  });
+
+  it('marks every file in a folder from the folder’s own box', async () => {
+    // The whole point of a folder checkbox, and it is one mutation per file:
+    // `markFileAsViewed` has no bulk form.
+    (request as unknown as Mock).mockResolvedValue({ ok: true, data: { data: {} } });
+    const { container } = mount({
+      extraFiles: [fileFixture({ path: 'src/beta.ts' })],
     });
 
-    expect(shadow(container)?.textContent).toContain('☐');
-    expect(shadow(container)?.textContent).not.toContain('☑');
+    await userEvent.click(box(container, 'src/') as Element);
+
+    const paths = (request as unknown as Mock).mock.calls.map(
+      (call) => call[0]?.variables?.path,
+    );
+    expect(paths).toContain('src/app.ts');
+    expect(paths).toContain('src/beta.ts');
   });
 });

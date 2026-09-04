@@ -116,7 +116,7 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
     ['src/beta.ts', 'out-of-hunk'],
     ['src/gamma.ts', 'outdated'],
   ] as const) {
-    await page.locator(`[data-item-path="${path}"]`).click();
+    await page.locator(`[data-path="${path}"]`).click();
     await expect(
       page.locator(`[data-unanchored="${path}"] [data-listed-reason="${reason}"]`),
     ).toHaveCount(1);
@@ -133,7 +133,7 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
     await expect(entry).toBeVisible();
   }
   for (const path of FILES) {
-    await expect(page.locator(`[data-item-path="${path}"]`)).toHaveCount(1);
+    await expect(page.locator(`[data-path="${path}"]`)).toHaveCount(1);
   }
 
   // And the fixture answered every request: nothing reached github.com.
@@ -155,15 +155,15 @@ test('the tree marks which files carry conversations, and follows a resolve', as
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const row = (path: string) => page.locator(`[data-item-path="${path}"]`);
+  const row = (path: string) => page.locator(`[data-path="${path}"]`);
 
   // Every file in the fixture carries exactly one open thread except src/app.ts,
   // which carries an open one and a resolved one — so all four read as open.
-  await expect(row('src/beta.ts')).toContainText('●');
-  await expect(row('src/app.ts')).toContainText('●');
+  const mark = (path: string) => row(path).locator('.tree-comment');
+  await expect(mark('src/beta.ts')).toHaveAttribute('data-tone', 'open');
+  await expect(mark('src/app.ts')).toHaveAttribute('data-tone', 'open');
   // And a file nobody has commented on says nothing at all.
-  await expect(row('src/epsilon.ts')).not.toContainText('●');
-  await expect(row('src/epsilon.ts')).not.toContainText('○');
+  await expect(mark('src/epsilon.ts')).toHaveCount(0);
 
   // Resolving src/beta.ts's only thread has to flip its mark from open to
   // settled. Nothing in the file list moves when it does.
@@ -183,28 +183,13 @@ test('the tree marks which files carry conversations, and follows a resolve', as
     .getByRole('button', { name: 'Resolve conversation' })
     .click();
 
-  await expect(row('src/beta.ts')).toContainText('○');
-  await expect(row('src/beta.ts')).not.toContainText('●');
+  await expect(mark('src/beta.ts')).toHaveAttribute('data-tone', 'resolved');
   expect(api.operations).toContain('ResolveThread');
 
-  // Every run in the decoration has to measure. The library renders each part
-  // as its own `<span>` inside a flex container, so a part holding an ordinary
-  // space is a flex item whose whole content is collapsible whitespace: it lays
-  // out at zero width, and the counts meet as `+1−1`. Only a layout engine can
-  // see that, which is why it survived from the day the counts shipped.
-  const widths = await page.evaluate(() => {
-    const outer = document
-      .querySelector('file-tree-container')
-      ?.shadowRoot?.querySelector(
-        '[data-item-path="src/app.ts"] [data-item-section="decoration"] span',
-      );
-    return [...(outer?.children ?? [])].map(
-      (part) => part.getBoundingClientRect().width,
-    );
-  });
-  // Counts, mark and box, with a separator between each: seven runs.
-  expect(widths).toHaveLength(7);
-  expect(widths.filter((width) => width > 0)).toHaveLength(7);
+  // The counts, the mark and the box are separate elements in a real row now,
+  // so there is no shared cell for one of them to collapse inside.
+  await expect(row('src/app.ts').locator('.tree-counts')).toContainText('+1');
+  await expect(row('src/app.ts').locator('[data-check]')).toHaveCount(1);
 });
 
 test('the rail’s reviewer list is not wearing the avatar’s ring', async ({
@@ -241,12 +226,13 @@ test('a file can be ticked off from the tree, and the card agrees', async ({
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const row = (path: string) => page.locator(`[data-item-path="${path}"]`);
+  const row = (path: string) => page.locator(`[data-path="${path}"]`);
 
-  await expect(row('src/app.ts')).toContainText('☐');
-  await row('src/app.ts').getByText('☐', { exact: true }).click();
+  const box = (path: string) => row(path).locator('[data-check]');
+  await expect(box('src/app.ts')).toHaveAttribute('data-check', 'unchecked');
+  await box('src/app.ts').click();
 
-  await expect(row('src/app.ts')).toContainText('☑');
+  await expect(box('src/app.ts')).toHaveAttribute('data-check', 'checked');
   expect(api.operations).toContain('MarkViewed');
 
   // The same state, not a second one: this is GitHub's viewed flag, so the
@@ -261,22 +247,48 @@ test('a file can be ticked off from the tree, and the card agrees', async ({
   await expect(page.locator('.shell')).toHaveAttribute('data-current-file', '');
 });
 
-test('the tree offers the same tick to a right-click', async ({
+test('a folder ticks off every file beneath it', async ({ context, extensionId, api }) => {
+  // The reason for owning the tree. `markFileAsViewed` has no bulk form, so
+  // this is one mutation per file — what it must not be is one request storm.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('[data-path="src/"] [data-check]').click();
+
+  await expect(page.locator('[data-path="src/"] [data-check]')).toHaveAttribute(
+    'data-check',
+    'checked',
+    { timeout: 10000 },
+  );
+  for (const path of ['src/app.ts', 'src/beta.ts', 'src/gamma.ts']) {
+    await expect(page.locator(`[data-path="${path}"] [data-check]`)).toHaveAttribute(
+      'data-check',
+      'checked',
+    );
+  }
+  expect(api.operations.filter((op) => op === 'MarkViewed').length).toBeGreaterThan(2);
+});
+
+test('the keyboard can tick a file off without leaving the tree', async ({
   context,
   extensionId,
   api,
 }) => {
   void api;
-  // The keyboard's route to it. The context menu is the one per-row affordance
-  // `@pierre/trees` sanctions, its trigger button is focusable, and all of that
-  // plumbing is the library's — none of it exists in jsdom.
+  // A treeitem may not contain focusable content, so the box is not a tab
+  // stop — ARIA's answer is that the row carries the state and Space toggles
+  // it. That only works if the row is genuinely focusable, which is a claim
+  // about a real browser.
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  await page.locator('[data-item-path="src/beta.ts"]').click({ button: 'right' });
-  await page.getByRole('button', { name: 'Mark as viewed' }).click();
+  await page.locator('[data-path="src/app.ts"]').focus();
+  await page.keyboard.press('Space');
 
-  await expect(page.locator('[data-item-path="src/beta.ts"]')).toContainText('☑');
+  await expect(page.locator('[data-path="src/app.ts"] [data-check]')).toHaveAttribute(
+    'data-check',
+    'checked',
+  );
 });
 
 test('hovering a tree row names the whole path', async ({ context, extensionId, api }) => {
@@ -286,7 +298,7 @@ test('hovering a tree row names the whole path', async ({ context, extensionId, 
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const row = page.locator('[data-item-path="src/components/Button.tsx"]');
+  const row = page.locator('[data-path="src/components/Button.tsx"]');
   await row.hover();
 
   await expect(row).toHaveAttribute('title', 'src/components/Button.tsx');
@@ -461,7 +473,7 @@ test('clicking a file in the tree scrolls the column to it', async ({
 
   // The tree renders inside `@pierre/trees`' own shadow root; Playwright's
   // selectors pierce it, and the row carries its own path.
-  const row = page.locator('[data-item-path="lib/util/debounce.ts"]');
+  const row = page.locator('[data-path="lib/util/debounce.ts"]');
   await row.click();
 
   await expect(row).toHaveAttribute('aria-selected', 'true');
@@ -711,10 +723,10 @@ test('dark mode renders', async ({ context, extensionId, api }) => {
   expect(dark.shell).not.toBe(light.shell);
   expect(dark.text).not.toBe(light.text);
 
-  // And the two Pierre surfaces resolve to the same background as the page.
-  // They render into shadow roots, so this cannot be checked anywhere but a
-  // real browser — and left alone the seams show three colours meeting: the
-  // page at #0d1117, the tree at #141415 and the diff at pure black.
+  // And the diff resolves to the same background as the page. It renders into
+  // a shadow root, so this cannot be checked anywhere but a real browser — and
+  // left alone the seam shows two colours meeting, the page at #0d1117 and the
+  // diff at pure black.
   const seams = await page.evaluate(() => {
     // The rendered colour, not the custom property: `getPropertyValue` on a
     // custom property hands back the unresolved token text, which compares
@@ -727,15 +739,17 @@ test('dark mode renders', async ({ context, extensionId, api }) => {
       | null;
     return {
       page: bg(document.body),
-      // The two libraries paint at different depths: the diff on the first
-      // element inside its shadow root, the tree on the host itself.
       diff: bg(diffHost?.shadowRoot?.firstElementChild ?? null),
-      tree: bg(document.querySelector('file-tree-container')),
+      tree: bg(document.querySelector('.filetree')),
     };
   });
 
   expect(seams.diff).toBe(seams.page);
-  expect(seams.tree).toBe(seams.page);
+  // The tree paints nothing of its own, so it cannot disagree with the page —
+  // which is a stronger guarantee than matching it. It used to render into a
+  // shadow root with its own theme, and the three surfaces met at #0d1117,
+  // #141415 and pure black.
+  expect(seams.tree).toBe('rgba(0, 0, 0, 0)');
 
   // The diff itself follows, inside Pierre's shadow root and its own theme.
   const diffBackground = await page

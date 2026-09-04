@@ -43,6 +43,25 @@ if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'fun
   });
 }
 
+/**
+ * `Element.prototype.scrollIntoView`, which jsdom does not implement either.
+ *
+ * The file tree calls it to keep the row for the file the column scrolled to
+ * on screen. Inert here for the same reason as the two above: jsdom performs
+ * no layout, so there is nothing to scroll and nothing worth asserting about
+ * where it ended up. That claim is checked in a real browser instead.
+ */
+if (
+  typeof Element !== 'undefined' &&
+  typeof Element.prototype.scrollIntoView !== 'function'
+) {
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    value: () => {},
+    writable: true,
+    configurable: true,
+  });
+}
+
 if (!('ResizeObserver' in globalThis)) {
   class InertResizeObserver implements ResizeObserver {
     observe(): void {}

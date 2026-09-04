@@ -116,14 +116,44 @@ export function FilesView({
     [files, session.viewed],
   );
 
-  const toggleViewed = useCallback(
-    (path: string) => {
-      const current = viewed.get(path);
-      if (current === undefined) return;
-      // `current`, not the payload's value: what goes back on failure is what
-      // the reviewer was actually looking at — including DISMISSED, which
-      // rolling back to UNVIEWED would quietly erase.
-      void session.setViewed(path, current !== 'VIEWED', current);
+  /**
+   * Mark a set of files viewed, or unmark them.
+   *
+   * One path when a file's own box is ticked, every file beneath it when a
+   * folder's is — and a folder can hold fifty. `markFileAsViewed` is per file
+   * and there is no bulk form, so this is fifty mutations however it is
+   * dressed up; what it must not be is fifty at once. Four at a time keeps a
+   * large folder responsive without opening the throttle on GitHub.
+   *
+   * Files already in the target state are skipped, so finishing a half-viewed
+   * folder does not re-send the half that was already done.
+   */
+  const setViewedMany = useCallback(
+    (paths: readonly string[], next: boolean) => {
+      const todo = paths.filter((path) => {
+        const state = viewed.get(path);
+        return state !== undefined && (state === 'VIEWED') !== next;
+      });
+      if (todo.length === 0) return;
+
+      let cursor = 0;
+      const worker = async (): Promise<void> => {
+        while (cursor < todo.length) {
+          const path = todo[cursor];
+          cursor += 1;
+          if (path === undefined) return;
+          const from = viewed.get(path);
+          if (from === undefined) continue;
+          // `from`, not the payload's value: what goes back on failure is what
+          // the reviewer was actually looking at — including DISMISSED, which
+          // rolling back to UNVIEWED would quietly erase.
+          await session.setViewed(path, next, from);
+        }
+      };
+
+      void Promise.all(
+        Array.from({ length: Math.min(4, todo.length) }, () => worker()),
+      );
     },
     [session, viewed],
   );
@@ -146,7 +176,7 @@ export function FilesView({
             viewed={viewed}
             current={current}
             onSelect={onSelectFromTree}
-            onToggleViewed={toggleViewed}
+            onSetViewed={setViewedMany}
           />
         </nav>
 

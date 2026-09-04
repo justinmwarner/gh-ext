@@ -675,42 +675,210 @@ code {
   display: flex;
   flex: 0 0 auto;
   min-height: 0;
-  padding: 8px 0 8px 12px;
+  padding: 8px 0 8px 8px;
   overflow: hidden;
 }
 
-/* An explicit height, not an inherited one. The tree virtualizes against this
-   element's scrollport, and without a resolved height it paints against a
-   fallback of 420px once and then measures zero. */
-.filetree-host {
-  /* The tree indents its rows by its own inline padding on top of the rail's,
-     which put tree rows 24px further in than the headings above them. */
-  --trees-padding-inline-override: 0px;
+.filetree-rows {
   flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
+  overflow-y: auto;
+  font-size: 13px;
+}
 
-  /* The same palette, through the trees package's own hooks. Set here
-     rather than on `:root` because these names are specific to the tree
-     and belong with it. */
-  --trees-bg-override: light-dark(#ffffff, #0d1117);
-  --trees-border-color-override: light-dark(#d1d9e0, #3d444d);
-  --trees-accent-override: light-dark(#0969da, #4493f8);
-  --trees-status-added-override: light-dark(#1a7f37, #3fb950);
-  --trees-status-deleted-override: light-dark(#cf222e, #f85149);
-  --trees-status-modified-override: light-dark(#0969da, #4493f8);
+/* `content-visibility` instead of virtualizing in JavaScript. The browser
+   skips layout and paint for rows that are off screen, which is the whole of
+   what a virtualized list buys and none of what it costs: no measured heights,
+   no scroll anchoring, and no rows that exist for the reviewer but not for the
+   browser's own find-in-page. `contain-intrinsic-size` is what keeps the
+   scrollbar honest about a list it has not laid out yet. */
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-right: 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
+  transition: background-color 0.12s ease;
+}
 
-  /* The page's focus ring is 2px and outside the element; the tree's was
-     1px, inside, and a different blue, so tabbing across the seam changed
-     the ring's width, position and hue. */
-  --trees-focus-ring-color-override: light-dark(#0969da, #4493f8);
+.tree-row:hover {
+  background: light-dark(#eef1f4, #212830);
+}
 
-  /* The conversation mark. Not one of the tree's own names — it inherits into
-     the shadow root from here, which is the only way a colour reaches a row
-     decoration the page cannot select. Amber rather than a fourth blue: the
-     row already carries green and red counts and a coloured git letter, and
-     this is the page's one "needs your attention" hue. */
-  --comment-dot-color: light-dark(#9a6700, #d29922);
+.tree-row[aria-selected='true'] {
+  background: light-dark(#dbe9ff, #253143);
+}
+
+.tree-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* A 20px target around a 13px box. The box is what the reviewer sees; the
+   target is what they actually have to hit, and a 13px one in a list this
+   dense is a miss waiting to happen. */
+.tree-check {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -2px;
+  color: light-dark(#0969da, #4493f8);
+}
+
+.tree-check::before,
+.tree-check::after {
+  grid-area: 1 / 1;
+}
+
+.tree-check::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  border: 1px solid light-dark(#8c959f, #6e7681);
+  border-radius: 3px;
+  background: light-dark(#ffffff, #0d1117);
+}
+
+.tree-check[data-check='checked']::before {
+  border-color: currentColor;
+  background: currentColor;
+}
+
+.tree-check[data-check='checked']::after {
+  content: '✓';
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* Partial, which means two different things and wants one drawing: some of a
+   folder's files are viewed, or a file was viewed and has changed since. */
+.tree-check[data-check='mixed']::before {
+  border-color: currentColor;
+}
+
+.tree-check[data-check='mixed']::after {
+  content: '';
+  width: 7px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+/* Drawn rather than typed. The triangle glyphs render at wildly different
+   sizes across the fonts this page falls back through, and at the size a tree
+   row wants them they came out as specks. */
+.tree-chevron {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 20px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.tree-chevron::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  margin-left: 2px;
+  transition: rotate 0.12s ease;
+}
+
+.tree-row[aria-expanded='true'] .tree-chevron::before {
+  rotate: 90deg;
+}
+
+/* A folder is a different kind of thing from a file and the eye should not
+   have to read the name to know which it is looking at. */
+.tree-row[aria-expanded] .tree-name {
+  font-weight: 600;
+}
+
+/* Linguist's colour, and nothing more. The row already carries a checkbox, a
+   name, a status letter and two counts; a detailed file-type icon on top of
+   that is decoration competing with information. */
+.tree-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin: 0 3px 0 2px;
+  border-radius: 2px;
+  background: light-dark(#8c959f, #6e7681);
+}
+
+.tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Present, reachable, and out of the way: a lockfile has to stay clickable
+   without drawing the eye every time it passes. */
+.tree-row[data-noise='true'] .tree-name,
+.tree-row[data-noise='true'] .tree-counts {
+  color: light-dark(#818b98, #656c76);
+}
+
+.tree-status {
+  flex: 0 0 auto;
+  width: 10px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.tree-row[data-status='added'] .tree-status {
+  color: light-dark(#1a7f37, #3fb950);
+}
+
+.tree-row[data-status='deleted'] .tree-status {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.tree-row[data-status='modified'] .tree-status {
+  color: light-dark(#0969da, #4493f8);
+}
+
+.tree-row[data-status='renamed'] .tree-status {
+  color: light-dark(#8250df, #a371f7);
+}
+
+.tree-counts {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+/* Amber rather than a fourth blue: the row already carries green and red
+   counts and a coloured status letter, and this is the page's one "needs your
+   attention" hue. Hollow once everything on the file is resolved — shape as
+   well as colour, so the two states differ without relying on hue. */
+.tree-comment {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: light-dark(#9a6700, #d29922);
+}
+
+.tree-comment[data-tone='resolved'] {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px light-dark(#8c959f, #6e7681);
 }
 
 .rail-resizer {
@@ -1473,38 +1641,6 @@ code {
 
 .thread-entry-replies {
   color: light-dark(#0969da, #4493f8);
-}
-
-/* ------------------------------------------------------- tree context menu */
-
-/* Slotted into the tree's own popover as light DOM, so it is styled from here
-   — but the popover around it is the library's, and this only fills it. */
-.tree-menu {
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-  padding: 4px;
-}
-
-.tree-menu-item {
-  padding: 6px 10px;
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  color: inherit;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  cursor: pointer;
-}
-
-.tree-menu-item:not(:disabled):hover {
-  background: light-dark(#eef1f4, #262c36);
-}
-
-.tree-menu-item:disabled {
-  color: light-dark(#818b98, #656c76);
-  cursor: default;
 }
 
 /* --------------------------------------------------- pending review footer */

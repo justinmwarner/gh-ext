@@ -137,7 +137,7 @@ describe('Shell', () => {
 
     const tree = screen.getByRole('navigation', { name: /changed files/i });
     expect(document.getElementById('review-view-files')?.contains(tree)).toBe(true);
-    expect(tree.querySelector('file-tree-container')).not.toBeNull();
+    expect(tree.querySelector('[role="tree"]')).not.toBeNull();
   });
 
   it('says so in both regions when a pull request changed nothing', () => {

@@ -1,29 +1,27 @@
 /**
  * The file tree.
  *
- * `@pierre/trees` renders into a shadow root and virtualizes against a
- * scrollport jsdom cannot measure, so nothing here asserts on its DOM. Two
- * things are ours and both are checkable: the option object the tree is
- * constructed from, and the model it hands back — which is where selection,
- * focus and the loop guard live.
+ * Ours now. The thing that made it worth writing is the first `describe`
+ * below: a row can hold a real control, so ticking a file off does not have to
+ * be a glyph with a click handler intercepted in the capture phase.
+ *
+ * `aria-checked` on the `treeitem` rather than a nested `<input>`, because a
+ * treeitem must not contain focusable content — that constraint is real and it
+ * is the same one the previous library was up against. The difference is that
+ * ARIA answers it directly: a checkable tree item carries its own state, and
+ * Space toggles it.
  */
 
-import { act, render } from '@testing-library/react';
-import { createRef } from 'react';
+import { act, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { FileTreeVisibleRow } from '@pierre/trees';
-import {
-  FileTree,
-  type FileTreeHandle,
-  type FileTreeSources,
-  fileTreeOptions,
-} from './FileTree';
-import { UNVIEWED_BOX, VIEWED_BOX } from './fileTreeData';
+import { FileTree } from './FileTree';
 import { NO_FILE } from './currentFile';
 import type { ReviewFile } from './reviewFiles';
 
-const file = (overrides: Partial<ReviewFile> & { path: string }): ReviewFile => ({
-  oldPath: overrides.path,
+const file = (path: string, overrides: Partial<ReviewFile> = {}): ReviewFile => ({
+  path,
+  oldPath: path,
   isBinary: false,
   isRename: false,
   patchOmitted: false,
@@ -37,449 +35,321 @@ const file = (overrides: Partial<ReviewFile> & { path: string }): ReviewFile => 
 });
 
 const FILES: ReviewFile[] = [
-  file({ path: 'src/app.ts', changeType: 'MODIFIED' }),
-  file({ path: 'src/new.ts', changeType: 'ADDED' }),
-  file({ path: 'package-lock.json', noise: true }),
+  file('src/app.ts'),
+  file('src/beta.ts'),
+  file('docs/readme.md'),
+  file('top.ts'),
 ];
 
-/** A row as the tree describes one when it asks for a decoration. */
-const visibleRow = (path: string): FileTreeVisibleRow => ({
-  ancestorPaths: [],
-  depth: 0,
-  hasChildren: false,
-  index: 0,
-  isFocused: false,
-  isSelected: false,
-  isExpanded: false,
-  isFlattened: false,
-  kind: 'file',
-  level: 1,
-  name: path,
-  path,
-  posInSet: 1,
-  setSize: 1,
-});
-
-const decorationFor = (
-  options: ReturnType<typeof fileTreeOptions>,
-  path: string,
-  kind: 'file' | 'directory' = 'file',
-) =>
-  options.renderRowDecoration?.({
-    item: { kind, name: path, path },
-    row: visibleRow(path),
-  }) ?? null;
-
 function mount(props: Partial<Parameters<typeof FileTree>[0]> = {}) {
-  const ref = createRef<FileTreeHandle>();
   const onSelect = vi.fn<(path: string) => void>();
+  const onSetViewed = vi.fn<(paths: readonly string[], next: boolean) => void>();
   const view = render(
-    <FileTree ref={ref} files={FILES} current={NO_FILE} onSelect={onSelect} {...props} />,
+    <FileTree
+      files={FILES}
+      current={NO_FILE}
+      onSelect={onSelect}
+      onSetViewed={onSetViewed}
+      {...props}
+    />,
   );
-  const model = ref.current?.model;
-  if (model == null) throw new Error('FileTree did not expose its model');
-  return { ...view, model, onSelect };
+  return { ...view, onSelect, onSetViewed };
 }
 
-describe('fileTreeOptions', () => {
-  it('hands over every changed path, noise included', () => {
-    // Noise is de-emphasized, never hidden: a reviewer who wants to read the
-    // lockfile has to be able to reach it.
-    expect(fileTreeOptions(FILES, { files: FILES }).paths).toEqual([
+const rows = () => screen.getAllByRole('treeitem');
+const row = (name: string) => screen.getByRole('treeitem', { name: new RegExp(name) });
+const check = (name: string) =>
+  row(name).querySelector('[data-check]') as HTMLElement;
+
+describe('the rows', () => {
+  it('draws a row for every directory and file', () => {
+    mount();
+
+    expect(rows().map((r) => r.getAttribute('data-path'))).toEqual([
+      'docs/',
+      'docs/readme.md',
+      'src/',
       'src/app.ts',
-      'src/new.ts',
-      'package-lock.json',
+      'src/beta.ts',
+      'top.ts',
     ]);
   });
 
-  it('derives the git lane from each file’s change type', () => {
-    expect(fileTreeOptions(FILES, { files: FILES }).gitStatus).toEqual([
-      { path: 'src/app.ts', status: 'modified' },
-      { path: 'src/new.ts', status: 'added' },
-      { path: 'package-lock.json', status: 'ignored' },
-    ]);
+  it('says how deep each row sits, one-based as ARIA counts', () => {
+    mount();
+
+    expect(row('docs').getAttribute('aria-level')).toBe('1');
+    expect(row('readme').getAttribute('aria-level')).toBe('2');
   });
 
-  it('turns the built-in search off', () => {
-    // `isSearchOpenSeedKey` matches any unmodified letter or digit and then
-    // calls stopPropagation, which would swallow every single-letter review
-    // shortcut whenever the tree held focus. §16.5.
-    expect(fileTreeOptions(FILES, { files: FILES }).search).toBe(false);
+  it('names the whole path, which the row itself has no room for', () => {
+    // The visible text is the basename. Without this a truncated deep path had
+    // nothing to say which file it was.
+    mount();
+
+    expect(row('app\\.ts').getAttribute('title')).toBe('src/app.ts');
   });
 
-  it('decorates a row with the counts for that row’s file', () => {
-    const options = fileTreeOptions(FILES, { files: FILES });
+  it('says so when a pull request changed nothing', () => {
+    render(<FileTree files={[]} current={NO_FILE} onSelect={vi.fn()} />);
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ${UNVIEWED_BOX}` });
+    expect(screen.getByText(/no changed files/i)).toBeDefined();
+  });
+});
+
+describe('ticking files off', () => {
+  it('carries its own checked state rather than nesting a control', () => {
+    // A treeitem must not contain focusable content, so the state lives on the
+    // row. This is what the previous library could not do at all.
+    mount({ viewed: new Map([['src/app.ts', 'VIEWED']]) });
+
+    expect(row('app\\.ts').getAttribute('aria-checked')).toBe('true');
+    expect(row('beta').getAttribute('aria-checked')).toBe('false');
   });
 
-  it('reads the decoration from the current file list, not the one it was built with', () => {
-    // Tree options are read once, at construction, so the renderer has to close
-    // over a live reference or the counts freeze at first paint.
-    const live = { files: FILES };
-    const options = fileTreeOptions(FILES, live);
-    live.files = [file({ path: 'src/app.ts', additions: 99, deletions: 0 })];
+  it('shows a file that changed since it was viewed as partial', () => {
+    mount({ viewed: new Map([['src/app.ts', 'DISMISSED']]) });
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+99 −0 ${UNVIEWED_BOX}` });
+    expect(row('app\\.ts').getAttribute('aria-checked')).toBe('mixed');
   });
 
-  it('decorates a row with the conversations on that row’s file', () => {
-    const options = fileTreeOptions(FILES, {
-      files: FILES,
+  it('marks a file when its box is clicked', async () => {
+    const { onSetViewed } = mount();
+
+    await userEvent.click(check('app\\.ts'));
+
+    expect(onSetViewed).toHaveBeenCalledWith(['src/app.ts'], true);
+  });
+
+  it('unmarks one that was already viewed', async () => {
+    const { onSetViewed } = mount({ viewed: new Map([['src/app.ts', 'VIEWED']]) });
+
+    await userEvent.click(check('app\\.ts'));
+
+    expect(onSetViewed).toHaveBeenCalledWith(['src/app.ts'], false);
+  });
+
+  it('does not also navigate to the file it just ticked', async () => {
+    // The box is inside the row, and the row is what selects. A tick that also
+    // navigated would move the diff column out from under the reviewer every
+    // time they ticked something off.
+    const { onSelect, onSetViewed } = mount();
+
+    await userEvent.click(check('app\\.ts'));
+
+    expect(onSetViewed).toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('marks every file under a folder at once', async () => {
+    const { onSetViewed } = mount();
+
+    await userEvent.click(check('src'));
+
+    expect(onSetViewed).toHaveBeenCalledWith(['src/app.ts', 'src/beta.ts'], true);
+  });
+
+  it('unmarks a folder only once all of it is viewed', async () => {
+    // Half-viewed reads as partial, and the useful thing to do to a partial
+    // folder is finish it, not undo it.
+    const { onSetViewed } = mount({ viewed: new Map([['src/app.ts', 'VIEWED']]) });
+
+    expect(row('src').getAttribute('aria-checked')).toBe('mixed');
+    await userEvent.click(check('src'));
+
+    expect(onSetViewed).toHaveBeenCalledWith(['src/app.ts', 'src/beta.ts'], true);
+  });
+
+  it('toggles the focused row with the space bar', async () => {
+    const { onSetViewed } = mount();
+
+    row('top').focus();
+    await userEvent.keyboard(' ');
+
+    expect(onSetViewed).toHaveBeenCalledWith(['top.ts'], true);
+  });
+});
+
+describe('moving around', () => {
+  it('keeps only one row in the tab order', () => {
+    mount();
+
+    expect(rows().filter((r) => r.getAttribute('tabindex') === '0')).toHaveLength(1);
+  });
+
+  it('steps down and up with the arrow keys', async () => {
+    const { onSelect } = mount();
+
+    rows()[0]?.focus();
+    await userEvent.keyboard('{ArrowDown}');
+
+    expect(document.activeElement?.getAttribute('data-path')).toBe('docs/readme.md');
+    expect(onSelect).toHaveBeenCalledWith('docs/readme.md');
+  });
+
+  it('does not report a directory as the file being reviewed', async () => {
+    // There is no diff card for a directory. Reporting one would ask the
+    // column to scroll somewhere that does not exist.
+    const { onSelect } = mount();
+
+    rows()[0]?.focus();
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}');
+
+    expect(onSelect).not.toHaveBeenCalledWith('src/');
+  });
+
+  it('jumps to the ends with Home and End', async () => {
+    mount();
+
+    rows()[2]?.focus();
+    await userEvent.keyboard('{End}');
+    expect(document.activeElement?.getAttribute('data-path')).toBe('top.ts');
+
+    await userEvent.keyboard('{Home}');
+    expect(document.activeElement?.getAttribute('data-path')).toBe('docs/');
+  });
+
+  it('selects a file when it is clicked', async () => {
+    const { onSelect } = mount();
+
+    await userEvent.click(row('beta'));
+
+    expect(onSelect).toHaveBeenCalledWith('src/beta.ts');
+  });
+});
+
+describe('folding', () => {
+  it('collapses a directory when it is clicked, and says so', async () => {
+    mount();
+
+    expect(row('src').getAttribute('aria-expanded')).toBe('true');
+    await userEvent.click(row('src'));
+
+    expect(row('src').getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('treeitem', { name: /app\.ts/ })).toBeNull();
+  });
+
+  it('folds and unfolds with the left and right arrows', async () => {
+    mount();
+
+    row('src').focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(row('src').getAttribute('aria-expanded')).toBe('false');
+
+    await userEvent.keyboard('{ArrowRight}');
+    expect(row('src').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('walks out to the parent from a file', async () => {
+    mount();
+
+    row('app\\.ts').focus();
+    await userEvent.keyboard('{ArrowLeft}');
+
+    expect(document.activeElement?.getAttribute('data-path')).toBe('src/');
+  });
+
+  it('opens a folded ancestor when the column moves to a file inside it', async () => {
+    // The column can be scrolled anywhere. A tree that left the selected file
+    // hidden inside a closed folder would be showing the wrong thing.
+    const { rerender } = mount();
+
+    await userEvent.click(row('src'));
+    expect(screen.queryByRole('treeitem', { name: /app\.ts/ })).toBeNull();
+
+    rerender(
+      <FileTree
+        files={FILES}
+        current={{ path: 'src/app.ts', origin: 'scroll' }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(row('app\\.ts').getAttribute('aria-selected')).toBe('true');
+  });
+});
+
+describe('what a row says about its file', () => {
+  it('marks a file with an open conversation', () => {
+    const { container } = mount({
       comments: new Map([['src/app.ts', { total: 2, unresolved: 1 }]]),
     });
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ● ${UNVIEWED_BOX}` });
+    expect(container.querySelector('[data-path="src/app.ts"] .tree-comment')).not.toBeNull();
   });
 
-  it('leaves a row alone when nobody has commented on that file', () => {
-    const options = fileTreeOptions(FILES, {
-      files: FILES,
-      comments: new Map([['src/new.ts', { total: 1, unresolved: 1 }]]),
+  it('marks a settled conversation differently', () => {
+    const { container } = mount({
+      comments: new Map([['src/app.ts', { total: 2, unresolved: 0 }]]),
     });
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ${UNVIEWED_BOX}` });
+    const mark = container.querySelector('[data-path="src/app.ts"] .tree-comment');
+    expect(mark?.getAttribute('data-tone')).toBe('resolved');
   });
 
-  it('reads conversations from the current tally, not the one it was built with', () => {
-    // Same reason as the counts above: options are read once, at construction,
-    // so a tally captured by value would freeze at first paint.
-    const live: FileTreeSources = { files: FILES };
-    const options = fileTreeOptions(FILES, live);
-    live.comments = new Map([['src/app.ts', { total: 1, unresolved: 1 }]]);
+  it('shows the added and removed counts', () => {
+    mount();
 
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({ text: `+12 −3 ● ${UNVIEWED_BOX}` });
+    expect(within(row('app\\.ts')).getByText('+12')).toBeDefined();
+    expect(within(row('app\\.ts')).getByText('−3')).toBeDefined();
   });
 
-  it('leaves a directory row undecorated', () => {
-    const options = fileTreeOptions(FILES, { files: FILES });
+  it('says which files are only noise', () => {
+    const { container } = mount({
+      files: [file('package-lock.json', { noise: true }), file('src/app.ts')],
+    });
 
-    expect(decorationFor(options, 'src/', 'directory')).toBeNull();
+    expect(
+      container.querySelector('[data-path="package-lock.json"]')?.getAttribute('data-noise'),
+    ).toBe('true');
+  });
+
+  it('follows the change type', () => {
+    const { container } = mount({
+      files: [file('added.ts', { changeType: 'ADDED' }), file('gone.ts', { changeType: 'DELETED' })],
+    });
+
+    expect(container.querySelector('[data-path="added.ts"]')?.getAttribute('data-status')).toBe('added');
+    expect(container.querySelector('[data-path="gone.ts"]')?.getAttribute('data-status')).toBe('deleted');
   });
 });
 
-describe('FileTree', () => {
-  it('puts every changed path in the model', () => {
-    const { model } = mount();
+describe('following the diff column', () => {
+  it('selects the file the column scrolled to', () => {
+    mount({ current: { path: 'src/beta.ts', origin: 'scroll' } });
 
-    expect(model.getItem('src/app.ts')).not.toBeNull();
-    expect(model.getItem('src/new.ts')).not.toBeNull();
-    expect(model.getItem('package-lock.json')).not.toBeNull();
+    expect(row('beta').getAttribute('aria-selected')).toBe('true');
   });
 
-  it('groups paths into the directories they came from', () => {
-    const { model } = mount();
-
-    expect(model.getItem('src/')?.isDirectory()).toBe(true);
-  });
-
-  it('reports a file the reviewer selected', () => {
-    const { model, onSelect } = mount();
-
-    act(() => {
-      model.getItem('src/new.ts')?.select();
-    });
-
-    expect(onSelect).toHaveBeenCalledWith('src/new.ts');
-  });
-
-  it('ignores a directory row, which selection also reports', () => {
-    // A plain click on a folder both selects it and toggles expansion, so
-    // `onSelectionChange` hands back paths ending in `/`. There is no diff card
-    // for a directory.
-    const { model, onSelect } = mount();
-
-    act(() => {
-      model.getItem('src/')?.select();
-    });
-
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it('follows arrow-key navigation, which moves focus and not selection', () => {
-    const { model, onSelect } = mount();
-
-    act(() => {
-      model.focusPath('package-lock.json');
-    });
-
-    expect(onSelect).toHaveBeenCalledWith('package-lock.json');
-  });
-
-  it('does not report the same file twice', () => {
-    const { model, onSelect } = mount();
-
-    act(() => {
-      model.getItem('src/new.ts')?.select();
-    });
-    act(() => {
-      model.focusPath('src/new.ts');
-    });
-
-    expect(onSelect.mock.calls.filter(([p]) => p === 'src/new.ts')).toHaveLength(1);
-  });
-
-  it('leaves its own selection alone when the tree is what moved', () => {
-    // The tree already shows what the reviewer clicked. Re-selecting it would
-    // emit another change, which is the first half of a feedback loop.
-    const { model, onSelect, rerender } = mount();
-
-    act(() => {
-      model.getItem('src/app.ts')?.select();
-    });
-    onSelect.mockClear();
-
-    rerender(
-      <FileTree
-        files={FILES}
-        current={{ path: 'src/new.ts', origin: 'tree' }}
-        onSelect={onSelect}
-      />,
-    );
-
-    expect(model.getSelectedPaths()).toEqual(['src/app.ts']);
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it('selects exactly the file the diff column scrolled to', () => {
-    // `select()` is additive and there is no "select only this", so the
-    // previous selection has to be cleared or the tree accumulates rows.
-    const { model, onSelect, rerender } = mount();
-
-    act(() => {
-      model.getItem('src/app.ts')?.select();
-    });
-
-    rerender(
-      <FileTree
-        files={FILES}
-        current={{ path: 'src/new.ts', origin: 'scroll' }}
-        onSelect={onSelect}
-      />,
-    );
-
-    expect(model.getSelectedPaths()).toEqual(['src/new.ts']);
-  });
-
-  it('only ever echoes back the path it was just given', () => {
-    // Selecting fires `onSelectionChange`, so a scroll-driven update does come
-    // back out. It has to name the file the caller already holds, so the
-    // caller's reducer absorbs it instead of moving again.
+  it('does not echo a move the tree itself made', async () => {
+    // The tree already shows what the reviewer clicked. Reporting it back is
+    // the first half of a feedback loop.
     const { onSelect, rerender } = mount();
+
+    await userEvent.click(row('beta'));
     onSelect.mockClear();
 
     rerender(
       <FileTree
         files={FILES}
-        current={{ path: 'src/new.ts', origin: 'scroll' }}
+        current={{ path: 'src/beta.ts', origin: 'tree' }}
         onSelect={onSelect}
       />,
     );
 
-    for (const [path] of onSelect.mock.calls) expect(path).toBe('src/new.ts');
-  });
-
-  it('takes a new file list without rebuilding the model', () => {
-    const { model, rerender } = mount();
-
-    rerender(
-      <FileTree
-        files={[file({ path: 'src/other.ts' })]}
-        current={NO_FILE}
-        onSelect={vi.fn()}
-      />,
-    );
-
-    expect(model.getItem('src/other.ts')).not.toBeNull();
-  });
-
-  it('redraws the counts when the file list changes underneath it', () => {
-    // The one place this file looks inside Pierre's shadow root, deliberately.
-    //
-    // `renderRowDecoration` is constructor-only, there is no `refresh()`, and
-    // `setGitStatus` early-returns on unchanged content — so the decorations
-    // are refreshed by re-setting the icons, which is the one setter with no
-    // equality guard. That is inferred from `@pierre/trees` source rather than
-    // documented, on a package still at `1.0.0-beta.6`. Nothing of ours can
-    // observe whether it worked, and a silent regression here would freeze
-    // every count at first paint. So this asserts on the rendered text.
-    const { container, rerender } = mount();
-    const shadow = () =>
-      container.querySelector('file-tree-container')?.shadowRoot?.textContent ?? '';
-
-    expect(shadow()).toContain('+12');
-
-    // The same paths, with different counts. Changing the *paths* would refresh
-    // the rows through `resetPaths` on its own, which would not exercise this
-    // at all — the counts have to move while the tree's own state stands still.
-    rerender(
-      <FileTree
-        files={FILES.map((f) => ({ ...f, additions: 99 }))}
-        current={NO_FILE}
-        onSelect={vi.fn()}
-      />,
-    );
-
-    expect(shadow()).toContain('+99');
-    expect(shadow()).not.toContain('+12');
-  });
-
-  it('redraws the conversation mark when a thread resolves underneath it', () => {
-    // The same inferred refresh lever as the counts above, driven by a second
-    // source. Thread state lives in the review session, so nothing about the
-    // file list moves when a comment is posted or resolved — without its own
-    // effect the mark would render once at first paint and then lie.
-    const { container, rerender } = mount({
-      comments: new Map([['src/app.ts', { total: 1, unresolved: 1 }]]),
-    });
-    const shadow = () =>
-      container.querySelector('file-tree-container')?.shadowRoot?.textContent ?? '';
-
-    expect(shadow()).toContain('●');
-
-    rerender(
-      <FileTree
-        files={FILES}
-        current={NO_FILE}
-        onSelect={vi.fn()}
-        comments={new Map([['src/app.ts', { total: 1, unresolved: 0 }]])}
-      />,
-    );
-
-    expect(shadow()).toContain('○');
-    expect(shadow()).not.toContain('●');
-  });
-
-  it('says so when nothing changed', () => {
-    const { container } = render(
-      <FileTree files={[]} current={NO_FILE} onSelect={vi.fn()} />,
-    );
-
-    expect(container.textContent).toMatch(/no changed files/i);
-  });
-});
-
-describe('the viewed box', () => {
-  const shadow = (container: HTMLElement) =>
-    container.querySelector('file-tree-container')?.shadowRoot ?? null;
-
-  /** A decoration run, found by the glyph it carries rather than by position. */
-  const run = (container: HTMLElement, text: string): Element | undefined =>
-    [
-      ...(shadow(container)?.querySelectorAll(
-        '[data-item-section="decoration"] span span',
-      ) ?? []),
-    ].find((element) => element.textContent === text);
-
-  const clickIn = (element: Element) => {
-    act(() => {
-      // `composed`, because the handler is delegated to the host in the light
-      // DOM and an uncomposed event never leaves the shadow root.
-      element.dispatchEvent(
-        new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
-      );
-    });
-  };
-
-  it('draws the state the session is holding, not the payload’s', () => {
-    const options = fileTreeOptions(FILES, {
-      files: FILES,
-      viewed: new Map([['src/app.ts', 'VIEWED']]),
-    });
-
-    expect(decorationFor(options, 'src/app.ts')).toMatchObject({
-      text: `+12 −3 ${VIEWED_BOX}`,
-    });
-  });
-
-  it('redraws when a file is marked viewed underneath it', () => {
-    // The same inferred refresh lever as the counts and the conversation mark.
-    // Viewed state lives in the session, so nothing about the file list moves
-    // when a box is ticked.
-    const { container, rerender } = mount({
-      viewed: new Map([['src/app.ts', 'UNVIEWED']]),
-    });
-
-    expect(shadow(container)?.textContent).toContain(UNVIEWED_BOX);
-
-    rerender(
-      <FileTree
-        files={FILES}
-        current={NO_FILE}
-        onSelect={vi.fn()}
-        viewed={new Map([['src/app.ts', 'VIEWED']])}
-      />,
-    );
-
-    expect(shadow(container)?.textContent).toContain(VIEWED_BOX);
-  });
-
-  it('toggles viewed when its box is clicked', () => {
-    const onToggleViewed = vi.fn();
-    const { container } = mount({ onToggleViewed });
-
-    const box = run(container, UNVIEWED_BOX);
-    expect(box).toBeDefined();
-    clickIn(box as Element);
-
-    expect(onToggleViewed).toHaveBeenCalledWith('src/app.ts');
-  });
-
-  it('does not also select the file it just ticked', () => {
-    // The row is a `<button>`, so every click in it is a click on the row. A
-    // tick that also navigated would move the diff column out from under the
-    // reviewer every time they ticked something off.
-    const { container, onSelect } = mount({ onToggleViewed: vi.fn() });
-    onSelect.mockClear();
-
-    clickIn(run(container, UNVIEWED_BOX) as Element);
-
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('leaves a click on the counts alone', () => {
-    // Only the box is a control. The rest of the cell belongs to the row.
-    const onToggleViewed = vi.fn();
-    const { container } = mount({ onToggleViewed });
+  it('survives a file list that changes underneath it', () => {
+    const { rerender } = mount();
 
-    clickIn(run(container, '+12') as Element);
+    rerender(
+      <FileTree files={[file('other/new.ts')]} current={NO_FILE} onSelect={vi.fn()} />,
+    );
 
-    expect(onToggleViewed).not.toHaveBeenCalled();
-  });
-});
-
-describe('the row tooltip', () => {
-  const rowFor = (container: HTMLElement, path: string) =>
-    container
-      .querySelector('file-tree-container')
-      ?.shadowRoot?.querySelector(`[data-item-path="${path}"]`) ?? null;
-
-  const hover = (element: Element) => {
-    act(() => {
-      element.dispatchEvent(
-        new MouseEvent('pointerover', { bubbles: true, composed: true }),
-      );
-    });
-  };
-
-  it('names the whole path on hover, which the row does not', () => {
-    // The row's own `aria-label` is the bare file name, and it carries no
-    // `title` at all — so a path truncated to `…ce/Thing.tsx` had nowhere to
-    // tell the reviewer which one it was.
-    const { container } = mount();
-    const row = rowFor(container, 'src/app.ts');
-
-    hover(row as Element);
-
-    expect(row?.getAttribute('title')).toBe('src/app.ts');
-  });
-
-  it('names a directory without the slash the tree keys it by', () => {
-    const { container } = mount();
-    const row = rowFor(container, 'src/');
-
-    hover(row as Element);
-
-    expect(row?.getAttribute('title')).toBe('src');
+    expect(rows().map((r) => r.getAttribute('data-path'))).toEqual([
+      'other/',
+      'other/new.ts',
+    ]);
   });
 });
