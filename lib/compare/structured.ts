@@ -282,7 +282,14 @@ export function compareJson(
       status: 'unparseable',
       changes: [],
       truncated: false,
-      reason: `${which} of this file is not valid JSON, so there is no structure to compare.`,
+      // Comments are named because they are the overwhelming cause. Half the
+      // `.json` files in a TypeScript repository are really JSONC —
+      // `tsconfig.json`, `.eslintrc.json`, everything under `.vscode` — and
+      // "not valid JSON" on a file the reviewer can see is fine reads as a
+      // defect in this page rather than as a fact about the format.
+      reason:
+        `${which} of this file is not valid JSON — most likely comments or ` +
+        'trailing commas, which this view does not read. Raw shows the change.',
     };
   }
 

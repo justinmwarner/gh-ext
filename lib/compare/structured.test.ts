@@ -129,6 +129,16 @@ describe('compareJson', () => {
     expect(result.reason).toMatch(/new/i);
   });
 
+  it('names comments as the likely cause, because they usually are', () => {
+    // Half the `.json` files in a TypeScript repository are really JSONC.
+    // "Not valid JSON" about a `tsconfig.json` the reviewer can see is fine
+    // reads as a defect in this page rather than a fact about the format.
+    const result = compareJson('{\n  // why\n  "a": 1\n}', '{"a":2}');
+
+    expect(result.status).toBe('unparseable');
+    expect(result.reason).toMatch(/comment/i);
+  });
+
   it('gives up above the node budget rather than walking a generated file', () => {
     // A `package-lock.json` is hundreds of thousands of leaves. Flattening it
     // to find that four versions moved is minutes of main thread for an answer
