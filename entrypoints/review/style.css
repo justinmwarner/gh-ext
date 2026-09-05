@@ -331,12 +331,12 @@ code {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    'strip strip'
-    'detail actions';
-  align-items: center;
+    'strip actions'
+    'detail detail';
+  align-items: end;
   column-gap: var(--gap);
-  row-gap: 4px;
-  padding: 0 0 6px;
+  row-gap: 0;
+  padding: 0 0 5px;
   font-size: 13px;
   border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
   background: light-dark(#ffffff, #0d1117);
@@ -354,7 +354,7 @@ code {
 
 .commit-detail {
   grid-area: detail;
-  padding-left: 12px;
+  padding: 5px 12px 0;
 }
 
 .scope-showing {
@@ -364,7 +364,7 @@ code {
 
 .scope-actions {
   grid-area: actions;
-  padding-right: 12px;
+  padding: 0 12px 6px;
 }
 
 /* Full width, under everything else. */
@@ -375,12 +375,12 @@ code {
 
 /* The whole point of the row: narrowed does not look like whole. A tinted
    band and a left rule, so it reads as a state the page is in rather than as
-   a message about something that happened. */
-.scope-bar[data-scope='narrowed'] {
-  border-left: 4px solid light-dark(#0969da, #4493f8);
-  background: light-dark(#ddf4ff, #121d2f);
-}
+   a message about something that happened.
 
+   Only for the states that are wrong. A scoped diff used to tint the whole bar
+   blue as well, and it no longer needs to: the pressed tab says which commits
+   are on screen, in the control the reviewer is already looking at, and a band
+   behind it was the same fact a second time in a heavier voice. */
 .scope-bar[data-scope='lost'],
 .scope-bar[data-scope='failed'] {
   border-left: 4px solid light-dark(#bf8700, #d29922);
@@ -400,32 +400,35 @@ code {
 /* Scrolls rather than wraps. A wrapped strip changes height as the pull
    request does, and this bar sits above the diff — a second row appearing
    would move the column under whoever is reading it. */
+/* No bottom border of its own: the tabs sit on the bar's floor and open into
+   it, the way the page's own tabs do. */
 .commit-strip {
   display: flex;
+  gap: 2px;
   min-width: 0;
-  padding: 0 12px;
+  padding: 5px 12px 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
 }
 
-/* Tabs rather than pills: an underline reads as "this is the one showing" the
-   way a filled capsule does not, and a run of them under a selected range
-   joins into one bar, which is exactly what a range is. */
+/* Real tabs: rounded at the top, square and open at the bottom, so a selected
+   one reads as attached to the bar underneath rather than as a chip lying on
+   top of it. The border is transparent rather than absent, so selecting a
+   commit does not move its number by a pixel. */
 .commit-tab {
-  position: relative;
   flex: 0 0 auto;
-  min-width: 30px;
-  padding: 7px 10px 8px;
+  min-width: 34px;
+  padding: 8px 14px 9px;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   /* So the strip does not jitter as the numbers gain a digit. */
   font-variant-numeric: tabular-nums;
-  line-height: 16px;
+  line-height: 18px;
   color: light-dark(#59636e, #9198a1);
-  border: 0;
-  border-radius: 6px 6px 0 0;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
   background: none;
   cursor: pointer;
   transition:
@@ -438,20 +441,14 @@ code {
   background: light-dark(#eef1f4, #212830);
 }
 
+/* Grey rather than the accent. The strip is a row of a dozen small controls
+   and a saturated fill on one of them shouts across the whole bar; the shape
+   is already saying which one it is. */
 .commit-tab[aria-pressed='true'] {
   color: light-dark(#1f2328, #e6edf3);
   font-weight: 600;
-}
-
-/* Drawn on a pseudo-element rather than as a border, so selecting a commit
-   does not move its number by the border's width. Flush to the ends, so a
-   range of them is one unbroken bar. */
-.commit-tab[aria-pressed='true']::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 -1px;
-  height: 2px;
-  background: light-dark(#0969da, #4493f8);
+  border-color: light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #212830);
 }
 
 /* One line, one place, always rendered. A line that appears only on hover
