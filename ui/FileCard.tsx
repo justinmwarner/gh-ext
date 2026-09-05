@@ -183,18 +183,14 @@ export function FileCard({
           <span className="deletions">{`${MINUS}${file.deletions}`}</span>
         </span>
 
-        <ViewedCheckbox path={file.path} state={file.viewedState} />
-      </div>
+        {/* On the head row rather than on a line of its own, and that is a
+            constraint rather than a preference. Every card in the column would
+            have grown by a row — `ModeSwitcher` draws nothing for an ordinary
+            source file — and the height of these headers is what decides which
+            files `CodeView` virtualizes in and where `topmostFile` says the
+            reviewer is. One extra row of chrome has already moved that once.
 
-      <div className="file-card-controls">
-        <ModeSwitcher
-          path={file.path}
-          modes={modes}
-          current={mode}
-          onChange={onChangeMode}
-        />
-
-        {/* Only where there is a text diff to take the whitespace out of. On a
+            Only where there is a text diff to take the whitespace out of: on a
             binary, a withheld patch or a rich comparison it would be a button
             with nothing behind it. */}
         {textDiff && (
@@ -211,7 +207,16 @@ export function FileCard({
             Ignore whitespace
           </button>
         )}
+
+        <ViewedCheckbox path={file.path} state={file.viewedState} />
       </div>
+
+      <ModeSwitcher
+        path={file.path}
+        modes={modes}
+        current={mode}
+        onChange={onChangeMode}
+      />
 
       {/* Not `role="status"`. This does not announce an event, it labels what
           is underneath it for as long as it is underneath it — and it is the

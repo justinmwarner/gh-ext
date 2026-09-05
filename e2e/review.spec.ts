@@ -848,6 +848,73 @@ test('a comment expanded into view survives narrowing the diff', async ({
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
 });
 
+test('split view redraws the column, and keeps the comments on it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The layout is the one thing jsdom cannot check at all — it performs no
+  // layout — and this is a control whose entire job is layout. §B.3 promises
+  // that moving between the two needs no annotation change; here is that
+  // promise against the production build, in a browser that lays out.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const diff = page.locator('diffs-container').first().locator('[data-diff-type]').first();
+  await expect(diff).toHaveAttribute('data-diff-type', 'single');
+
+  await chooseScope(page, /split view/i);
+
+  await expect(diff).toHaveAttribute('data-diff-type', 'split');
+  // Still real, highlighted, numbered code — not an empty two-column frame.
+  await expect(
+    page.locator('diffs-container').first().locator('[data-column-number]').first(),
+  ).toBeVisible();
+  // And the thread that was anchored in unified is still anchored in split.
+  await expect(
+    page.getByLabel('Diff').getByText('This allocates on every call.'),
+  ).toBeVisible();
+
+  await scopeChecked(page, /split view/i, 'true');
+});
+
+test('a file can be read without its whitespace, and says that it is', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The label is the requirement, not the decoration: the body under it is not
+  // what anybody else on this pull request is looking at. Checked in the real
+  // build because it is the shipped stylesheet that has to make it visible.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const card = page.locator('[data-file-card="src/app.ts"]');
+  const toggle = card.getByRole('button', { name: /ignore whitespace/i });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+  await toggle.click();
+
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(card.locator('[data-whitespace-note]')).toContainText(
+    /not the diff GitHub is showing/i,
+  );
+  // Per file. The next card is still showing GitHub's diff, unannounced.
+  await expect(
+    page.locator('[data-file-card="src/beta.ts"] [data-whitespace-note]'),
+  ).toHaveCount(0);
+
+  // The column survived being rebuilt under a new key: there is still code.
+  await expect(
+    page.locator('diffs-container').first().locator('[data-column-number]').first(),
+  ).toBeVisible();
+
+  await toggle.click();
+  await expect(card.locator('[data-whitespace-note]')).toHaveCount(0);
+});
+
 test('the numbered strip scopes the diff, and keeps All within reach', async ({
   context,
   extensionId,
