@@ -29,6 +29,16 @@ export type PendingReviewAction =
    */
   | { type: 'review-resumed'; reviewId: string; commentCount: number }
   | { type: 'comment-added' }
+  /**
+   * A queued comment was deleted off the review.
+   *
+   * Not the mirror image of `comment-added`: the count can only ever go down
+   * to zero. On a resumed review it starts at zero while the review holds
+   * comments this session never saw, so deleting one of those has nothing to
+   * subtract — and a negative count would be rendered, which is a worse thing
+   * to read than a floor that is merely low.
+   */
+  | { type: 'comment-removed' }
   | { type: 'submitted' }
   | { type: 'discarded' };
 
@@ -65,6 +75,10 @@ export function reduce(
     case 'comment-added':
       return state.kind === 'pending'
         ? { ...state, commentCount: state.commentCount + 1 }
+        : state;
+    case 'comment-removed':
+      return state.kind === 'pending'
+        ? { ...state, commentCount: Math.max(0, state.commentCount - 1) }
         : state;
     case 'submitted':
     case 'discarded':

@@ -29,6 +29,7 @@ import {
 import {
   ADD_REPLY,
   ADD_THREAD,
+  DELETE_COMMENT,
   DELETE_REVIEW,
   MARK_VIEWED,
   RESOLVE_THREAD,
@@ -36,6 +37,7 @@ import {
   SUBMIT_REVIEW,
   UNMARK_VIEWED,
   UNRESOLVE_THREAD,
+  UPDATE_COMMENT,
 } from '@/lib/github/mutations';
 import type {
   FileViewedState,
@@ -65,6 +67,17 @@ export const REVIEW_SUBMIT = 'review-submit';
 
 /** The failure key for one file's viewed checkbox. */
 export const viewedKey = (path: string): string => `viewed:${path}`;
+
+/**
+ * The failure key for one comment's edit or delete.
+ *
+ * Per comment rather than per thread, unlike the reply and the resolve. A
+ * thread has one reply box and one resolve control, so a thread-keyed message
+ * lands next to the thing that failed; it has as many comments as it likes, and
+ * "Deleting this comment failed" under a thread of six says nothing about
+ * which.
+ */
+export const commentKey = (commentId: string): string => `comment:${commentId}`;
 
 /**
  * GitHub said yes and then did not say what it had made.
@@ -147,6 +160,14 @@ export interface ReviewSessionValue {
   /** Threads whose resolve mutation has not answered yet. */
   resolveInFlight: ReadonlySet<string>;
   /**
+   * Comments whose edit or delete has not answered yet, by comment id.
+   *
+   * One set for both, because a comment cannot be being rewritten and destroyed
+   * at the same time and the guard is the same either way: a second press must
+   * not send a second mutation.
+   */
+  commentInFlight: ReadonlySet<string>;
+  /**
    * Whether GitHub has rejected the token since this page loaded.
    *
    * Page-level rather than per-control because that is what it is: an expired
@@ -157,6 +178,22 @@ export interface ReviewSessionValue {
   tokenRejected: boolean;
   setResolved(threadId: string, resolved: boolean): Promise<void>;
   reply(threadId: string, body: string): Promise<boolean>;
+  /**
+   * Rewrite one comment's body, published or still queued.
+   *
+   * `body` is the finished text, not a delta — the mutation replaces the body
+   * outright. False means the words are still only on this page and the caller
+   * must keep them; true means GitHub has them.
+   */
+  editComment(commentId: string, body: string): Promise<boolean>;
+  /**
+   * Destroy one comment on GitHub. Irreversible, and nothing keeps a copy.
+   *
+   * The caller confirms first. This does not ask — a session method that put a
+   * dialog on screen would be a rule enforced in the one place it cannot be
+   * seen from.
+   */
+  deleteComment(commentId: string): Promise<boolean>;
   postThread(input: NewThreadInput): Promise<boolean>;
   /** Open a PENDING review for later comments to attach to. */
   startReview(): Promise<boolean>;
@@ -257,6 +294,12 @@ function readComment(value: unknown): ReviewComment | null {
     body,
     createdAt: typeof value['createdAt'] === 'string' ? value['createdAt'] : '',
     url: typeof value['url'] === 'string' ? value['url'] : '',
+    // Both default to false on anything but a literal `true`. A permission
+    // invented for a field the payload did not carry offers a control that can
+    // only fail, and on the delete that failure is irreversible on the second
+    // attempt rather than the first.
+    viewerCanUpdate: value['viewerCanUpdate'] === true,
+    viewerCanDelete: value['viewerCanDelete'] === true,
   };
 }
 
@@ -354,6 +397,9 @@ export function ReviewSessionProvider({
   const [viewedInFlight, setViewedInFlight] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [commentInFlight, setCommentInFlight] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [pending, dispatch] = useReducer(reduce, pullRequest, initialPendingReview);
   /**
    * Threads holding a comment that is queued on the pending review.
@@ -365,8 +411,46 @@ export function ReviewSessionProvider({
    */
   const [unpublished, setUnpublished] = useState<ReadonlySet<string>>(() => new Set());
 
+  /**
+   * The same fact one level down: which *comments* are queued.
+   *
+   * Not exposed, and not a duplicate of the set above. The badge is per thread
+   * because that is what carries it, but deleting a comment asks a per-comment
+   * question — was this one of the queued ones, so that the footer's count and
+   * the thread's badge both have to move? A thread routinely holds a published
+   * comment and one queued reply, and the thread-level set cannot tell them
+   * apart.
+   *
+   * Only ever holds comments this session queued. That is the same limit the
+   * footer already states: a resumed review may hold comments made elsewhere,
+   * and they were never counted, so deleting one has nothing to subtract.
+   */
+  const [queued, setQueued] = useState<ReadonlySet<string>>(() => new Set());
+
+  /**
+   * Forget both, together, whenever the review they described has gone.
+   *
+   * Together because they are one fact recorded twice, and a leftover comment
+   * id is not inert: after a submit, those comments are published, and a
+   * `queued` set still holding them would make deleting one of them decrement
+   * the count of whatever review the reviewer opens next.
+   */
+  const forgetQueued = useCallback(() => {
+    setUnpublished(new Set());
+    setQueued(new Set());
+  }, []);
+
   const markUnpublished = useCallback((threadId: string) => {
     setUnpublished((current) => new Set(current).add(threadId));
+  }, []);
+
+  const markQueued = useCallback((commentIds: readonly string[]) => {
+    if (commentIds.length === 0) return;
+    setQueued((current) => {
+      const next = new Set(current);
+      for (const id of commentIds) next.add(id);
+      return next;
+    });
   }, []);
 
   // A refreshed payload replaces the threads outright. Comparing the prop
@@ -391,6 +475,10 @@ export function ReviewSessionProvider({
   resolvingNow.current = resolveInFlight;
   const viewingNow = useRef(viewedInFlight);
   viewingNow.current = viewedInFlight;
+  const commentingNow = useRef(commentInFlight);
+  commentingNow.current = commentInFlight;
+  const queuedNow = useRef(queued);
+  queuedNow.current = queued;
 
   const prId = typeof pullRequest.id === 'string' ? pullRequest.id : '';
 
@@ -398,6 +486,101 @@ export function ReviewSessionProvider({
     setLive((list) =>
       list.map((thread) => (thread.id === threadId ? { ...thread, ...fields } : thread)),
     );
+  }, []);
+
+  /**
+   * Replace one comment's fields wherever it turns out to live.
+   *
+   * By comment id alone, without the thread: the mutation that produces this
+   * takes only the comment id, and asking the caller to also carry the thread
+   * id is asking it to keep two things in step for no gain.
+   */
+  const patchComment = useCallback(
+    (commentId: string, fields: Partial<ReviewComment>) => {
+      setLive((list) =>
+        list.map((thread) =>
+          thread.comments.nodes.some((comment) => comment.id === commentId)
+            ? {
+                ...thread,
+                comments: {
+                  ...thread.comments,
+                  nodes: thread.comments.nodes.map((comment) =>
+                    comment.id === commentId ? { ...comment, ...fields } : comment,
+                  ),
+                },
+              }
+            : thread,
+        ),
+      );
+    },
+    [],
+  );
+
+  /**
+   * Take a deleted comment out of state — and its thread with it, if it was the
+   * last one.
+   *
+   * **GitHub deletes a review thread along with its final comment.** An empty
+   * thread left behind here is a card with nothing in it anchored to a line of
+   * the diff, and every control on it fails against an id that no longer
+   * resolves.
+   *
+   * `totalCount` is decremented rather than recomputed from the nodes, because
+   * it counts comments past the fifty the query fetched. It is floored at the
+   * number actually on screen so it can never claim fewer comments than are
+   * being drawn.
+   *
+   * The two queued-comment bookkeepings are the reason this is not three lines.
+   * The footer's count and the thread's "Not posted yet" badge both describe
+   * comments that are not on the pull request yet, and a delete is the one
+   * thing that can make either of them false: a count that goes on offering to
+   * submit a comment that no longer exists, and a badge on a thread whose only
+   * unposted comment has just gone.
+   */
+  const dropComment = useCallback((commentId: string) => {
+    const thread = liveNow.current.find((candidate) =>
+      candidate.comments.nodes.some((comment) => comment.id === commentId),
+    );
+    if (thread === undefined) return;
+
+    const nodes = thread.comments.nodes.filter((comment) => comment.id !== commentId);
+    const totalCount = Math.max(nodes.length, thread.comments.totalCount - 1);
+    const threadGone = totalCount === 0;
+
+    setLive((list) =>
+      threadGone
+        ? list.filter((candidate) => candidate.id !== thread.id)
+        : list.map((candidate) =>
+            candidate.id === thread.id
+              ? { ...candidate, comments: { totalCount, nodes } }
+              : candidate,
+          ),
+    );
+
+    const wasQueued = queuedNow.current.has(commentId);
+    if (wasQueued) {
+      dispatch({ type: 'comment-removed' });
+      setQueued((current) => {
+        const rest = new Set(current);
+        rest.delete(commentId);
+        return rest;
+      });
+    }
+
+    // Cleared when the thread has gone, and when the comment that was holding
+    // the badge up has. The second case is guarded on `wasQueued` because that
+    // is the only case where this session knows which comments were queued —
+    // a resumed review's are unknown, and clearing the badge on a guess would
+    // tell the reviewer their comment is public when it is not.
+    const stillQueued = nodes.some((comment) => queuedNow.current.has(comment.id));
+    if (threadGone || (wasQueued && !stillQueued)) {
+      setUnpublished((current) => {
+        if (!current.has(thread.id)) return current;
+        const rest = new Set(current);
+        rest.delete(thread.id);
+        return rest;
+      });
+    }
   }, []);
 
   const clearFailure = useCallback((key: string) => {
@@ -516,6 +699,10 @@ export function ReviewSessionProvider({
       const comment = readComment(
         field(response.data.data, 'addPullRequestReviewThreadReply', 'comment'),
       );
+      // Which comment is queued, not just which thread holds one. Deleting
+      // this reply later has to take the badge off a thread whose other
+      // comments are public.
+      if (comment !== null && state.kind === 'pending') markQueued([comment.id]);
       if (comment !== null) {
         setLive((list) =>
           list.map((thread) =>
@@ -533,7 +720,104 @@ export function ReviewSessionProvider({
       }
       return true;
     },
-    [clearFailure, fail, markUnpublished, mutate],
+    [clearFailure, fail, markQueued, markUnpublished, mutate],
+  );
+
+  /**
+   * Rewrite one comment's body.
+   *
+   * Not optimistic, which is the opposite of `setResolved` beside it, and the
+   * asymmetry is deliberate. A resolve is a flag with two values and the wrong
+   * one costs a glance; a body is the writing itself, and showing a correction
+   * as saved and then reverting it is the reviewer believing their typo is
+   * fixed when the original is still what everyone else reads. There is nothing
+   * to gain by guessing: the round trip is one request and the editor stays on
+   * screen throughout.
+   *
+   * No review id is passed, on purpose. A queued comment already belongs to a
+   * review; naming one here could only ever name a different one.
+   */
+  const editComment = useCallback(
+    async (commentId: string, body: string): Promise<boolean> => {
+      // A second save would race the first and could settle on the older text.
+      if (commentingNow.current.has(commentId)) return false;
+
+      const key = commentKey(commentId);
+      clearFailure(key);
+      setCommentInFlight((current) => new Set(current).add(commentId));
+
+      const response = await mutate(UPDATE_COMMENT, {
+        pullRequestReviewCommentId: commentId,
+        body,
+      });
+
+      setCommentInFlight((current) => {
+        const rest = new Set(current);
+        rest.delete(commentId);
+        return rest;
+      });
+
+      if (!response.ok) {
+        fail(key, `Saving this edit failed: ${response.error.message}`);
+        return false;
+      }
+
+      // Mutations do not opt into partial responses, so `ok` means GitHub
+      // really applied it — which is why `{ body }` is a safe fallback for a
+      // payload that came back in an unexpected shape. It is what was sent,
+      // and it is now what is stored.
+      const payload = field(
+        response.data.data,
+        'updatePullRequestReviewComment',
+        'pullRequestReviewComment',
+      );
+      const updated = readComment(payload);
+      patchComment(commentId, updated ?? { body });
+      return true;
+    },
+    [clearFailure, fail, mutate, patchComment],
+  );
+
+  /**
+   * Destroy one comment on GitHub.
+   *
+   * Not optimistic either, and for a stronger reason than the edit above: there
+   * is no rollback. A comment removed from the page and then restored because
+   * the request failed reads as the delete having been undone by somebody else,
+   * and the reviewer has no way to tell that from the truth. So nothing moves
+   * until GitHub has agreed.
+   *
+   * The confirmation lives in the component, not here. A session method that
+   * put a dialog on screen would enforce the rule in the one place nobody
+   * reviewing the UI would look for it.
+   */
+  const deleteComment = useCallback(
+    async (commentId: string): Promise<boolean> => {
+      if (commentingNow.current.has(commentId)) return false;
+
+      const key = commentKey(commentId);
+      clearFailure(key);
+      setCommentInFlight((current) => new Set(current).add(commentId));
+
+      // `id`, not `pullRequestReviewCommentId` — the delete input is spelled
+      // differently from the update input. See DELETE_COMMENT.
+      const response = await mutate(DELETE_COMMENT, { id: commentId });
+
+      setCommentInFlight((current) => {
+        const rest = new Set(current);
+        rest.delete(commentId);
+        return rest;
+      });
+
+      if (!response.ok) {
+        fail(key, `Deleting this comment failed: ${response.error.message}`);
+        return false;
+      }
+
+      dropComment(commentId);
+      return true;
+    },
+    [clearFailure, dropComment, fail, mutate],
   );
 
   /**
@@ -658,11 +942,14 @@ export function ReviewSessionProvider({
       }
 
       const created = takeThread(added.data.data);
-      if (created !== null) markUnpublished(created.id);
+      if (created !== null) {
+        markUnpublished(created.id);
+        markQueued(created.comments.nodes.map((comment) => comment.id));
+      }
       dispatch({ type: 'comment-added' });
       return true;
     },
-    [addThread, fail, markUnpublished, takeThread],
+    [addThread, fail, markQueued, markUnpublished, takeThread],
   );
 
   /**
@@ -751,7 +1038,10 @@ export function ReviewSessionProvider({
       if (!submitted.ok) {
         dispatch({ type: 'review-started', reviewId });
         dispatch({ type: 'comment-added' });
-        if (created !== null) markUnpublished(created.id);
+        if (created !== null) {
+          markUnpublished(created.id);
+          markQueued(created.comments.nodes.map((comment) => comment.id));
+        }
         fail(
           REVIEW_SUBMIT,
           `Your comment was saved but has not been posted: ${submitted.error.message} ` +
@@ -762,7 +1052,16 @@ export function ReviewSessionProvider({
 
       return true;
     },
-    [addThread, fail, markUnpublished, mutate, openOrJoinReview, queueThread, takeThread],
+    [
+      addThread,
+      fail,
+      markQueued,
+      markUnpublished,
+      mutate,
+      openOrJoinReview,
+      queueThread,
+      takeThread,
+    ],
   );
 
   const postThread = useCallback(
@@ -864,7 +1163,7 @@ export function ReviewSessionProvider({
         // into a review that is gone, with a reload the only way out.
         if ((await reviewPresence(state.reviewId)) === 'gone') {
           dispatch({ type: 'submitted' });
-          setUnpublished(new Set());
+          forgetQueued();
           fail(
             REVIEW_SUBMIT,
             'This review is no longer open on GitHub — it was submitted or ' +
@@ -884,10 +1183,10 @@ export function ReviewSessionProvider({
       dispatch({ type: 'submitted' });
       // Posted now, so nothing is outstanding. Leaving the marks would keep
       // saying otherwise on threads that are live on GitHub.
-      setUnpublished(new Set());
+      forgetQueued();
       return true;
     },
-    [clearFailure, fail, mutate, reviewPresence],
+    [clearFailure, fail, forgetQueued, mutate, reviewPresence],
   );
 
   /**
@@ -913,9 +1212,9 @@ export function ReviewSessionProvider({
     }
 
     dispatch({ type: 'discarded' });
-    setUnpublished(new Set());
+    forgetQueued();
     return true;
-  }, [clearFailure, fail, mutate]);
+  }, [clearFailure, fail, forgetQueued, mutate]);
 
   /**
    * Mark a file viewed, or take the mark back.
@@ -994,9 +1293,12 @@ export function ReviewSessionProvider({
       viewed,
       viewedInFlight,
       resolveInFlight,
+      commentInFlight,
       tokenRejected,
       setResolved,
       reply,
+      editComment,
+      deleteComment,
       postThread,
       startReview,
       submitReview,
@@ -1018,9 +1320,12 @@ export function ReviewSessionProvider({
       viewed,
       viewedInFlight,
       resolveInFlight,
+      commentInFlight,
       tokenRejected,
       setResolved,
       reply,
+      editComment,
+      deleteComment,
       postThread,
       startReview,
       submitReview,

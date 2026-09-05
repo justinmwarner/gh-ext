@@ -11,15 +11,24 @@
  * fence, which is pulled out and shown as the proposed replacement it is —
  * that is the content of the comment, not its formatting.
  *
- * Permission flags disable controls rather than hiding them or letting the
- * mutation fail: a reviewer who cannot resolve should be able to see that they
- * cannot, not discover it from an error.
+ * Permission flags never let a mutation fail that could have been prevented,
+ * but they are honoured two different ways and the difference is what the
+ * absence would mean:
+ *
+ * - **Thread controls are disabled.** Reply and Resolve are offered once, to
+ *   every reader of the thread. A disabled Resolve says "not you", which is
+ *   information; removing it would leave a reviewer wondering where it went.
+ * - **Comment controls are absent.** Edit and Delete belong to the author of
+ *   the comment they sit on. On the four comments in a thread that somebody
+ *   else wrote, a disabled Delete says nothing at all — it is six words of
+ *   clutter per comment, in the way of the conversation. Same rule as the
+ *   onion-skin mode that is not offered for a one-sided image.
  */
 
 import { useState } from 'react';
 import type { ReviewComment, ReviewThread } from '@/lib/github/types';
 import { threadPosition } from './reviewThreads';
-import { useReviewSession } from './reviewSession';
+import { commentKey, useReviewSession } from './reviewSession';
 import { useShortcutTarget } from './shortcutTargets';
 import { splitBody } from './suggestion';
 import { formatTimestamp } from './timestamp';
@@ -52,14 +61,161 @@ function Body({ comment }: { comment: ReviewComment }) {
   );
 }
 
+/**
+ * The comment's body, swapped for a box holding the same words.
+ *
+ * Seeded from the comment rather than starting empty, because
+ * `updatePullRequestReviewComment` replaces the body outright — an editor that
+ * opened blank would make Save an erase. The draft is local to this component
+ * and outlives a failed save on purpose: the words the reviewer meant are then
+ * the only copy of them anywhere, and closing the box would throw them away
+ * while the wrong body is still what everyone else reads.
+ */
+function CommentEditor({
+  comment,
+  onDone,
+}: {
+  comment: ReviewComment;
+  onDone: () => void;
+}) {
+  const session = useReviewSession();
+  const [body, setBody] = useState(comment.body);
+  const inFlight = session.commentInFlight.has(comment.id);
+  // An empty body is not an edit, it is a deletion done the wrong way round —
+  // and there is a control for that beside this one.
+  const empty = body.trim() === '';
+
+  return (
+    <form
+      className="comment-edit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (empty || inFlight) return;
+        void session.editComment(comment.id, body).then((saved) => {
+          if (saved) onDone();
+        });
+      }}
+    >
+      <textarea
+        className="comment-edit-input"
+        aria-label="Edit this comment"
+        value={body}
+        disabled={inFlight}
+        onChange={(event) => setBody(event.target.value)}
+      />
+      <div className="comment-edit-actions">
+        <button type="submit" className="button" disabled={empty || inFlight}>
+          {inFlight ? 'Saving…' : 'Save'}
+        </button>
+        <button type="button" className="button" disabled={inFlight} onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The second confirmation before a comment is destroyed.
+ *
+ * Inline and in the flow of the thread rather than a dialog, matching the
+ * pending review's own discard: the thing being deleted stays visible above the
+ * question, so "this one?" is answerable by looking rather than by remembering.
+ *
+ * The words say where the comment goes and that it does not come back. Unlike
+ * an edit, GitHub keeps no earlier version of a deleted comment, so there is
+ * nowhere to recover it from — including github.com.
+ */
+function DeleteConfirm({
+  comment,
+  onDone,
+}: {
+  comment: ReviewComment;
+  onDone: () => void;
+}) {
+  const session = useReviewSession();
+  const inFlight = session.commentInFlight.has(comment.id);
+
+  return (
+    <div className="comment-confirm" role="group" aria-label="Delete this comment">
+      <p>This deletes the comment on GitHub, for everyone. It cannot be undone.</p>
+      <button
+        type="button"
+        className="button danger"
+        disabled={inFlight}
+        onClick={() => {
+          void session.deleteComment(comment.id).then((deleted) => {
+            // Closed either way. On success this component is unmounted with
+            // the comment; on failure the message below explains, and leaving
+            // a primed Delete button under it invites a second press at
+            // whatever just refused the first.
+            if (!deleted) onDone();
+          });
+        }}
+      >
+        {inFlight ? 'Deleting…' : 'Delete comment'}
+      </button>
+      <button type="button" className="button" disabled={inFlight} onClick={onDone}>
+        Keep it
+      </button>
+    </div>
+  );
+}
+
 function Comment({ comment }: { comment: ReviewComment }) {
+  const session = useReviewSession();
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const failure = session.failures.get(commentKey(comment.id));
+  // One box at a time, and the two entry points withdrawn while either is
+  // open. An editor and a delete confirmation side by side ask the reviewer to
+  // hold two intentions about the same words at once.
+  const boxOpen = editing || confirming;
+
   return (
     <li className="comment">
       <div className="comment-head">
         <span className="comment-author">{comment.author?.login ?? 'Unknown user'}</span>
         <time dateTime={comment.createdAt}>{formatTimestamp(comment.createdAt)}</time>
+        {!boxOpen && (comment.viewerCanUpdate || comment.viewerCanDelete) && (
+          <span className="comment-actions">
+            {comment.viewerCanUpdate && (
+              <button
+                type="button"
+                className="comment-action"
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </button>
+            )}
+            {comment.viewerCanDelete && (
+              <button
+                type="button"
+                className="comment-action comment-action-danger"
+                onClick={() => setConfirming(true)}
+              >
+                Delete
+              </button>
+            )}
+          </span>
+        )}
       </div>
-      <Body comment={comment} />
+
+      {editing ? (
+        <CommentEditor comment={comment} onDone={() => setEditing(false)} />
+      ) : (
+        <Body comment={comment} />
+      )}
+
+      {confirming && (
+        <DeleteConfirm comment={comment} onDone={() => setConfirming(false)} />
+      )}
+
+      {failure !== undefined && (
+        <p className="thread-error" role="alert">
+          {failure}
+        </p>
+      )}
     </li>
   );
 }

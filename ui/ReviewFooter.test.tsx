@@ -348,10 +348,12 @@ describe('reviewing your own pull request', () => {
 
 describe('discarding', () => {
   /**
-   * The control is deliberately hidden. `deletePullRequestReview` is the only
-   * destructive thing this extension can do — it removes a pending review and
-   * every comment queued on it, including ones made in GitHub's own UI that
-   * this page never saw, and nothing brings them back.
+   * The control is deliberately hidden. `deletePullRequestReview` is the
+   * widest destructive thing this extension can do — it removes a pending
+   * review and every comment queued on it, including ones made in GitHub's own
+   * UI that this page never saw, and nothing brings them back. The per-comment
+   * Delete on `ThreadCard` is offered because its blast radius is exactly the
+   * comment on screen.
    *
    * The wiring stays covered here so re-enabling it is a one-line change to
    * SHOW_DISCARD rather than a rebuild. These drive the session directly,

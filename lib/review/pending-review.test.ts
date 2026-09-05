@@ -18,6 +18,45 @@ describe('pending review state machine', () => {
     });
   });
 
+  it('uncounts a queued comment that was deleted', () => {
+    // Deleting the one comment on a review and leaving the footer saying "1
+    // comment not posted yet" invites the reviewer to submit a review that is
+    // now empty — the same lie the resumed-review wording exists to avoid.
+    let s = reduce(initialState(), { type: 'review-started', reviewId: 'R_1' });
+    s = reduce(s, { type: 'comment-added' });
+    s = reduce(s, { type: 'comment-removed' });
+    expect(s).toEqual({
+      kind: 'pending',
+      reviewId: 'R_1',
+      commentCount: 0,
+      countIsComplete: true,
+    });
+  });
+
+  it('does not count below zero when the deleted comment was never counted', () => {
+    // A resumed review starts at zero and holds comments this session never
+    // saw, so deleting one of those has nothing to subtract. Negative would be
+    // rendered, and "-1 comments" is worse than a floor that is merely low.
+    let s = reduce(initialState(), {
+      type: 'review-resumed',
+      reviewId: 'R_1',
+      commentCount: 0,
+    });
+    s = reduce(s, { type: 'comment-removed' });
+    expect(s).toEqual({
+      kind: 'pending',
+      reviewId: 'R_1',
+      commentCount: 0,
+      countIsComplete: false,
+    });
+  });
+
+  it('ignores comment-removed while browsing', () => {
+    expect(reduce({ kind: 'browse' }, { type: 'comment-removed' })).toEqual({
+      kind: 'browse',
+    });
+  });
+
   it('ignores comment-added while browsing', () => {
     expect(reduce({ kind: 'browse' }, { type: 'comment-added' })).toEqual({ kind: 'browse' });
   });

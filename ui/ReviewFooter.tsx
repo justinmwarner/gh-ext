@@ -91,10 +91,16 @@ interface SubmitAction {
 /**
  * Whether the Discard control is offered.
  *
- * Off. Discarding calls `deletePullRequestReview`, which is the only
+ * Off. Discarding calls `deletePullRequestReview`, which is the widest
  * destructive thing this extension can do — it removes a pending review and
  * every comment queued on it, including comments made in GitHub's own UI that
  * this page has never seen, and nothing brings them back.
+ *
+ * That blast radius is the whole objection, and it is what distinguishes this
+ * from the per-comment Delete on `ThreadCard`, which is offered: deleting one
+ * comment destroys exactly the comment on screen, and only where
+ * `viewerCanDelete` says the viewer may. Discarding destroys an unknown number
+ * of comments the reviewer cannot see from here.
  *
  * The machinery stays wired and tested so this is a one-line change rather
  * than an archaeology exercise. Discarding meanwhile is GitHub's job, and the

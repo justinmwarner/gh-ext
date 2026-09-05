@@ -350,12 +350,69 @@ have no producer. Clearing only local state would leave the `PENDING` review and
 every comment queued on it sitting on GitHub, so the next visit would silently
 resume a review the reviewer believes they abandoned.
 
-This is the one destructive mutation in the extension. It deletes queued review
+The widest destructive mutation in the extension. It deletes queued review
 comments that exist nowhere else. The UI requires an explicit second
-confirmation before calling it.
+confirmation before calling it — and is currently not offered at all
+(`SHOW_DISCARD = false` in `ui/ReviewFooter.tsx`), because a resumed review may
+hold comments the page has never seen.
 
 Validated against the live schema with a fabricated review id: returns
 `NOT_FOUND` only, so the document is schema-valid.
+
+### Edit a comment — `updatePullRequestReviewComment`
+
+```
+clientMutationId: String
+pullRequestReviewCommentId: ID!
+body: String!
+```
+
+Payload field: `pullRequestReviewComment`.
+
+`body` is `String!` and **replaces** the body — there is no patch form, so the
+caller sends the finished text. Works on a comment queued on a `PENDING` review
+as well as a published one: a draft comment is an ordinary
+`PullRequestReviewComment`. No review id is taken and none is wanted; the
+comment already belongs to a review.
+
+GitHub keeps the earlier versions (`userContentEdits`), which is why this needs
+no confirmation.
+
+### Delete a comment — `deletePullRequestReviewComment`
+
+```
+clientMutationId: String
+id: ID!
+```
+
+Payload fields: `pullRequestReview`, `pullRequestReviewComment`.
+
+**The input field is `id`, not `pullRequestReviewCommentId`.** The update above
+takes the long name and this takes the short one; both were introspected on
+2026-09-05. A wrong input field name is HTTP 200 with a validation error, so
+the mistake reads as a comment that quietly refused to go away.
+
+Only `pullRequestReview` is selected. Reading back the comment that was just
+destroyed invites a caller to merge it into state.
+
+**Deleting a thread's last comment deletes the thread.** The caller has to drop
+the thread rather than leave an empty one anchored to a line of the diff.
+
+Irreversible, and nothing keeps a copy — `userContentEdits` goes with the
+comment. `ThreadCard` asks for an explicit second confirmation before calling
+it, and offers the control only where `viewerCanDelete` is true.
+
+### Whether the viewer may edit or delete a comment
+
+`PullRequestReviewComment` implements `Updatable` and `Deletable`, so it carries
+`viewerCanUpdate` and `viewerCanDelete` (introspected 2026-09-05). Both are
+**per comment**, not per thread — one thread routinely holds a comment the
+viewer wrote and four they did not, and there is no thread-level equivalent.
+
+They are selected in `REVIEW_THREAD_FIELDS` and in every mutation document that
+returns a comment. The mutations matter as much as the read: without them the
+comment a reviewer has just written comes back with both flags falsy, so the
+one comment they cannot fix a typo in is the one they just made.
 
 ### Viewed state — `markFileAsViewed` / `unmarkFileAsViewed`
 
@@ -598,6 +655,11 @@ on 2026-09-01: `ADD_THREAD`, `ADD_REPLY`, `RESOLVE_THREAD`, `UNRESOLVE_THREAD`,
 `START_REVIEW`, `SUBMIT_REVIEW`, `MARK_VIEWED`, `UNMARK_VIEWED`. Every one
 returned `NOT_FOUND` only.
 
+Four more on 2026-09-05, with the same dead id, each returning `NOT_FOUND`
+only: the two new `UPDATE_COMMENT` and `DELETE_COMMENT`, plus `ADD_THREAD` and
+`ADD_REPLY` re-probed because their comment selections gained
+`viewerCanUpdate` and `viewerCanDelete` that day.
+
 The payload field names were separately introspected and are confirmed:
 
 | Mutation | Payload field |
@@ -607,6 +669,8 @@ The payload field names were separately introspected and are confirmed:
 | `resolveReviewThread` / `unresolveReviewThread` | `thread` |
 | `addPullRequestReview` | `pullRequestReview` (also `reviewEdge`) |
 | `submitPullRequestReview` | `pullRequestReview` |
+| `updatePullRequestReviewComment` | `pullRequestReviewComment` |
+| `deletePullRequestReviewComment` | `pullRequestReview` (also `pullRequestReviewComment`) |
 | `markFileAsViewed` / `unmarkFileAsViewed` | `pullRequest` |
 
 Re-run this probe after editing any mutation. It is the only check that catches

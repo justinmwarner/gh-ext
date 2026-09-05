@@ -1446,6 +1446,83 @@ button.scope-showing:hover {
   color: light-dark(#1f2328, #e6edf3);
 }
 
+/* Pushed to the far end of the head row, away from the author and the
+   timestamp: those two are what the eye reads first on a comment, and a
+   control sitting between them would be read as part of the attribution. */
+.comment-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Text, not a button shape. These are offered on every comment the reviewer
+   wrote, so in a long thread they repeat — a row of bordered buttons would
+   compete with the writing they belong to. Same size as the head row they sit
+   in, so they take no extra height. */
+.comment-action {
+  padding: 0;
+  font: inherit;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.comment-action:hover {
+  color: light-dark(#1f2328, #e6edf3);
+}
+
+/* The one irreversible control on a comment, and the only place on the card
+   that is red. */
+.comment-action-danger:hover {
+  color: light-dark(#cf222e, #f85149);
+}
+
+.comment-edit {
+  margin-top: 6px;
+}
+
+.comment-edit-input {
+  display: block;
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 6px 8px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+  background: light-dark(#ffffff, #0d1117);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+.comment-edit-actions {
+  display: flex;
+  gap: var(--gap);
+  margin-top: 6px;
+}
+
+/* The same amber-bordered box the pending review's own discard uses, because
+   it is the same kind of question: this destroys something on GitHub and
+   nothing brings it back. */
+.comment-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 13px;
+  border: 1px solid light-dark(#d29922, #9e6a03);
+  border-radius: 6px;
+}
+
+.comment-confirm p {
+  flex: 1 1 200px;
+  margin: 0;
+}
+
 /* Bodies are Markdown rendered as plain text — this project has no Markdown
    renderer and takes no dependency for one. `pre-wrap` at least keeps the
    author's own line breaks, which is most of what is lost otherwise. */
