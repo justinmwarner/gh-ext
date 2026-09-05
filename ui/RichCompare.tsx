@@ -27,6 +27,7 @@ import {
   imageMediaType,
   syntaxOf,
 } from '@/lib/compare/modes';
+import { compareMarkdown } from '@/lib/compare/markdown';
 import { compareNotebooks, parseNotebook } from '@/lib/compare/notebook';
 import { compareStructured } from '@/lib/compare/structured';
 import { compareTables, delimiterFor, parseDelimited } from '@/lib/compare/tabular';
@@ -34,6 +35,7 @@ import type { BlobRefs } from './blobLoader';
 import { useImageSides, useTextSides } from './fileSides';
 import { ImageCompare, type ImageVariant } from './ImageCompare';
 import { JsonFormatted, JsonKeyPaths } from './JsonCompare';
+import { MarkdownCompare } from './MarkdownCompare';
 import { NotebookCompare } from './NotebookCompare';
 import type { ReviewFile } from './reviewFiles';
 import { TableCompare } from './TableCompare';
@@ -118,6 +120,17 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
     [syntax, text.status, text.before, text.after],
   );
 
+  // Rendering and word-diffing two documents, which is the expensive step in
+  // this file — see `HTML_DIFF_BUDGET`. Memoized on the two sides, so a
+  // re-render caused by anything else on the card does not pay for it again.
+  const markdown = useMemo(
+    () =>
+      kind !== 'markdown' || text.status !== 'ready'
+        ? null
+        : compareMarkdown(text.before, text.after),
+    [kind, text.status, text.before, text.after],
+  );
+
   const notebook = useMemo(() => {
     if (kind !== 'notebook' || text.status !== 'ready') return null;
     const before = parseNotebook(text.before ?? '{"cells":[]}');
@@ -195,6 +208,10 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
         showOutputs={mode === 'notebook:outputs'}
       />
     );
+  }
+
+  if (markdown !== null) {
+    return <MarkdownCompare comparison={markdown} />;
   }
 
   return null;
