@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    // Every file in this repository is a module. The bundler resolves them.
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "es2020",
+    "strict": true,
+    // The one that catches the most real bugs, and the one people turn off.
+    "noUncheckedIndexedAccess": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+}
