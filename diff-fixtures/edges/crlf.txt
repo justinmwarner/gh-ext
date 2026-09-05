@@ -1,2 +1,3 @@
 Carriage returns and line feeds.
 Every line here ends CRLF.
+A third line, also CRLF.
