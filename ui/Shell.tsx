@@ -43,6 +43,7 @@ import { ShortcutHelp } from './ShortcutHelp';
 import { TopBar } from './TopBar';
 import { type ReviewView, ViewSwitcher, viewId, viewTabId } from './ViewSwitcher';
 import { DeniedNotice } from './DeniedNotice';
+import { HeadMovedNotice } from './HeadMovedNotice';
 import { TokenRejectedNotice } from './TokenRejectedNotice';
 import { TruncationNotice } from './TruncationNotice';
 import { type CurrentFile, NO_FILE, fromCommand, fromScroll, fromTree } from './currentFile';
@@ -54,6 +55,7 @@ import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 import { orderedThreads } from './reviewThreads';
 import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
 import { useCompareDiff } from './useCompareDiff';
+import { useHeadMoved } from './useHeadMoved';
 import { useKeymap } from './useKeymap';
 
 /** Which overlay is open. Only ever one: they all want the same keystrokes. */
@@ -100,6 +102,16 @@ export function Shell({
 function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => void }) {
   const session = useReviewSession();
   const targets = useShortcutTargets();
+
+  /**
+   * Whether the pull request has moved since this payload was read.
+   *
+   * Here rather than in `usePrPayload`, which owns the load: this is not a
+   * fourth load state but a fact *about* the one on screen, and the answer has
+   * to be readable next to a session that knows whether a review is open —
+   * because that is what decides whether reloading costs the reviewer anything.
+   */
+  const headMoved = useHeadMoved(payload.ref, payload.headSha);
 
   const wholeDiff = useMemo(() => reviewFiles(payload), [payload]);
   const [current, setCurrent] = useState<CurrentFile>(NO_FILE);
@@ -365,6 +377,19 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   return (
     <div className="shell" data-current-file={current.path ?? ''} data-view={view}>
       <TopBar payload={payload} />
+      {/* First of the banners, because it is the only one that says the page
+          below is out of date rather than incomplete — and because it is the
+          only one with an expiry: the other two describe this payload forever,
+          while this one is about a commit that is getting further away. */}
+      {headMoved.movedTo !== null && (
+        <HeadMovedNotice
+          loaded={payload.headSha}
+          movedTo={headMoved.movedTo}
+          reviewPending={session.pending.kind === 'pending'}
+          onReload={retry}
+          onDismiss={headMoved.dismiss}
+        />
+      )}
       <TruncationNotice
         truncated={payload.truncated}
         pr={payload.ref}
