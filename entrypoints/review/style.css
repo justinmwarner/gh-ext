@@ -1339,6 +1339,37 @@ button.scope-showing:hover {
   align-items: center;
 }
 
+/* The pull request moved while it was being read. Blue rather than the amber
+   the two banners above it use, and the difference is the point: those say the
+   page arrived incomplete, which is a fault. This says the world moved on,
+   which is not one — nothing here is broken and nothing needs doing unless the
+   reviewer decides it does. Same shape as its neighbours, so a page carrying
+   two of them still reads as one column of notices. */
+.head-moved-notice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0 16px 12px;
+  border-left-color: light-dark(#0969da, #4493f8);
+}
+
+.head-moved-notice p {
+  margin: 0 0 4px;
+}
+
+.head-moved-notice p:last-child {
+  margin-bottom: 0;
+}
+
+/* The commits, in the same face the commit list and the picker set them in.
+   A reviewer comparing what is on screen against what `git log` just told them
+   should not have to work out whether these are the same kind of thing. */
+.head-moved-notice code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
 /* ------------------------------------------------------------ full pages */
 
 .fullpage {

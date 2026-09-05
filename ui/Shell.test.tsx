@@ -6,15 +6,17 @@
  * reaches them, and that the one thing no view may do is lose a thread.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Shell } from './Shell';
 import { request } from './background';
+import { HEAD_CHECK_FLOOR_MS } from './useHeadMoved';
 import {
   fileFixture,
   prPayload,
   prPayloadWithFiles,
+  pullRequestNode,
   reviewThread,
 } from './prPayload.fixture';
 
@@ -24,7 +26,32 @@ const requestMock = request as unknown as Mock;
 
 beforeEach(() => {
   requestMock.mockReset();
+  clockOffset = 0;
 });
+
+/** A head commit that is not the fixture's. */
+const PUSHED = 'b'.repeat(40);
+
+const realNow = Date.now.bind(Date);
+let clockOffset = 0;
+
+/**
+ * Come back to the tab, far enough after the last check to be worth asking.
+ *
+ * The offset accumulates, so two of these are two checks rather than one and a
+ * silent no-op — which is the difference between testing dismissal and testing
+ * nothing. The clock is only bent across the dispatch itself: `useHeadMoved`
+ * compares against the floor synchronously inside its listener, so there is no
+ * reason to leave `Date.now` frozen over the interactions that follow.
+ */
+const refocusPastTheFloor = () => {
+  clockOffset += HEAD_CHECK_FLOOR_MS;
+  const spy = vi.spyOn(Date, 'now').mockReturnValue(realNow() + clockOffset);
+  act(() => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  spy.mockRestore();
+};
 
 describe('Shell', () => {
   it('renders the top bar, the view switcher and the diff', () => {
@@ -310,5 +337,94 @@ describe('when the token stops working mid-review', () => {
     });
     // And the diff is still there to read.
     expect(document.querySelector('[data-file-card]')).not.toBeNull();
+  });
+
+  it('says when the pull request has moved on since the page loaded', async () => {
+    // The reviewer was elsewhere — which is where pushes come from — and the
+    // line numbers under them now belong to a patch that no longer exists.
+    requestMock.mockResolvedValue({ ok: true, data: { headSha: PUSHED } });
+    render(<Shell retry={() => {}} payload={prPayload()} />);
+
+    refocusPastTheFloor();
+
+    await waitFor(() => {
+      expect(screen.getByText(/new commits have been pushed/i)).toBeTruthy();
+    });
+    // And the diff it was reading is untouched underneath.
+    expect(screen.getByRole('main')).toBeDefined();
+  });
+
+  it('leaves the reload to the reviewer', async () => {
+    // Never automatic. Rebuilding the file list under someone mid-comment is a
+    // worse outcome than the staleness it would fix.
+    const retry = vi.fn();
+    requestMock.mockResolvedValue({ ok: true, data: { headSha: PUSHED } });
+    render(<Shell retry={retry} payload={prPayload()} />);
+
+    refocusPastTheFloor();
+    await waitFor(() => {
+      expect(screen.getByText(/new commits have been pushed/i)).toBeTruthy();
+    });
+    expect(retry).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: /^reload at/i }));
+
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes "keep reading" for an answer', async () => {
+    // Dismissal has to reach the hook, not just the banner: the check runs
+    // again on the next focus and would put the same commit straight back.
+    requestMock.mockResolvedValue({ ok: true, data: { headSha: PUSHED } });
+    render(<Shell retry={() => {}} payload={prPayload()} />);
+
+    refocusPastTheFloor();
+    await waitFor(() => {
+      expect(screen.getByText(/new commits have been pushed/i)).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /^keep reading/i }));
+    expect(screen.queryByText(/new commits have been pushed/i)).toBeNull();
+
+    // And it stays gone when the same commit is reported again.
+    refocusPastTheFloor();
+    await act(async () => {});
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/new commits have been pushed/i)).toBeNull();
+  });
+
+  it('warns that a reload costs the summary when a review is open', async () => {
+    // The queued comments are on GitHub and survive; the words typed into the
+    // footer are component state and do not. A reviewer who reloads because we
+    // suggested it must not be the one to discover that.
+    requestMock.mockResolvedValue({ ok: true, data: { headSha: PUSHED } });
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayload({
+          pullRequest: pullRequestNode({ viewerPendingReview: { id: 'PRR_1' } }),
+        })}
+      />,
+    );
+
+    refocusPastTheFloor();
+
+    await waitFor(() => {
+      expect(screen.getByText(/summary typed into the review bar/i)).toBeTruthy();
+    });
+  });
+
+  it('says nothing about a head commit that has not moved', async () => {
+    requestMock.mockResolvedValue({
+      ok: true,
+      data: { headSha: prPayload().headSha },
+    });
+    render(<Shell retry={() => {}} payload={prPayload()} />);
+
+    refocusPastTheFloor();
+    await act(async () => {});
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/new commits have been pushed/i)).toBeNull();
   });
 });
