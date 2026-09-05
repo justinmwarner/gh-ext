@@ -21,7 +21,7 @@ import { useMemo } from 'react';
 import { MultiFileDiff } from '@pierre/diffs/react';
 import type { FileDiffOptions } from '@pierre/diffs';
 import type { JsonComparison } from '@/lib/compare/structured';
-import { formatJson } from '@/lib/compare/structured';
+import { SYNTAX_NAMES, type StructuredSyntax, formatStructured } from '@/lib/compare/syntax';
 
 /**
  * How much re-indented JSON to hand the diff renderer, per side.
@@ -89,18 +89,20 @@ export function JsonKeyPaths({ comparison }: { comparison: JsonComparison }) {
 
 export function JsonFormatted({
   path,
+  syntax,
   before,
   after,
 }: {
   path: string;
+  syntax: StructuredSyntax;
   before: string | null;
   after: string | null;
 }) {
   const formatted = useMemo(() => {
-    const one = before === null ? null : formatJson(before);
-    const two = after === null ? null : formatJson(after);
+    const one = before === null ? null : formatStructured(before, syntax);
+    const two = after === null ? null : formatStructured(after, syntax);
     return { before: one, after: two };
-  }, [before, after]);
+  }, [before, after, syntax]);
 
   if (
     (before !== null && formatted.before === null) ||
@@ -108,8 +110,8 @@ export function JsonFormatted({
   ) {
     return (
       <p className="file-note" role="note">
-        One side of this file is not valid JSON, so there is nothing to
-        re-indent. The raw diff is the only view of it.
+        One side of this file is not valid {SYNTAX_NAMES[syntax]}, so there is
+        nothing to re-indent. The raw diff is the only view of it.
       </p>
     );
   }

@@ -17,6 +17,24 @@ dist.unpackedSize`. Entry-point sizes came from `npm pack`, extracting, and
 `ls` on the file the package's `exports` map actually points at — not from a
 bundle-size website, and not from memory.
 
+**Correction, 2026-09-05.** The sizes below are mostly `dist.unpackedSize`, and
+that unit is misleading enough to have changed two of the recommendations. A
+tarball carries the CJS build *and* the ESM build *and* the types *and* the
+sourcemaps *and* the tests; a bundler takes one path through one of them. Where
+it matters, the honest number is now given as **the output of `esbuild
+--bundle --minify` on a file importing only the one function needed, gzipped**,
+and it runs five to twenty times smaller:
+
+| Package | Unpacked | Bundled, minified, gzipped |
+| --- | --- | --- |
+| `yaml` (`parse`) | 685,953 B | **30,427 B** |
+| `smol-toml` (`parse`) | 109,164 B | **4,372 B** |
+| `jsonc-parser` (`parse`) | 212,821 B | **3,313 B** |
+| `fflate` (`unzipSync`) | 796,742 B | **2,769 B** |
+| `pixelmatch` | 21,538 B | **1,485 B** |
+| `marked` | 479,846 B | **12,852 B** |
+| `dompurify` | 1,802,029 B | **11,081 B** |
+
 ---
 
 ## 1. What this is
@@ -37,7 +55,9 @@ real enough that guessing would be worse than asking.
 | Image | `png` `apng` `jpg` `jpeg` `jfif` `gif` `webp` `avif` `bmp` `ico` | Side by side · Swipe · Onion skin · Difference · Raw | `ui/ImageCompare.tsx` |
 | SVG | `svg` | Rendered · Difference · Raw | same |
 | Table | `csv` `tsv` | Grid · Changed rows · Raw | `lib/compare/tabular.ts` |
-| JSON | `json` | Key paths · Formatted · Raw | `lib/compare/structured.ts` |
+| JSON | `json` `jsonc` | Key paths · Formatted · Raw | `lib/compare/structured.ts` |
+| YAML | `yaml` `yml` | Key paths · Formatted · Raw | same, via `lib/compare/syntax.ts` |
+| TOML | `toml` | Key paths · Raw | same |
 | Notebook | `ipynb` | Cells · Cells and outputs · Raw | `lib/compare/notebook.ts` |
 | Everything else | — | Raw | `ui/diffItems.ts` |
 
@@ -70,10 +90,11 @@ Measured by building this working tree at `1b6b955` (before the feature) and at
 | `assets/review-*.css` | 21,389 B | 28,887 B | +7,498 B (+35%) |
 | same, gzipped | 3,789 B | 4,821 B | +1,032 B (+27%) |
 
-**No dependency was added.** `package.json` is untouched.
+**No dependency was added by that change.** Three were added on 2026-09-05,
+when decisions 2 and 3 were taken — see §3.6 for what they cost.
 
 For scale, the thing already in the bundle: `chunks/wasm-*.js` is **622,325
-bytes** of base64-encoded WebAssembly, reachable only from Shiki's
+bytes — 230,057 gzipped**, measured on 2026-09-05 — of base64-encoded WebAssembly, reachable only from Shiki's
 `shiki-wasm` engine, which this project deliberately never selects
 (`DiffColumn` never sets `preferredHighlighter`; there is a test pinning that
 absence). It is dead weight and it is 20× the size of everything added here.
@@ -156,6 +177,54 @@ would refuse anyway — to answer a question nobody asked about a file nobody
 reads. Files matching `DEFAULT_NOISE_PATTERNS` open Raw; the structural view is
 still one press away.
 
+### 3.6 Three syntaxes share one engine, and TOML is denied one mode
+
+Decisions 2 and 3 were taken on 2026-09-05, and the TOML gap this document had
+under-sold was taken with them. `lib/compare/syntax.ts` is the whole of the
+seam: three parsers in, one plain value out, and the walker in
+`structured.ts` — renamed `compareStructured`, since it no longer only compares
+JSON — never learns which spelling it was handed.
+
+| Package | Version | Licence | Modified | Bundled + gzipped | For |
+| --- | --- | --- | --- | --- | --- |
+| `yaml` | 2.9.0 | ISC | 2026-05-11 | 30,427 B | `.yaml` `.yml` |
+| `smol-toml` | 1.8.0 | BSD-3-Clause | 2026-08-11 | 4,372 B | `.toml` |
+| `jsonc-parser` | 3.3.1 | MIT | 2026-07-16 | 3,313 B | `.json` `.jsonc` |
+
+All three are exact-pinned rather than caret-ranged, as `@pierre/diffs` is.
+None contains `eval` or `new Function` in the path `exports` points at, grepped
+from the extracted tarballs. None has a dependency of its own.
+
+**Measured cost.** Building this working tree before and after with
+`npx wxt build`: `chunks/review-*.js` went 727,178 → 845,932 B raw and
+**204,135 → 240,999 B gzipped, +36,864 B (+18.1%)**. The CSS is untouched.
+That is still 160 kB gzipped less than the dead WASM chunk in decision 12.
+
+Three calls inside it are worth recording, because each is the kind that would
+otherwise be rediscovered:
+
+**`.json` is parsed as JSONC, always.** Not a new extension — the problem was
+never `.jsonc` files, which are rare. It was that `tsconfig.json`,
+`.eslintrc.json` and everything under `.vscode/` are JSONC wearing a `.json`
+extension, and `JSON.parse` refuses them. `jsonc-parser` reads strict JSON
+identically, so there is no second path and nothing to choose between.
+
+**A recovering parser is not believed.** `jsonc-parser` is built for an editor,
+where returning a value for a half-typed document is correct behaviour: handed
+`{ not json` it returns `{}` and a list of errors. Reading the value and
+ignoring the errors would report every key in the file as deleted. The error
+list is authoritative, and there is a test that fails if it stops being.
+
+**TOML is not offered the formatted mode.** The formatted view exists so that a
+pure reformatting shows as no change. JSON and YAML both have comment-preserving
+formatters — `jsonc-parser`'s `format`/`applyEdits`, and `yaml`'s
+`parseDocument().toString()` — and both are used, so neither loses a `#` line or
+a `//` line. `smol-toml` has no such formatter, and re-serializing from the
+parsed value would make a comment-only change in a `Cargo.toml` show as *no
+change at all*. That is not a smaller claim than the text diff's, it is a wrong
+one, so the mode is absent — the same rule that already withholds onion-skinning
+from a newly added image.
+
 ---
 
 ## 4. Open decisions
@@ -205,7 +274,7 @@ this week. **This is the decision I am least confident about** — if the
 repositories in question are documentation-heavy, B plus DOMPurify plus a
 byte cap is defensible and cheap.
 
-### Decision 2 — YAML: structural comparison?
+### Decision 2 — YAML: structural comparison? — **TAKEN, `yaml` 2.9.0**
 
 Arguably a bigger gap than CSV. GitHub Actions workflows, Kubernetes manifests,
 `docker-compose.yml`, `.gitlab-ci.yml` — YAML is edited in an enormous share of
@@ -235,7 +304,12 @@ change with the best ratio of reviewer value to bytes, and the only reason it
 was not simply done is the standing rule that a new dependency is a decision
 for a human.
 
-### Decision 3 — JSON with comments
+**Taken on 2026-09-05.** B, at 30,427 B gzipped rather than the 685,953 B this
+table implies — see the correction in §0. `parseDocument` is used rather than
+`parse`, so the formatted mode keeps the comments and the error carries a line
+number. §3.6 has the rest.
+
+### Decision 3 — JSON with comments — **TAKEN, `jsonc-parser` 3.3.1**
 
 `tsconfig.json`, `.eslintrc.json`, `devcontainer.json` and everything under
 `.vscode/` are JSONC, and `JSON.parse` refuses them. Verified: parsing
@@ -260,6 +334,12 @@ Microsoft as part of VS Code, and it removes a visible wart on a common file.
 C is tempting and is the wrong instinct: a comment stripper that does not
 correctly track string state will silently corrupt any document containing
 `//` inside a string, which is every file with a URL in it.
+
+**Taken on 2026-09-05.** B, at 3,313 B gzipped, and applied to *every* `.json`
+file rather than to a new `.jsonc` extension — the wart was never on `.jsonc`
+files. Trailing commas came along with it. §3.6 records the one trap: this
+parser recovers from broken input by design, so its error list rather than its
+return value is what decides whether a document was read.
 
 ### Decision 4 — PDF
 
@@ -488,13 +568,37 @@ binary:
 
 ## 6. What to answer
 
-In rough order of value per byte:
+Decisions 2 and 3 were taken on 2026-09-05, along with TOML, which this
+document had only mentioned in passing under lockfiles. What is left, in rough
+order of value per byte:
 
-1. **Decision 2 (YAML).** The biggest real gap; reuses an engine that exists.
-2. **Decision 12 (drop the WASM chunk).** Pure win if it works.
-3. **Decision 3 (JSONC).** Nine kilobytes, removes a visible wart.
-4. **Decision 11 (test the worker-minted object URL).** Might delete a whole
+1. **Decision 12 (drop the WASM chunk).** Pure win if it works, and now the
+   largest item by a distance: 230,057 B gzipped of code that provably cannot
+   execute here, against 36,864 B for all three parsers together.
+2. **Decision 11 (test the worker-minted object URL).** Might delete a whole
    code path.
-5. **Decision 8 (XML via `DOMParser`).** No dependency, needs a design call.
-6. **Decision 1 (Markdown).** The most-requested and the least clearly useful.
-7. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
+3. **Decision 8 (XML via `DOMParser`).** No dependency, needs a design call.
+   `pom.xml`, `.csproj`, `.plist` and Android manifests would join the same
+   walker the three syntaxes above now share, which makes the adapter the only
+   work left in it.
+4. **Decision 1 (Markdown).** Re-open it. The rejection rested on "~170 kB
+   unminified", and the measured figure is **27,341 B gzipped** for `marked`
+   plus `dompurify` plus `htmldiff-js` — and that combination buys option E,
+   the rendered *diff*, not merely option B. The one caveat is `htmldiff-js`
+   (ISC, 9,565 B minified, untouched since 2022-05-05), which is small enough
+   to vendor rather than depend on.
+5. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
+
+Two libraries examined on 2026-09-05 and rejected outright, recorded so nobody
+re-examines them:
+
+- **`xlsx` (SheetJS) must not be used from npm.** The registry reports a
+  `time.modified` of 2026-07-17, which reads as maintained. It is not: the last
+  actual publish is **0.18.5 on 2022-03-24**, and the prototype-pollution and
+  ReDoS fixes exist only in the builds SheetJS self-hosts. The recent timestamp
+  is metadata churn on an abandoned package.
+- **`toml`, the npm package, is not the TOML parser to take.** Dormant since
+  2019, then 4.1.2 to 5.0.0 inside a fortnight in July 2026. That may be a
+  genuine revival, but it is also the shape of a takeover, and `smol-toml`
+  (BSD-3-Clause, continuously maintained, 4,372 B gzipped) needs no such
+  judgement. `@ltd/j-toml` is LGPL-3.0 and stale since 2023.

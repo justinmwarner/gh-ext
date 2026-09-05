@@ -29,9 +29,16 @@
  */
 
 import type { PatchStatus } from '../github/types';
+import { FORMATTABLE, type StructuredSyntax } from './syntax';
 
 /** The families of content that get their own mode set. */
-export type ComparisonKind = 'image' | 'svg' | 'table' | 'json' | 'notebook' | 'none';
+export type ComparisonKind =
+  | 'image'
+  | 'svg'
+  | 'table'
+  | 'structured'
+  | 'notebook'
+  | 'none';
 
 /** Which sides of the change exist at all. */
 export type ChangeSides = 'both' | 'added' | 'deleted';
@@ -81,9 +88,15 @@ export const RAW: ComparisonMode = {
  *
  * `needsBothSides` marks the modes that compare two things and therefore have
  * nothing to say about a file that was only added or only deleted.
+ *
+ * `syntaxes` marks the modes that only some spellings of a structured document
+ * can answer honestly. It is the same rule as `needsBothSides` one level down:
+ * a control that would lie is not offered, any more than one that would sit
+ * there doing nothing.
  */
 interface ModeSpec extends ComparisonMode {
   needsBothSides?: true;
+  syntaxes?: readonly StructuredSyntax[];
 }
 
 const MODES: Record<Exclude<ComparisonKind, 'none'>, ModeSpec[]> = {
@@ -137,16 +150,20 @@ const MODES: Record<Exclude<ComparisonKind, 'none'>, ModeSpec[]> = {
       hint: 'Only the rows that moved, without the ones that did not.',
     },
   ],
-  json: [
+  structured: [
     {
-      id: 'json:keys',
+      id: 'structured:keys',
       label: 'Key paths',
       hint: 'Every value that changed, named by its path through the document.',
     },
     {
-      id: 'json:formatted',
+      id: 'structured:formatted',
       label: 'Formatted',
       hint: 'Both sides re-indented identically, so only real edits show.',
+      // TOML is absent from `FORMATTABLE`: re-serializing it from the parsed
+      // value drops every comment, which would make a comment-only change
+      // show as no change at all.
+      syntaxes: FORMATTABLE,
     },
   ],
   notebook: [
@@ -184,8 +201,29 @@ const KINDS_BY_EXTENSION: Record<string, ComparisonKind> = {
   svg: 'svg',
   csv: 'table',
   tsv: 'table',
-  json: 'json',
+  json: 'structured',
+  jsonc: 'structured',
+  yaml: 'structured',
+  yml: 'structured',
+  toml: 'structured',
   ipynb: 'notebook',
+};
+
+/**
+ * Which parser a structured file wants.
+ *
+ * `json` covers `.jsonc` as well, and covers `.json` as it is actually
+ * committed — comments and trailing commas included. Half the `.json` files in
+ * a TypeScript repository are really JSONC, and a strict parser refusing
+ * `tsconfig.json` reads as a defect in this page rather than a fact about the
+ * format.
+ */
+const SYNTAX_BY_EXTENSION: Record<string, StructuredSyntax> = {
+  json: 'json',
+  jsonc: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
 };
 
 /**
@@ -213,6 +251,18 @@ export function extensionOf(path: string): string {
 export function comparisonKind(file: ComparableFile): ComparisonKind {
   const named = file.path === '' ? file.oldPath : file.path;
   return KINDS_BY_EXTENSION[extensionOf(named)] ?? 'none';
+}
+
+/**
+ * Which syntax a structured file is written in, or null if it is not one.
+ *
+ * Read off the same name `comparisonKind` reads, for the same reason: a
+ * deleted file's head path is empty on some diff shapes and only the base
+ * side still knows what it was called.
+ */
+export function syntaxOf(file: ComparableFile): StructuredSyntax | null {
+  const named = file.path === '' ? file.oldPath : file.path;
+  return SYNTAX_BY_EXTENSION[extensionOf(named)] ?? null;
 }
 
 /**
@@ -271,11 +321,19 @@ export function changeSides(file: ComparableFile): ChangeSides {
 }
 
 /** The modes this kind offers, given how many sides there are to compare. */
-export function modesFor(kind: ComparisonKind, sides: ChangeSides): ComparisonMode[] {
+export function modesFor(
+  kind: ComparisonKind,
+  sides: ChangeSides,
+  syntax: StructuredSyntax | null = null,
+): ComparisonMode[] {
   if (kind === 'none') return [RAW];
 
   const offered = MODES[kind]
     .filter((mode) => sides === 'both' || mode.needsBothSides !== true)
+    // Only when a syntax is known. Asked what the kind offers, the answer is
+    // everything it has; asked what a file offers, it is what that file can
+    // answer honestly.
+    .filter((mode) => syntax === null || mode.syntaxes === undefined || mode.syntaxes.includes(syntax))
     .map(({ id, label, hint }): ComparisonMode => ({ id, label, hint }));
 
   return [...offered, RAW];
@@ -283,7 +341,7 @@ export function modesFor(kind: ComparisonKind, sides: ChangeSides): ComparisonMo
 
 /** The modes one file offers. */
 export function modesForFile(file: ComparableFile): ComparisonMode[] {
-  return modesFor(comparisonKind(file), changeSides(file));
+  return modesFor(comparisonKind(file), changeSides(file), syntaxOf(file));
 }
 
 /**

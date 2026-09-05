@@ -18,7 +18,9 @@ import {
   imageMediaType,
   modeIndex,
   modesFor,
+  modesForFile,
   resolveMode,
+  syntaxOf,
 } from './modes';
 
 const file = (overrides: Partial<ComparableFile> = {}): ComparableFile => ({
@@ -56,7 +58,7 @@ describe('comparisonKind', () => {
     // `.ipynb` is JSON on the wire, and reading it as JSON would bury the one
     // thing a reviewer wants — the cells — under the output blobs.
     expect(comparisonKind(file({ path: 'analysis.ipynb' }))).toBe('notebook');
-    expect(comparisonKind(file({ path: 'tsconfig.json' }))).toBe('json');
+    expect(comparisonKind(file({ path: 'tsconfig.json' }))).toBe('structured');
   });
 
   it('reads the extension off the name, not off the directory', () => {
@@ -154,7 +156,7 @@ describe('changeSides', () => {
 
 describe('modesFor', () => {
   it('offers raw for every kind there is', () => {
-    const kinds = ['image', 'svg', 'table', 'json', 'notebook', 'none'] as const;
+    const kinds = ['image', 'svg', 'table', 'structured', 'notebook', 'none'] as const;
     for (const kind of kinds) {
       expect(modesFor(kind, 'both').map((mode) => mode.id)).toContain(RAW.id);
     }
@@ -189,7 +191,9 @@ describe('modesFor', () => {
     // A new CSV still has a grid worth reading, and a new JSON file still has
     // key paths — both simply compare against nothing.
     expect(modesFor('table', 'added').map((mode) => mode.id)).toContain('table:grid');
-    expect(modesFor('json', 'deleted').map((mode) => mode.id)).toContain('json:keys');
+    expect(modesFor('structured', 'deleted').map((mode) => mode.id)).toContain(
+      'structured:keys',
+    );
   });
 
   it('gives every mode a label and a sentence explaining what it answers', () => {
@@ -235,5 +239,67 @@ describe('resolveMode and modeIndex', () => {
     // would blank the column.
     expect(resolveMode('image:nonsense')).toBeNull();
     expect(modeIndex('image:nonsense')).toBe(0);
+  });
+});
+
+describe('the syntaxes that share the structural view', () => {
+  it('recognises YAML, TOML and JSON as the same kind of question', () => {
+    // They are three spellings of one tree, and the walker downstream has
+    // never cared which one it was handed.
+    for (const name of ['deploy.yaml', 'ci.yml', 'Cargo.toml', 'tsconfig.json']) {
+      expect(comparisonKind(file({ path: name }))).toBe('structured');
+    }
+  });
+
+  it('knows which parser each extension wants', () => {
+    expect(syntaxOf(file({ path: '.github/workflows/ci.yml' }))).toBe('yaml');
+    expect(syntaxOf(file({ path: 'k8s/deploy.yaml' }))).toBe('yaml');
+    expect(syntaxOf(file({ path: 'pyproject.toml' }))).toBe('toml');
+    expect(syntaxOf(file({ path: 'tsconfig.json' }))).toBe('json');
+    expect(syntaxOf(file({ path: '.vscode/settings.jsonc' }))).toBe('json');
+  });
+
+  it('has no syntax for a file that is not one of them', () => {
+    expect(syntaxOf(file({ path: 'src/app.ts' }))).toBeNull();
+    expect(syntaxOf(file({ path: 'logo.png' }))).toBeNull();
+  });
+
+  it('reads the base path for a deletion, as the kind does', () => {
+    // A deleted file's head path is empty on some diff shapes, and its name
+    // survives only on the base side.
+    expect(syntaxOf(file({ path: '', oldPath: 'old/values.yaml' }))).toBe('yaml');
+  });
+});
+
+describe('the formatted mode, where it can be honest', () => {
+  it('offers it for JSON and YAML, whose formatters keep the comments', () => {
+    for (const syntax of ['json', 'yaml'] as const) {
+      expect(modesFor('structured', 'both', syntax).map((mode) => mode.id)).toContain(
+        'structured:formatted',
+      );
+    }
+  });
+
+  it('withholds it from TOML rather than shipping one that eats comments', () => {
+    // Re-serializing TOML from the parsed value loses every `#` line, which
+    // would make a comment-only change show as no change at all. That is not a
+    // smaller claim than the text diff's — it is a wrong one.
+    const ids = modesFor('structured', 'both', 'toml').map((mode) => mode.id);
+
+    expect(ids).toContain('structured:keys');
+    expect(ids).not.toContain('structured:formatted');
+    expect(ids).toContain(RAW.id);
+  });
+
+  it('applies the same rule to a real TOML file', () => {
+    const ids = modesForFile(file({ path: 'Cargo.toml' })).map((mode) => mode.id);
+
+    expect(ids).toEqual(['structured:keys', RAW.id]);
+  });
+
+  it('still offers both to a real YAML file', () => {
+    const ids = modesForFile(file({ path: 'docker-compose.yml' })).map((mode) => mode.id);
+
+    expect(ids).toEqual(['structured:keys', 'structured:formatted', RAW.id]);
   });
 });

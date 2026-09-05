@@ -1,5 +1,11 @@
 /**
- * Comparing two JSON documents by structure rather than by line.
+ * Comparing two structured documents by structure rather than by line.
+ *
+ * JSON, YAML and TOML are three spellings of one thing — a tree of plain
+ * values — and all three suffer the same failure under a text diff, so all
+ * three arrive here. `lib/compare/syntax.ts` is the only part that knows which
+ * spelling it was handed; from the parse onward this walks a plain value and
+ * has no opinion about where it came from.
  *
  * A text diff of JSON is wrong in two directions at once. Re-indent a file and
  * every line changes while nothing does; insert one element at the head of an
@@ -26,6 +32,7 @@
  */
 
 import { alignRows, pairRows } from './rows';
+import { SYNTAX_NAMES, type StructuredSyntax, parseStructured } from './syntax';
 
 export interface JsonLimits {
   /** Leaves flattened per side. */
@@ -58,22 +65,6 @@ export interface JsonComparison {
   truncated: boolean;
   /** Why there is no comparison. Null when there is one. */
   reason: string | null;
-}
-
-/**
- * Re-indent a document, or return null if it is not JSON.
- *
- * Whitespace only. Key order is left exactly as parsed: sorting would hide a
- * reordering, and order is meaningful in enough documents — an ordered list of
- * build steps, a `files` array — that suppressing it is not this mode's
- * decision to make.
- */
-export function formatJson(text: string): string | null {
-  try {
-    return JSON.stringify(JSON.parse(text) as unknown, null, 2);
-  } catch {
-    return null;
-  }
 }
 
 /** A key that can be written as `.name` rather than as `["name"]`. */
@@ -252,14 +243,10 @@ function walkTogether(
   );
 }
 
-const parse = (text: string | null): { ok: true; value: unknown } | { ok: false } => {
-  if (text === null) return { ok: true, value: undefined };
-  try {
-    return { ok: true, value: JSON.parse(text) as unknown };
-  } catch {
-    return { ok: false };
-  }
-};
+// A missing side is an addition or a deletion, not a parse failure: there is
+// no document to read and `undefined` is what the flattener expects.
+const parseSide = (text: string | null, syntax: StructuredSyntax) =>
+  text === null ? ({ ok: true, value: undefined } as const) : parseStructured(text, syntax);
 
 /**
  * Compare two documents.
@@ -268,28 +255,29 @@ const parse = (text: string | null): { ok: true; value: unknown } | { ok: false 
  * deletion — which is different from an empty document and is reported as
  * every leaf on the other side arriving or leaving.
  */
-export function compareJson(
+export function compareStructured(
   beforeText: string | null,
   afterText: string | null,
+  syntax: StructuredSyntax,
   limits: JsonLimits = JSON_LIMITS,
 ): JsonComparison {
-  const before = parse(beforeText);
-  const after = parse(afterText);
+  const before = parseSide(beforeText, syntax);
+  const after = parseSide(afterText, syntax);
 
   if (!before.ok || !after.ok) {
     const which = !before.ok && !after.ok ? 'Neither side' : !after.ok ? 'The new side' : 'The old side';
+    // The parser's own words, because "not valid YAML" about a four-hundred
+    // line manifest is a shrug. All three know where they gave up, and passing
+    // that through is the difference between a reviewer fixing it and a
+    // reviewer hunting for it.
+    const detail = !after.ok ? after.detail : !before.ok ? before.detail : '';
     return {
       status: 'unparseable',
       changes: [],
       truncated: false,
-      // Comments are named because they are the overwhelming cause. Half the
-      // `.json` files in a TypeScript repository are really JSONC —
-      // `tsconfig.json`, `.eslintrc.json`, everything under `.vscode` — and
-      // "not valid JSON" on a file the reviewer can see is fine reads as a
-      // defect in this page rather than as a fact about the format.
       reason:
-        `${which} of this file is not valid JSON — most likely comments or ` +
-        'trailing commas, which this view does not read. Raw shows the change.',
+        `${which} of this file is not valid ${SYNTAX_NAMES[syntax]} — ` +
+        `${detail}. Raw shows the change.`,
     };
   }
 

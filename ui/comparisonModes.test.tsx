@@ -287,6 +287,86 @@ describe('the comparisons themselves', () => {
     });
   });
 
+  it('lists the key paths of a YAML change, indentation and all', async () => {
+    // YAML is the format the text diff serves worst, because its indentation
+    // is semantic: reindent a block and every line repaints while nothing
+    // moved. This is the whole of decision 2.
+    answerWith((ref) =>
+      ref === BLOBS.baseSha
+        ? 'server:\n  port: 80\n  hosts:\n    - a\n'
+        : 'server:\n    port: 443\n    hosts:\n        - a\n',
+    );
+    mount([file({ path: 'k8s/deploy.yaml' })]);
+
+    await waitFor(() => {
+      expect(card('k8s/deploy.yaml').querySelector('.key-paths')).not.toBeNull();
+    });
+
+    const paths = [...card('k8s/deploy.yaml').querySelectorAll('.key-path')].map(
+      (node) => node.textContent,
+    );
+    expect(paths).toEqual(['server.port']);
+  });
+
+  it('lists the key paths of a TOML change too', async () => {
+    // Inline table promoted to a section header: every line of it changes, and
+    // one version is the only thing that moved.
+    answerWith((ref) =>
+      ref === BLOBS.baseSha
+        ? 'name = "x"\ndeps = { serde = "1.0" }\n'
+        : 'name = "x"\n\n[deps]\nserde = "1.1"\n',
+    );
+    mount([file({ path: 'Cargo.toml' })]);
+
+    await waitFor(() => {
+      expect(card('Cargo.toml').querySelector('.key-paths')).not.toBeNull();
+    });
+
+    const paths = [...card('Cargo.toml').querySelectorAll('.key-path')].map(
+      (node) => node.textContent,
+    );
+    expect(paths).toEqual(['deps.serde']);
+  });
+
+  it('reads a tsconfig with comments in it instead of refusing the file', async () => {
+    // The visible wart decision 3 removes. `JSON.parse` refuses JSONC, so this
+    // used to answer "not valid JSON" about a file the reviewer can see is
+    // perfectly fine — which reads as a defect in this page.
+    answerWith((ref) =>
+      ref === BLOBS.baseSha
+        ? '{\n  // the target we ship\n  "target": "es2020",\n}'
+        : '{\n  // the target we ship\n  "target": "es2022",\n}',
+    );
+    mount([file({ path: 'tsconfig.json' })]);
+
+    await waitFor(() => {
+      expect(card('tsconfig.json').querySelector('.key-paths')).not.toBeNull();
+    });
+
+    const paths = [...card('tsconfig.json').querySelectorAll('.key-path')].map(
+      (node) => node.textContent,
+    );
+    expect(paths).toEqual(['target']);
+  });
+
+  it('offers TOML no formatted mode, having no formatter that keeps comments', async () => {
+    // Re-serializing TOML from the parsed value eats every `#` line, which
+    // would make a comment-only change show as no change at all. A control
+    // that would lie is not offered, the same as one that would do nothing.
+    answerWith(() => 'a = 1\n');
+    mount([file({ path: 'Cargo.toml' }), file({ path: 'deploy.yaml' })]);
+
+    await waitFor(() => expect(card('Cargo.toml')).toBeTruthy());
+
+    const labels = (path: string) =>
+      within(switcher(path))
+        .getAllByRole('button')
+        .map((button) => button.textContent);
+
+    expect(labels('Cargo.toml')).toEqual(['Key paths', 'Raw']);
+    expect(labels('deploy.yaml')).toEqual(['Key paths', 'Formatted', 'Raw']);
+  });
+
   it('compares a notebook by cell, with the re-run ones marked as unchanged', async () => {
     const cell = (source: string, out: string) => ({
       cell_type: 'code',

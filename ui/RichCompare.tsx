@@ -25,9 +25,10 @@ import {
   changeSides,
   comparisonKind,
   imageMediaType,
+  syntaxOf,
 } from '@/lib/compare/modes';
 import { compareNotebooks, parseNotebook } from '@/lib/compare/notebook';
-import { compareJson } from '@/lib/compare/structured';
+import { compareStructured } from '@/lib/compare/structured';
 import { compareTables, delimiterFor, parseDelimited } from '@/lib/compare/tabular';
 import type { BlobRefs } from './blobLoader';
 import { useImageSides, useTextSides } from './fileSides';
@@ -105,9 +106,16 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
     );
   }, [kind, text.status, text.before, text.after, file.path, file.oldPath]);
 
-  const json = useMemo(
-    () => (kind !== 'json' || text.status !== 'ready' ? null : compareJson(text.before, text.after)),
-    [kind, text.status, text.before, text.after],
+  // Which of the three spellings this file is written in. Null for everything
+  // else, which is also what keeps the structural block below from running.
+  const syntax = syntaxOf(file);
+
+  const structured = useMemo(
+    () =>
+      syntax === null || text.status !== 'ready'
+        ? null
+        : compareStructured(text.before, text.after, syntax),
+    [syntax, text.status, text.before, text.after],
   );
 
   const notebook = useMemo(() => {
@@ -166,11 +174,16 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
     return <TableCompare comparison={table} changedOnly={mode === 'table:changed-rows'} />;
   }
 
-  if (json !== null) {
-    return mode === 'json:formatted' ? (
-      <JsonFormatted path={file.path} before={text.before} after={text.after} />
+  if (structured !== null && syntax !== null) {
+    return mode === 'structured:formatted' ? (
+      <JsonFormatted
+        path={file.path}
+        syntax={syntax}
+        before={text.before}
+        after={text.after}
+      />
     ) : (
-      <JsonKeyPaths comparison={json} />
+      <JsonKeyPaths comparison={structured} />
     );
   }
 
