@@ -35,6 +35,10 @@ and it runs five to twenty times smaller:
 | `marked` | 479,846 B | **12,852 B** |
 | `dompurify` | 1,802,029 B | **11,081 B** |
 
+Those last two shipped on 2026-09-05 (§3.7). Their measured cost together, in a
+real build rather than in isolation, was **+25,860 B gzipped** — less than the
+sum above, because a bundle shares what its dependencies have in common.
+
 ---
 
 ## 1. What this is
@@ -59,6 +63,7 @@ real enough that guessing would be worse than asking.
 | YAML | `yaml` `yml` | Key paths · Formatted · Raw | same, via `lib/compare/syntax.ts` |
 | TOML | `toml` | Key paths · Raw | same |
 | Notebook | `ipynb` | Cells · Cells and outputs · Raw | `lib/compare/notebook.ts` |
+| Markdown | `md` `markdown` `mdown` | Rendered diff · Raw | `lib/compare/markdown.ts` |
 | Everything else | — | Raw | `ui/diffItems.ts` |
 
 Three rules hold across all of them, enforced in `lib/compare/modes.ts` rather
@@ -90,8 +95,9 @@ Measured by building this working tree at `1b6b955` (before the feature) and at
 | `assets/review-*.css` | 21,389 B | 28,887 B | +7,498 B (+35%) |
 | same, gzipped | 3,789 B | 4,821 B | +1,032 B (+27%) |
 
-**No dependency was added by that change.** Three were added on 2026-09-05,
-when decisions 2 and 3 were taken — see §3.6 for what they cost.
+**No dependency was added by that change.** Five have been added since, all on
+2026-09-05: three when decisions 2 and 3 were taken (§3.6), and two more when
+decision 1 was (§3.7). A sixth — `htmldiff-js` — was vendored instead.
 
 For scale, the thing already in the bundle: `chunks/wasm-*.js` is **622,325
 bytes — 230,057 gzipped**, measured on 2026-09-05 — of base64-encoded WebAssembly, reachable only from Shiki's
@@ -225,6 +231,79 @@ change at all*. That is not a smaller claim than the text diff's, it is a wrong
 one, so the mode is absent — the same rule that already withholds onion-skinning
 from a newly added image.
 
+### 3.7 Markdown is a rendered *diff*, and the sanitiser runs last
+
+Decision 1 was taken on 2026-09-05. Four calls inside it are worth recording.
+
+**The obvious mode was not built.** Rendering both sides and putting them side
+by side is the thing everyone asks for and it is worse than what it replaces:
+two blocks of formatted prose have to be compared by eye, where the source diff
+at least paints the words that moved. Formatting *removes* the marks. So the
+mode renders the new document and marks the insertions and deletions inside it
+— the one arrangement that keeps the formatting and the marks at once.
+
+That is also why the mode is `needsBothSides`. On an added or deleted `.md`
+there is no what-changed, only a document, and a button labelled "Rendered
+diff" that can only produce a preview is the rejected mode wearing a diff's
+clothes. A new file's raw diff is already every line in green. Same rule as the
+onion skin on a new image, and as the formatted mode on TOML.
+
+**`htmldiff-js` is vendored, not depended on.** ISC, 9,565 B minified, untouched
+since 2022-05-05. Four reasons, any two sufficient: its `main` is
+`dist/htmldiff.min.js`, a webpack-4 UMD bundle with no `module` field, no
+`exports` map and no types, so depending on it means shipping an unreadable ES5
+blob into the origin that holds the token; a dormant package with a live publish
+key is the shape this document already refused for `toml`; at that size
+outsourcing trust buys very little; and reading it found four defects, three of
+which TypeScript will not compile. All four are real and were reproduced against
+the published bundle — `< >` in a document throws `TypeError`, its
+block-expression feature throws `ReferenceError: index is not defined`, and a
+module-scope `/…/ig` used with `.test()` makes the same two documents diff
+differently on the second call (107 of 40,000 random pairs) and makes an
+unrelated file diffed in between change the answer for one already on screen
+(77 of 40,000). The port is byte-identical to a `g`-flag-corrected upstream over
+**40,000 random document pairs**, so the algorithm is upstream's and only the
+defects moved.
+
+**Sanitisation happens after the diff, never before.** Both are true and only
+the ordering is subtle. Sanitising each side first would look tidier and is
+unsound: the word diff then splices tags into the token stream at positions it
+chooses, assembling new markup out of markup already declared safe with nothing
+left to check the join. So `lib/compare/markdown.ts` returns a field named
+`unsafeHtml`, and `ui/markdownHtml.ts` is the only thing that reads it. The
+seam falls exactly where the existing `lib`-is-pure rule already put it, because
+DOMPurify needs a `Document`.
+
+The configuration is DOMPurify's, narrowed four ways, each of which was ablated
+to confirm a test fails without it: `USE_PROFILES: { html: true }` — because the
+default allows inline SVG and MathML, and §3.3 already decided SVG from a pull
+request never renders inline in this origin; `FORBID_TAGS` for `img` and the
+form controls; `FORBID_ATTR` for `style` and `id`; and `ALLOW_DATA_ATTR: false`,
+which is load-bearing rather than tidy — this page finds threads with
+`querySelectorAll('[data-thread]')` and a reply box with
+`querySelector('[data-reply-for="…"]')` that it casts to a textarea.
+
+Markdown images are rendered as *text* rather than as `<img>`, which is one step
+beyond §3.3: an absolute `src` in a `.md` file is a network request that needs
+no script and tells a third party who is reviewing what, from where, from inside
+this origin — and a relative one has nothing to resolve against. Naming the file
+also makes swapping an image a change the word diff can mark, which two `<img>`
+tags could not be, since the diff strips attributes before comparing.
+
+**The ceiling is on work, not on size, because size does not predict the cost.**
+`MARKDOWN_LIMITS` caps the source at 64,000 characters and the rendered HTML at
+80,000, both cheap to check. Neither is sufficient. Measured: 37,000 characters
+of rendered Markdown with one word changed per section diffs in 568 ms, and
+40,000 characters of *one word repeated* takes 10,952 ms — nineteen times, at
+the same size — because every block index key collides. At 160,000 characters
+that shape takes three and a half minutes. So `HTML_DIFF_BUDGET` (2,000,000
+comparisons) bounds the match finder the way `ALIGN_BUDGET` bounds row
+alignment, and `diffHtml` returns null rather than a half-marked document,
+which is the one failure a reviewer could not see. The number is calibrated
+rather than chosen: this repository's own README needs 21,829 of it, this
+document needs 92,840, seventy-five kilobytes of varied prose needs 1,945,059,
+and the pathological shapes give up inside 500 ms.
+
 ---
 
 ## 4. Open decisions
@@ -273,6 +352,26 @@ rendered diff, and that is its own piece of work rather than a mode to bolt on
 this week. **This is the decision I am least confident about** — if the
 repositories in question are documentation-heavy, B plus DOMPurify plus a
 byte cap is defensible and cheap.
+
+**Taken on 2026-09-05: E.** `marked` 18.0.11 (MIT) and `dompurify` 3.4.14
+(MPL-2.0 OR Apache-2.0), both exact-pinned; `htmldiff-js` **vendored rather
+than depended on**. The `.md` `.markdown` `.mdown` extensions get a `markdown`
+kind offering one mode — *Rendered diff* — plus Raw. §3.7 has the rest.
+
+The rejection above rested on a number that was never measured. The real cost,
+built before and after with `npx wxt build`, is **+25,860 B gzipped** on
+`chunks/review-*.js` and +268 B gzipped on the CSS: a ninth of the dead WASM
+chunk in decision 12, for the file type a pull request contains most often.
+
+The `marked` advisories this section flagged as **UNVERIFIED** are resolved.
+There are two, both from January 2022 — GHSA-rrrm-qjm4-v8hf and
+GHSA-5v2h-r2cx-5xgj — and both are `marked <= 4.0.9`, patched in 4.0.10;
+confirmed by auditing a tree pinned to 4.0.9 and watching them appear.
+`npm audit --omit=dev` on this tree reports zero. Verified behaviourally as
+well, because a version range is a claim about metadata: 18.0.11 was timed
+against the published proof-of-concept shapes for both advisories and is
+linear on all of them — 5,000 stacked `[` characters parse in 9.7 ms and
+20,000 spaces inside a `block.def` in 0.1 ms.
 
 ### Decision 2 — YAML: structural comparison? — **TAKEN, `yaml` 2.9.0**
 
@@ -543,6 +642,40 @@ breaking Shiki's module graph.
 execute in this extension. It would pay for every other decision in this
 document combined.
 
+### Decision 13 — A rich card in the middle of the column mis-measures
+
+Found on 2026-09-05 while taking decision 1, and it is not a Markdown problem —
+Markdown is only the first file type common enough to expose it.
+
+`CodeView` measures a collapsed item at about the height of its header row,
+38 px in a browser, and never re-measures it. Every rich comparison renders in
+a collapsed card's header, and its body arrives later, from the worker: a
+rendered Markdown diff settles at ~153 px, an image at ~126 px, a CSV grid at
+~179 px. The shortfall is scroll range the viewer does not know it has, it
+accumulates down the column, and past `.column-tail`'s 40vh of slack the last
+card can no longer be scrolled to the top — which puts its mode buttons below
+the fold with nowhere left to go.
+
+Until now every rich file in the browser fixture was at the *bottom* of the
+column, where the tail absorbed it: image plus table costs ~229 px and fits.
+Two rendered-Markdown cards above them cost ~459 px and do not. **Reproduced on
+the commit before Markdown existed** by moving a single `.csv` into the middle
+of the fixture's file list, which fails the same two tests — so the cause is
+rich cards in general.
+
+| Option | Cost | Note |
+| --- | --- | --- |
+| A. Grow `.column-tail` | one number | Hides it for one more card and adds dead space to every pull request. The error is cumulative, so this never closes |
+| B. Observe the header slots | ~20 lines | A `ResizeObserver` per mounted item, telling `CodeView` its height moved. `CodeView` already constructs one, for its root and its sticky container only |
+| C. Reserve a fixed height per rich mode | ~10 lines of CSS | `min-height` on each comparison so the card's height is known before its content arrives. Cheap, and wrong for a two-line document |
+
+**Recommendation: B, and do not grow the tail in the meantime.** The number in
+`.column-tail` is load-bearing for the reason it was written and growing it to
+cover this would quietly couple the two. The browser fixture keeps its `docs/`
+files as `.txt` so that it goes on testing what it was built to test; the
+consequence is that **the Markdown mode has no browser coverage**, which is the
+main thing worth fixing about it once B lands.
+
 ---
 
 ## 5. Types deliberately left as "binary file changed"
@@ -581,13 +714,15 @@ order of value per byte:
    `pom.xml`, `.csproj`, `.plist` and Android manifests would join the same
    walker the three syntaxes above now share, which makes the adapter the only
    work left in it.
-4. **Decision 1 (Markdown).** Re-open it. The rejection rested on "~170 kB
-   unminified", and the measured figure is **27,341 B gzipped** for `marked`
-   plus `dompurify` plus `htmldiff-js` — and that combination buys option E,
-   the rendered *diff*, not merely option B. The one caveat is `htmldiff-js`
-   (ISC, 9,565 B minified, untouched since 2022-05-05), which is small enough
-   to vendor rather than depend on.
-5. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
+4. ~~**Decision 1 (Markdown).**~~ **Taken on 2026-09-05**, as option E and at
+   **+25,860 B gzipped** rather than the 27,341 B estimated — `htmldiff-js` was
+   vendored rather than depended on, which is where most of the difference
+   went. §3.7 records it.
+5. **Decision 13 (the mid-column measurement shortfall).** New, and the only
+   one of these that is a defect rather than an absence: a rich card anywhere
+   but the bottom of the column costs the last card its scroll range. It is
+   also what keeps the Markdown mode out of the browser fixture.
+6. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
 
 Two libraries examined on 2026-09-05 and rejected outright, recorded so nobody
 re-examines them:

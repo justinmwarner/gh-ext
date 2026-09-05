@@ -502,3 +502,148 @@ describe('screen reader wiring', () => {
     expect(screen.getByRole('group', { name: 'Compare data/rows.csv as' })).toBeTruthy();
   });
 });
+
+describe('the rendered Markdown diff', () => {
+  const rendered = (path: string): HTMLElement | null =>
+    card(path).querySelector<HTMLElement>('.markdown-rendered');
+
+  it('shows the new document formatted, with the changed words marked in it', async () => {
+    answerWith((ref) =>
+      ref === BLOBS.baseSha
+        ? '# Guide\n\nThe quick brown fox jumps.\n'
+        : '# Guide\n\nThe quick red fox jumps.\n',
+    );
+    mount([file({ path: 'README.md' })]);
+
+    await waitFor(() => expect(rendered('README.md')).not.toBeNull());
+    const view = rendered('README.md');
+
+    // Formatted, not source: a real heading element rather than a `#`.
+    expect(view?.querySelector('h1')?.textContent).toBe('Guide');
+    // And the marks, inside the prose rather than beside it.
+    expect(view?.querySelector('del')?.textContent).toBe('brown');
+    expect(view?.querySelector('ins')?.textContent).toBe('red');
+    // The words that did not move are not marked.
+    expect(view?.textContent).toContain('jumps');
+  });
+
+  it('opens on the rendered diff and can be put back to raw', async () => {
+    const user = userEvent.setup();
+    answerWith((ref) => (ref === BLOBS.baseSha ? 'a\n' : 'b\n'));
+    mount([file({ path: 'docs/notes.md' })]);
+
+    const labels = within(switcher('docs/notes.md'))
+      .getAllByRole('button')
+      .map((button) => button.textContent);
+    expect(labels).toEqual(['Rendered diff', 'Raw']);
+
+    await waitFor(() => expect(rendered('docs/notes.md')).not.toBeNull());
+    await user.click(modeButton('docs/notes.md', 'Raw'));
+    expect(rendered('docs/notes.md')).toBeNull();
+  });
+
+  it('offers a newly added document nothing but raw', () => {
+    // There is no what-changed on a file with one side, and a control that can
+    // only render a preview is the mode this feature exists instead of.
+    mount([
+      file({
+        path: 'docs/new.md',
+        changeType: 'ADDED',
+        patch: 'diff --git a/docs/new.md b/docs/new.md\nnew file mode 100644\n@@ -0,0 +1 @@\n+hi\n',
+      }),
+    ]);
+
+    expect(
+      within(card('docs/new.md')).queryByRole('group', { name: /Compare/ }),
+    ).toBeNull();
+  });
+});
+
+describe('a Markdown file written by an attacker', () => {
+  /**
+   * The end-to-end version of `markdownHtml.test.tsx`.
+   *
+   * That file proves the sanitiser is correct in isolation. This one proves it
+   * is actually *reached* — that the wiring from the blob loader through the
+   * renderer and the word diff and into the card really does put the string
+   * through it, and that nothing between them inserts anything of its own. A
+   * correct sanitiser nobody calls is the failure mode worth a second test.
+   */
+  const MALICIOUS = [
+    '# Notes',
+    '',
+    '<img src=x onerror="globalThis.__pwned = true">',
+    '<script>globalThis.__pwned = true</script>',
+    '<iframe src="https://evil.test/"></iframe>',
+    '[click me](javascript:globalThis.__pwned=true)',
+    '<svg onload="globalThis.__pwned = true"></svg>',
+    '<p onmouseover="globalThis.__pwned = true">hover</p>',
+    '<style>.file-card { display: none }</style>',
+    '<form action="https://evil.test/"><input name="token"></form>',
+    '<p data-reply-for="1" data-thread="1" id="root">clobber</p>',
+  ].join('\n');
+
+  it('comes out inert', async () => {
+    answerWith((ref) => (ref === BLOBS.baseSha ? '# Notes\n' : `${MALICIOUS}\n`));
+    mount([file({ path: 'README.md' })]);
+
+    await waitFor(() =>
+      expect(card('README.md').querySelector('.markdown-rendered')).not.toBeNull(),
+    );
+    const view = card('README.md').querySelector<HTMLElement>('.markdown-rendered');
+    if (view === null) throw new Error('no rendered markdown');
+
+    for (const tag of ['script', 'img', 'iframe', 'svg', 'style', 'form', 'input']) {
+      expect(view.querySelectorAll(tag)).toHaveLength(0);
+    }
+
+    for (const element of [view, ...view.querySelectorAll('*')]) {
+      for (const attribute of element.attributes) {
+        expect(attribute.name).not.toMatch(/^on/i);
+        expect(attribute.name).not.toMatch(/^data-/);
+        expect(attribute.name).not.toBe('id');
+        expect(attribute.name).not.toBe('style');
+      }
+    }
+
+    for (const anchor of view.querySelectorAll('a')) {
+      expect((anchor.getAttribute('href') ?? '').toLowerCase()).not.toContain('javascript');
+    }
+
+    // No *live* handler either, which is a different question from the
+    // attribute sweep above: jsdom compiles `onmouseover="…"` into a callable
+    // property on the element, so this is the DOM's own opinion about whether
+    // something would run rather than ours about what the string said.
+    //
+    // Note what this environment cannot show. jsdom loads no resources, so an
+    // `<img onerror>` never fires; and `innerHTML` never executes a `<script>`
+    // in any engine, by specification. So "did the payload run" is not
+    // observable here in either case, and asserting on a global the attack
+    // tried to set would be a test that cannot fail. What is asserted is what
+    // reached the document, which is the thing the sanitiser controls.
+    for (const element of [view, ...view.querySelectorAll('*')]) {
+      for (const property of ['onerror', 'onload', 'onmouseover', 'onclick', 'ontoggle']) {
+        expect((element as unknown as Record<string, unknown>)[property]).toBeFalsy();
+      }
+    }
+
+    // And the document is still readable, which is the other half: a sanitiser
+    // that returned the empty string would pass everything above.
+    expect(view.textContent).toContain('Notes');
+  });
+
+  it('leaves the rest of the page alone', async () => {
+    // The card body is light DOM, so a surviving `<style>` would be a
+    // stylesheet for the whole application rather than for one card.
+    answerWith((ref) => (ref === BLOBS.baseSha ? '# Notes\n' : `${MALICIOUS}\n`));
+    mount([file({ path: 'README.md' })]);
+
+    await waitFor(() =>
+      expect(card('README.md').querySelector('.markdown-rendered')).not.toBeNull(),
+    );
+
+    expect(document.querySelectorAll('[data-reply-for]')).toHaveLength(0);
+    expect(document.getElementById('root')).toBeNull();
+    expect(document.querySelector('.markdown-rendered style')).toBeNull();
+  });
+});

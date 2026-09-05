@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Shell } from './Shell';
 import { request } from './background';
+import { clearSideCache } from './fileSides';
 import { diffLayout } from './pierreDom.fixture';
 import { HEAD_CHECK_FLOOR_MS } from './useHeadMoved';
 import {
@@ -28,6 +29,23 @@ const requestMock = request as unknown as Mock;
 beforeEach(() => {
   requestMock.mockReset();
   clockOffset = 0;
+  // `README.md` appears in the fixtures below, and a `.md` file now opens on
+  // its rendered diff rather than on the text diff — which means the card reads
+  // both sides through this seam on mount, where before it read nothing.
+  //
+  // A bare `vi.fn()` resolves `undefined`, and the real `request` documents that
+  // it never rejects and always resolves to a well-formed response: it turns a
+  // missing reply from a dead worker into `{ ok: false, … }` itself. So a mock
+  // that resolves `undefined` is not a lesser version of the seam, it is a reply
+  // production cannot produce, and the blob loader rejecting on it says nothing
+  // about the loader. Answering blob requests the way the worker would keeps the
+  // mock honest; everything else stays as it was.
+  requestMock.mockImplementation((msg: { kind: string }) =>
+    msg.kind === 'get-blob'
+      ? Promise.resolve({ ok: true, data: { status: 'ok', text: '' } })
+      : Promise.resolve(undefined),
+  );
+  clearSideCache();
 });
 
 /** A head commit that is not the fixture's. */

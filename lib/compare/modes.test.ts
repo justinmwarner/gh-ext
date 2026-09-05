@@ -63,7 +63,10 @@ describe('comparisonKind', () => {
 
   it('reads the extension off the name, not off the directory', () => {
     // A directory called `img.png/` is legal, and a file inside it is not one.
-    expect(comparisonKind(file({ path: 'img.png/readme.md' }))).toBe('none');
+    // It is the readme's own extension that decides, which is now visible in
+    // the answer rather than only in the absence of one.
+    expect(comparisonKind(file({ path: 'img.png/readme.md' }))).toBe('markdown');
+    expect(comparisonKind(file({ path: 'img.png/notes.txt' }))).toBe('none');
   });
 
   it('has no smart view for an extensionless or unknown file', () => {
@@ -156,7 +159,9 @@ describe('changeSides', () => {
 
 describe('modesFor', () => {
   it('offers raw for every kind there is', () => {
-    const kinds = ['image', 'svg', 'table', 'structured', 'notebook', 'none'] as const;
+    const kinds = [
+      'image', 'svg', 'table', 'structured', 'notebook', 'markdown', 'none',
+    ] as const;
     for (const kind of kinds) {
       expect(modesFor(kind, 'both').map((mode) => mode.id)).toContain(RAW.id);
     }
@@ -301,5 +306,48 @@ describe('the formatted mode, where it can be honest', () => {
     const ids = modesForFile(file({ path: 'docker-compose.yml' })).map((mode) => mode.id);
 
     expect(ids).toEqual(['structured:keys', 'structured:formatted', RAW.id]);
+  });
+});
+
+describe('markdown, which gets a rendered diff rather than a rendered preview', () => {
+  it('recognises the spellings a repository actually uses', () => {
+    for (const name of ['README.md', 'docs/GUIDE.MD', 'a.markdown', 'a.mdown']) {
+      expect(comparisonKind(file({ path: name }))).toBe('markdown');
+    }
+  });
+
+  it('leaves MDX alone, because MDX is not Markdown', () => {
+    // `.mdx` is JSX inside Markdown. A Markdown renderer handed a component tag
+    // emits it as literal text or as an unknown element, so the rendered view
+    // would be a confidently wrong picture of a file it cannot read.
+    expect(comparisonKind(file({ path: 'docs/page.mdx' }))).toBe('none');
+  });
+
+  it('offers exactly the rendered diff and the escape hatch', () => {
+    const ids = modesForFile(file({ path: 'README.md' })).map((mode) => mode.id);
+
+    expect(ids).toEqual(['markdown:rendered', RAW.id]);
+  });
+
+  it('opens on the rendered diff', () => {
+    expect(defaultModeFor(file({ path: 'README.md' }))).toBe('markdown:rendered');
+  });
+
+  it('withholds the rendered diff from a one-sided change', () => {
+    // The mode's whole claim is "here is what changed, marked in place". On an
+    // added file there is no what-changed — there is only the document — and a
+    // button promising a diff that can only be a preview is the rendered
+    // before-and-after this feature exists to avoid. The raw diff of a new file
+    // is already every line in green, which is the same completeness with none
+    // of the ambiguity.
+    for (const sides of ['added', 'deleted'] as const) {
+      expect(modesFor('markdown', sides)).toEqual([RAW]);
+    }
+  });
+
+  it('reads the base path for a deleted document, as every other kind does', () => {
+    expect(
+      comparisonKind(file({ path: '', oldPath: 'docs/old.md', changeType: 'DELETED' })),
+    ).toBe('markdown');
   });
 });

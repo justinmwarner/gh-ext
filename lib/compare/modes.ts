@@ -38,6 +38,7 @@ export type ComparisonKind =
   | 'table'
   | 'structured'
   | 'notebook'
+  | 'markdown'
   | 'none';
 
 /** Which sides of the change exist at all. */
@@ -178,6 +179,19 @@ const MODES: Record<Exclude<ComparisonKind, 'none'>, ModeSpec[]> = {
       hint: 'The same, with each cell’s output shown underneath it.',
     },
   ],
+  markdown: [
+    {
+      id: 'markdown:rendered',
+      label: 'Rendered diff',
+      hint: 'The new document rendered, with what moved marked inside the prose.',
+      // The obvious mode — both sides rendered, side by side — is the one this
+      // deliberately is not. Two blocks of formatted prose are *harder* to
+      // compare than the source diff, which at least paints the changed words.
+      // The only rendered view that beats the text diff is one that keeps the
+      // marks, and a mark needs two sides to be a mark rather than a colour.
+      needsBothSides: true,
+    },
+  ],
 };
 
 /**
@@ -207,7 +221,21 @@ const KINDS_BY_EXTENSION: Record<string, ComparisonKind> = {
   yml: 'structured',
   toml: 'structured',
   ipynb: 'notebook',
+  md: 'markdown',
+  markdown: 'markdown',
+  mdown: 'markdown',
 };
+
+/**
+ * `.mdx` is absent from the table above, and its absence is the decision.
+ *
+ * MDX is JSX inside Markdown: `<Callout type="warn" />` is a component
+ * invocation, not markup. A Markdown renderer emits it as literal text or as
+ * an unknown element and renders the imports at the top of the file as a
+ * paragraph — so the rendered view would be a confident, detailed and wrong
+ * picture of a document it cannot read. That is the same rule that keeps the
+ * formatted mode away from TOML: an absent view beats a lying one.
+ */
 
 /**
  * Which parser a structured file wants.

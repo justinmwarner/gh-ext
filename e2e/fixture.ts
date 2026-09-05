@@ -32,7 +32,17 @@ export const PRIOR_SHA = 'b'.repeat(40);
  */
 export const FIRST_SHA = 'c'.repeat(40);
 
-/** In column order: this is the order the diff sends them, which the UI keeps. */
+/**
+ * In column order: this is the order the diff sends them, which the UI keeps.
+ *
+ * Every entry has to be a file that opens on the *text* diff, for the same
+ * reason `IMAGE_FILE` and `TABLE_FILE` are kept out of this list below: what
+ * reads it is counting text files with two hunks each. The two documents under
+ * `docs/` are `.txt` rather than `.md` because `.md` stopped qualifying when
+ * Markdown got a rendered diff — see the note on `.column-tail` in
+ * `entrypoints/review/style.css` for what a rich card in the middle of this
+ * column does to the ones below it.
+ */
 export const FILES = [
   'src/app.ts',
   'src/beta.ts',
@@ -46,8 +56,8 @@ export const FILES = [
   'lib/format.ts',
   'lib/util/clamp.ts',
   'lib/util/debounce.ts',
-  'docs/readme.md',
-  'docs/changelog.md',
+  'docs/readme.txt',
+  'docs/changelog.txt',
 ] as const;
 
 /**

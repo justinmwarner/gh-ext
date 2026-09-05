@@ -2913,10 +2913,162 @@ button.scope-showing:hover {
   overflow: auto;
 }
 
+/* ------------------------------------------------------------- markdown */
+
+/* The rendered document is the *new* one, with what moved marked inside it.
+   Everything under `.markdown-rendered` came from a pull request and has been
+   through DOMPurify — which is why the selectors below are all descendant
+   selectors on plain tags: there are no classes to key on except the three the
+   word diff adds, because content cannot be trusted to carry any. */
+.markdown-compare {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+}
+
+.markdown-rendered {
+  padding: 8px 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.markdown-rendered > :first-child {
+  margin-top: 0;
+}
+
+.markdown-rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-rendered h1,
+.markdown-rendered h2,
+.markdown-rendered h3,
+.markdown-rendered h4 {
+  margin: 12px 0 6px;
+  line-height: 1.25;
+}
+
+/* Headings are capped near body size on purpose. A README's `# Title` at its
+   natural scale would tower over the file card's own header and read as the
+   page's heading rather than as the document's. */
+.markdown-rendered h1 { font-size: 1.3em; }
+.markdown-rendered h2 { font-size: 1.15em; }
+.markdown-rendered h3,
+.markdown-rendered h4 { font-size: 1em; }
+
+.markdown-rendered p,
+.markdown-rendered ul,
+.markdown-rendered ol,
+.markdown-rendered blockquote,
+.markdown-rendered pre,
+.markdown-rendered table {
+  margin: 6px 0;
+}
+
+.markdown-rendered ul,
+.markdown-rendered ol {
+  padding-left: 24px;
+}
+
+.markdown-rendered blockquote {
+  padding-left: 10px;
+  border-left: 3px solid light-dark(#d1d9e0, #3d444d);
+  color: light-dark(#59636e, #9198a1);
+}
+
+.markdown-rendered code {
+  padding: 1px 4px;
+  background: light-dark(#eff1f3, #21262d);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.markdown-rendered pre {
+  padding: 8px 10px;
+  overflow: auto;
+  background: light-dark(#f6f8fa, #161b22);
+  border-radius: 6px;
+}
+
+/* A code block's `<code>` must not carry the inline pill styling on top of the
+   block's own background. */
+.markdown-rendered pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown-rendered table {
+  border-collapse: collapse;
+}
+
+.markdown-rendered th,
+.markdown-rendered td {
+  padding: 3px 8px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.markdown-rendered hr {
+  border: 0;
+  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+/* An image is named rather than loaded — see the renderer in
+   `lib/compare/markdown.ts`. Drawn as a quiet chip so it reads as a stand-in
+   for something rather than as prose the author wrote. */
+.markdown-rendered .md-image {
+  padding: 1px 6px;
+  background: light-dark(#eff1f3, #21262d);
+  border: 1px dashed light-dark(#d1d9e0, #3d444d);
+  border-radius: 4px;
+  color: light-dark(#59636e, #9198a1);
+  font-size: 0.9em;
+}
+
+/* The marks. `<ins>` and `<del>` carry the meaning on their own — a screen
+   reader announces them — so colour is the second channel and the line through
+   a deletion is the third. `diffmod` is both halves of one replacement and is
+   deliberately the same pair of colours: telling the two apart is the job of
+   the element, not of a third tint nobody would learn.
+
+   `text-decoration: none` on the insertion is not cosmetic. The browser's
+   default for `<ins>` is an underline, which in a rendered document is
+   indistinguishable from a link. */
+.markdown-rendered ins {
+  background: light-dark(#e6ffec, #12261e);
+  color: light-dark(#1a7f37, #3fb950);
+  text-decoration: none;
+}
+
+.markdown-rendered del {
+  background: light-dark(#ffebe9, #25171c);
+  color: light-dark(#cf222e, #f85149);
+  text-decoration: line-through;
+  text-decoration-color: light-dark(#cf222e88, #f8514988);
+}
+
 /* Room to scroll past the last file, so its card can reach the top of the
    column like every other one. Without it CodeView stops scrolling with the
    final item's *bottom* level with the scrollport, which puts the top of that
-   card — where its controls are — below the fold with nowhere left to go. */
+   card — where its controls are — below the fold with nowhere left to go.
+
+   It is also, unintentionally, the budget for a second problem, and the two
+   compete. CodeView measures a collapsed item at roughly the height of its
+   header row — 38px in a browser — and never re-measures it. Every card in a
+   rich comparison mode is collapsed, and its body arrives later, from the
+   worker: a rendered Markdown diff settles at ~153px, an image at ~126px, a
+   CSV grid at ~179px. The difference is scroll range the viewer does not know
+   it has, it accumulates down the column, and past 40vh of it the last card
+   can no longer reach the top after all.
+
+   Measured on the browser fixture: two image-and-table cards cost ~229px and
+   fit; adding two rendered-Markdown cards above them costs ~459px and does
+   not. Reproduced on the commit *before* Markdown existed by moving a single
+   `.csv` into the middle of the column, so this is a property of rich cards in
+   general rather than of any one of them — Markdown is only the first file
+   type common enough to land in the middle of a real pull request. The fix is
+   for CodeView to observe its header slots rather than for this number to grow,
+   so this number is deliberately not being grown to hide it. */
 .column-tail {
   height: 40vh;
 }
