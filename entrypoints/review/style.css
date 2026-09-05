@@ -328,14 +328,49 @@ code {
   top: var(--topbar-height);
   z-index: 9;
   flex: 0 0 auto;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'strip strip'
+    'detail actions';
   align-items: center;
-  gap: var(--gap);
-  padding: 6px 12px;
+  column-gap: var(--gap);
+  row-gap: 4px;
+  padding: 0 0 6px;
   font-size: 13px;
   border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
   background: light-dark(#ffffff, #0d1117);
+}
+
+/* The strip is a row of its own and the two things under it share the next
+   one, so `.commit-tabs` steps out of the way rather than boxing them in. */
+.commit-tabs {
+  display: contents;
+}
+
+.commit-strip {
+  grid-area: strip;
+}
+
+.commit-detail {
+  grid-area: detail;
+  padding-left: 12px;
+}
+
+.scope-showing {
+  grid-area: detail;
+  padding-left: 12px;
+}
+
+.scope-actions {
+  grid-area: actions;
+  padding-right: 12px;
+}
+
+/* Full width, under everything else. */
+.scope-note {
+  grid-column: 1 / -1;
+  padding: 0 12px;
 }
 
 /* The whole point of the row: narrowed does not look like whole. A tinted
@@ -362,53 +397,60 @@ code {
 
 /* ------------------------------------------------------- the commit strip */
 
-.commit-tabs {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
 /* Scrolls rather than wraps. A wrapped strip changes height as the pull
    request does, and this bar sits above the diff — a second row appearing
    would move the column under whoever is reading it. */
 .commit-strip {
   display: flex;
-  gap: 3px;
   min-width: 0;
+  padding: 0 12px;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: thin;
-  padding-bottom: 2px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
 }
 
+/* Tabs rather than pills: an underline reads as "this is the one showing" the
+   way a filled capsule does not, and a run of them under a selected range
+   joins into one bar, which is exactly what a range is. */
 .commit-tab {
+  position: relative;
   flex: 0 0 auto;
-  min-width: 24px;
-  padding: 2px 7px;
+  min-width: 30px;
+  padding: 7px 10px 8px;
   font: inherit;
   font-size: 12px;
-  /* So the strip does not jitter as the numbers gain digits. */
+  /* So the strip does not jitter as the numbers gain a digit. */
   font-variant-numeric: tabular-nums;
-  line-height: 18px;
+  line-height: 16px;
   color: light-dark(#59636e, #9198a1);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
-  border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  background: none;
   cursor: pointer;
   transition:
     background-color 0.12s ease,
-    border-color 0.12s ease;
+    color 0.12s ease;
 }
 
 .commit-tab:hover {
   color: light-dark(#1f2328, #e6edf3);
-  border-color: light-dark(#8c959f, #6e7681);
+  background: light-dark(#eef1f4, #212830);
 }
 
 .commit-tab[aria-pressed='true'] {
-  color: #ffffff;
-  border-color: light-dark(#0969da, #4493f8);
+  color: light-dark(#1f2328, #e6edf3);
+  font-weight: 600;
+}
+
+/* Drawn on a pseudo-element rather than as a border, so selecting a commit
+   does not move its number by the border's width. Flush to the ends, so a
+   range of them is one unbroken bar. */
+.commit-tab[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 2px;
   background: light-dark(#0969da, #4493f8);
 }
 

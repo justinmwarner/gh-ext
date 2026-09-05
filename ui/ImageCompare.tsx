@@ -14,6 +14,14 @@
  * mode that runs no script and resolves no external references — which is the
  * only safe way to render markup that arrived from a pull request.
  *
+ * The two sliding modes act on **both** layers, not just the top one. Fading
+ * the new image in over the old, or clipping only the new one, looks correct
+ * for opaque images — the top layer eventually covers the bottom, so nobody
+ * notices the bottom is still there. Give either side an alpha channel and the
+ * old version shows through at every setting including the last, and a swipe
+ * reveals the new image composited *over* the old rather than instead of it.
+ * So onion cross-fades and swipe clips complementary halves.
+ *
  * The three overlay modes need the two images in one coordinate space. They are
  * rarely the same size — that is often the change — so the box is the larger of
  * the two in each axis and each image is sized as a percentage of it, top-left
@@ -172,7 +180,14 @@ export function ImageCompare({ variant, path, before, after }: ImageCompareProps
           className="image-layer"
           src={before.url}
           alt={`${path} before this change`}
-          style={scale(beforeSize)}
+          style={{
+            ...scale(beforeSize),
+            // The old image has to get out of the way, not just be covered up.
+            ...(variant === 'onion' ? { opacity: 1 - position / 100 } : {}),
+            ...(variant === 'swipe'
+              ? { clipPath: `inset(0 ${100 - position}% 0 0)` }
+              : {}),
+          }}
           onLoad={(event) =>
             setBeforeSize({
               width: event.currentTarget.naturalWidth,
@@ -186,8 +201,9 @@ export function ImageCompare({ variant, path, before, after }: ImageCompareProps
           alt={`${path} after this change`}
           style={{
             ...scale(afterSize),
-            // Swipe clips rather than fades, so the two halves stay at full
-            // fidelity and the seam is exactly where the reviewer put it.
+            // Swipe clips rather than fades, so both halves stay at full
+            // fidelity and the seam is exactly where the reviewer put it. The
+            // other half of this inset is on the layer below.
             ...(variant === 'swipe'
               ? { clipPath: `inset(0 0 0 ${position}%)` }
               : {}),

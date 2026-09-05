@@ -51,12 +51,16 @@ const details = () => screen.getByTestId('commit-details').textContent ?? '';
  * One `setup()` instance for both calls, because the direct API builds a fresh
  * one per call and a modifier held on one instance is not held on the next.
  */
-const shiftClick = async (element: HTMLElement): Promise<void> => {
+const withModifier = async (element: HTMLElement, modifier: string): Promise<void> => {
   const user = userEvent.setup();
-  await user.keyboard('{Shift>}');
+  await user.keyboard(`{${modifier}>}`);
   await user.click(element);
-  await user.keyboard('{/Shift}');
+  await user.keyboard(`{/${modifier}}`);
 };
+
+const shiftClick = (element: HTMLElement) => withModifier(element, 'Shift');
+const ctrlClick = (element: HTMLElement) => withModifier(element, 'Control');
+const metaClick = (element: HTMLElement) => withModifier(element, 'Meta');
 
 describe('the strip', () => {
   it('numbers the commits from one, oldest first', () => {
@@ -158,6 +162,34 @@ describe('choosing', () => {
     const { onScope } = mount({ kind: 'commits', from: COMMITS[2]!.oid, to: COMMITS[2]!.oid });
 
     await shiftClick(tab('Commit 1, 1111111'));
+
+    expect(onScope).toHaveBeenCalledWith({
+      kind: 'commits',
+      from: COMMITS[0]!.oid,
+      to: COMMITS[2]!.oid,
+    });
+  });
+
+  it('extends on a control-click too', async () => {
+    // Shift is the convention for a range and control for a set, but there are
+    // no disjoint sets here — the diff between two commits is the span between
+    // them — so both mean the same thing rather than one of them meaning
+    // nothing.
+    const { onScope } = mount({ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[0]!.oid });
+
+    await ctrlClick(tab('Commit 3, 3333333'));
+
+    expect(onScope).toHaveBeenCalledWith({
+      kind: 'commits',
+      from: COMMITS[0]!.oid,
+      to: COMMITS[2]!.oid,
+    });
+  });
+
+  it('extends on a command-click, which is what a Mac sends', async () => {
+    const { onScope } = mount({ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[0]!.oid });
+
+    await metaClick(tab('Commit 3, 3333333'));
 
     expect(onScope).toHaveBeenCalledWith({
       kind: 'commits',

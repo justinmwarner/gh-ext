@@ -124,7 +124,16 @@ export function ScopeBar({
         commits={commits}
         scope={chosen}
         onScope={onScope}
-        fallback={busy ? 'Comparing…' : showing(scope, commitCount, failed)}
+        // Nothing for the ordinary case. The pressed "All" tab already says
+        // the column is showing everything, and a sentence repeating it is one
+        // more line of chrome above a diff that wants the room.
+        fallback={
+          busy
+            ? 'Comparing…'
+            : scope.kind === 'whole' && !failed
+              ? ''
+              : showing(scope, commitCount, failed)
+        }
       />
 
       {commits.length === 0 && (

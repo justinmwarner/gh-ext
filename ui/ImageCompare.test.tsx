@@ -104,3 +104,54 @@ describe('the plates, which are what side by side draws', () => {
     expect(before?.hasAttribute('height')).toBe(false);
   });
 });
+
+describe('the overlay modes, which have to hide one side to show the other', () => {
+  const layers = (variant: 'onion' | 'swipe') =>
+    render(
+      <ImageCompare
+        variant={variant}
+        path="assets/logo.png"
+        before={image({ width: 100, height: 100 })}
+        after={image({ width: 100, height: 100 })}
+      />,
+    ).container.querySelectorAll<HTMLElement>('img.image-layer');
+
+  it('cross-fades an onion skin rather than fading one side in over the other', () => {
+    // Fading the top layer in and leaving the bottom at full opacity only
+    // *looks* right for opaque images, where the top eventually covers the
+    // bottom. Give either side an alpha channel and the old version shows
+    // through at every setting, including the last one.
+    const [before, after] = layers('onion');
+
+    // The slider starts at the halfway point.
+    expect(before?.style.opacity).toBe('0.5');
+    expect(after?.style.opacity).toBe('0.5');
+  });
+
+  it('clips both sides of a swipe, so the seam has one image on each side', () => {
+    // Clipping only the top layer leaves the bottom painted underneath it, so
+    // the revealed half is the new image composited *over* the old one. Opaque
+    // images hide that; anything with transparency does not.
+    const [before, after] = layers('swipe');
+
+    expect(before?.style.clipPath).toBe('inset(0 50% 0 0)');
+    expect(after?.style.clipPath).toBe('inset(0 0 0 50%)');
+  });
+
+  it('leaves both sides alone for a difference blend', () => {
+    // Difference needs both layers at full strength; the blend mode is what
+    // does the work.
+    const [before, after] = render(
+      <ImageCompare
+        variant="difference"
+        path="assets/logo.png"
+        before={image({ width: 100, height: 100 })}
+        after={image({ width: 100, height: 100 })}
+      />,
+    ).container.querySelectorAll<HTMLElement>('img.image-layer');
+
+    expect(before?.style.opacity).toBe('');
+    expect(before?.style.clipPath).toBe('');
+    expect(after?.style.opacity).toBe('');
+  });
+});

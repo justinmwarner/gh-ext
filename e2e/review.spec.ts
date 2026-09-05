@@ -919,7 +919,12 @@ test('scoping the diff to one commit never draws a comment on the wrong line', a
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
   await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'whole');
-  await expect(page.locator('.scope-bar')).toContainText('all 3 commits');
+  // The pressed "All" tab is what says the column is showing everything; the
+  // sentence that used to repeat it is gone.
+  await expect(page.getByRole('button', { name: 'All' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
 
   await page.getByRole('button', { name: 'Choose commits…' }).click();
   const picker = page.getByRole('dialog', { name: 'Commits' });

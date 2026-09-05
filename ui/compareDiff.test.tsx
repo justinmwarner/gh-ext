@@ -155,13 +155,17 @@ const columnLines = (): string[] =>
   );
 
 describe('the scope bar', () => {
-  it('says the whole pull request is on screen before anything is narrowed', () => {
+  it('shows the whole pull request as a state, not as an absence', () => {
     // The whole diff and a diff scoped to one commit must not look the same,
-    // and the only way to guarantee that is to state the ordinary case too.
+    // and the only way to guarantee that is to say the ordinary case out loud
+    // too. It used to be a sentence; it is the pressed "All" tab now, which is
+    // the same guarantee in the control the reviewer is already looking at.
     render(<Shell retry={() => {}} payload={payloadWith()} />);
 
     expect(scopeBar().getAttribute('data-scope')).toBe('whole');
-    expect(scopeBar().textContent).toMatch(/all 3 commits/i);
+    expect(
+      screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   it('says the commit list is short when GitHub did not send all of it', () => {

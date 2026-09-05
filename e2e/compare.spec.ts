@@ -171,6 +171,43 @@ test('the overlay modes put both images in one coordinate space', async ({
   expect(boxes[0]?.width).toBeCloseTo(boxes[1]?.width ?? -1, 1);
 });
 
+test('the overlay modes get the old image out of the way, not just cover it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // Fading the new image in over the old, or clipping only the new one, looks
+  // right for opaque images because the top layer eventually covers the bottom.
+  // Give either side an alpha channel and the old version shows through at
+  // every setting including the last. Both layers have to move.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await reach(page, IMAGE_FILE);
+
+  const opacities = async (): Promise<string[]> =>
+    page.locator('img.image-layer').evaluateAll((nodes) =>
+      nodes.map((node) => getComputedStyle(node).opacity),
+    );
+
+  await page.getByRole('button', { name: 'Onion skin', exact: true }).first().click();
+  await page.getByRole('slider').first().fill('100');
+  expect(await opacities()).toEqual(['0', '1']);
+
+  await page.getByRole('slider').first().fill('0');
+  expect(await opacities()).toEqual(['1', '0']);
+
+  await page.getByRole('button', { name: 'Swipe', exact: true }).first().click();
+  await page.getByRole('slider').first().fill('30');
+  const clips = await page
+    .locator('img.image-layer')
+    .evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).clipPath));
+  // Complementary halves: the seam has one image on each side of it rather
+  // than one image over the top of the other.
+  expect(clips[0]).toContain('70%');
+  expect(clips[1]).toContain('30%');
+});
+
 test('the swipe slider moves the seam with the keyboard', async ({
   context,
   extensionId,

@@ -88,8 +88,13 @@ export function CommitTabs({ commits, scope, onScope, fallback = '' }: CommitTab
     const commit = commits[slot];
     if (commit === undefined) return;
 
-    // Shift extends from whatever is already selected. With nothing selected
-    // there is no anchor to extend from, so it is an ordinary click.
+    // Shift or control extends from whatever is already selected. Shift is the
+    // convention for a range and control for a set, but there are no disjoint
+    // sets here — the diff between two commits is the span between them — so
+    // both mean the same thing rather than one of them meaning nothing.
+    //
+    // With nothing selected there is no anchor to extend from, so it is an
+    // ordinary click.
     const anchor = extend && span !== null ? span : null;
     if (anchor === null) {
       onScope({ kind: 'commits', from: commit.oid, to: commit.oid });
@@ -209,7 +214,7 @@ export function CommitTabs({ commits, scope, onScope, fallback = '' }: CommitTab
               onFocus={() => setFocusSlot(slot)}
               onBlur={() => setFocusSlot(null)}
               onClick={(event) => {
-                choose(slot, event.shiftKey);
+                choose(slot, event.shiftKey || event.ctrlKey || event.metaKey);
                 // Focus stays on the button, but it stops driving the line.
                 // Otherwise a range the reviewer has just made goes on being
                 // described by whichever of its ends they clicked — which is
