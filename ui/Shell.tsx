@@ -441,7 +441,16 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
             tabIndex={0}
             style={{ visibility: view === 'overview' ? 'visible' : 'hidden' }}
           >
-            <OverviewView payload={payload} />
+            <OverviewView
+              payload={payload}
+              // Scope *and* switch. Narrowing the diff without moving to it
+              // would leave the reviewer on the Overview looking at a list,
+              // with the thing they asked for on a view they cannot see.
+              onReviewCommit={(commit) => {
+                setScope({ kind: 'commits', from: commit.oid, to: commit.oid });
+                setView('files');
+              }}
+            />
           </div>
         </div>
       </div>

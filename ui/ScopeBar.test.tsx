@@ -118,6 +118,26 @@ describe('what it says is on screen', () => {
     expect(status()).toContain('commit 1111111');
   });
 
+  it('opens the list of commits and hashes when the sentence is clicked', async () => {
+    // The sentence names what is on screen in the shortest form there is — a
+    // count, or one abbreviated sha. The reviewer who wants to know *which*
+    // ones has to go somewhere, and the picker is already that list.
+    const { props } = mount({
+      scope: NARROWED,
+      chosen: { kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[0]!.oid },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /commit 1111111/i }));
+
+    expect(props.onOpenPicker).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the busy line as text, since there is nothing yet to list', async () => {
+    mount({ busy: true, scope: NARROWED });
+
+    expect(screen.queryByRole('button', { name: /comparing/i })).toBeNull();
+  });
+
   it('says a comparison is on its way rather than looking finished', () => {
     mount({ busy: true, scope: NARROWED });
 

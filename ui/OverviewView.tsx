@@ -1,10 +1,17 @@
 /**
  * The Overview view: everything about the change that is not the change.
  *
- * What it claims to do, what it is being merged into, whether CI agrees, and
- * who else has looked. All four were previously squeezed into a rail 296px
- * wide or scattered across the top bar, where the branch pair sat beside the
- * title as though it described the pull request rather than one fact about it.
+ * What it claims to do, how it got there, what it is being merged into,
+ * whether CI agrees, and who else has looked. Most of it was previously
+ * squeezed into a rail 296px wide or scattered across the top bar, where the
+ * branch pair sat beside the title as though it described the pull request
+ * rather than one fact about it.
+ *
+ * The commit log is here because the numbered strip above the diff cannot hold
+ * it. That strip says nothing but a number, deliberately — a row of subjects
+ * is unscannable and the reviewer up there is stepping along a history they
+ * are already reading. This is where the numbers get their subjects back, so
+ * "which commit should I read" can be answered before you are inside one.
  *
  * Two columns: the description gets the reading measure it needs, and the
  * facts about the change stand beside it rather than under it. Each list keeps
@@ -18,15 +25,19 @@
 
 import { type ReactNode, useMemo } from 'react';
 import type { PrPayload } from '@/lib/messages';
+import type { PrCommit } from '@/lib/github/types';
 import { type CheckContext, checksSummary } from './checks';
 import { htmlToParagraphs } from './prBody';
 import { ChecksChip } from './ChecksChip';
+import { CommitLog } from './CommitLog';
 import { ReviewerAvatars } from './ReviewerAvatars';
 import { prBranches, prPermalink, prReviewers } from './prNode';
 import { reviewerLabel, reviewerTone } from './reviewerLabel';
 
 export interface OverviewViewProps {
   payload: PrPayload;
+  /** Scope the diff to one commit and take the reviewer to it. */
+  onReviewCommit: (commit: PrCommit) => void;
 }
 
 function Description({ payload }: { payload: PrPayload }) {
@@ -153,13 +164,27 @@ function SectionHead({ title, children }: { title: string; children?: ReactNode 
   );
 }
 
-export function OverviewView({ payload }: OverviewViewProps) {
+export function OverviewView({ payload, onReviewCommit }: OverviewViewProps) {
   return (
     <div className="overview">
       <div className="overview-main">
         <section className="overview-section">
           <SectionHead title="Description" />
           <Description payload={payload} />
+        </section>
+
+        {/* Under the description rather than in the column beside it: a
+            subject line is a sentence and wants the reading measure, and the
+            narrow column is for facts that fit on one line. */}
+        <section className="overview-section">
+          <SectionHead title="Commits">
+            <span className="overview-count">{payload.commits.length}</span>
+          </SectionHead>
+          <CommitLog
+            commits={payload.commits}
+            pr={payload.ref}
+            onReview={onReviewCommit}
+          />
         </section>
       </div>
 

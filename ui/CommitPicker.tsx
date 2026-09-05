@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PrCommit } from '@/lib/github/types';
 import { commitLabel } from '@/lib/review/diffScope';
+import { shortDate } from './timestamp';
 
 export interface CommitPickerProps {
   commits: readonly PrCommit[];
@@ -33,11 +34,6 @@ export interface CommitPickerProps {
 /** Where each oid sits, so a range can be marked without scanning per row. */
 const positions = (commits: readonly PrCommit[]): Map<string, number> =>
   new Map(commits.map((commit, index) => [commit.oid, index]));
-
-const shortDate = (iso: string): string => {
-  const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? '' : at.toISOString().slice(0, 10);
-};
 
 export function CommitPicker({
   commits,

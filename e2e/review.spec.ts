@@ -873,18 +873,33 @@ test('the numbered strip scopes the diff, and keeps All within reach', async ({
 
   // "All" is last in the sequence and pinned to the right-hand end of it, so a
   // pull request long enough to scroll its numbers away cannot scroll away the
-  // way back. Only a layout engine can show that the sticky actually holds.
+  // way back. The numbers go with it rather than starting at the left, so the
+  // strip reads as one group. Only a layout engine can show any of that.
   const ends = await strip.evaluate((node) => {
+    const tabs = [...node.querySelectorAll('.commit-tab')];
     const all = node.querySelector('.commit-tab-all');
-    if (all === null) throw new Error('no All tab');
+    const first = tabs[0];
+    const lastNumber = tabs[tabs.length - 2];
+    if (all === null || first === undefined || lastNumber === undefined) {
+      throw new Error('no strip');
+    }
+    const box = (element: Element) => element.getBoundingClientRect();
     return {
       last: node.lastElementChild === all,
-      stripRight: Math.round(node.getBoundingClientRect().right),
-      allRight: Math.round(all.getBoundingClientRect().right),
+      stripLeft: Math.round(box(node).left),
+      stripRight: Math.round(box(node).right),
+      firstLeft: Math.round(box(first).left),
+      allLeft: Math.round(box(all).left),
+      allRight: Math.round(box(all).right),
+      lastNumberRight: Math.round(box(lastNumber).right),
     };
   });
   expect(ends.last).toBe(true);
   expect(ends.allRight).toBe(ends.stripRight);
+  // The numbers are up against "All" — one 2px flex gap between them — and not
+  // stranded at the far left of a wide strip.
+  expect(ends.allLeft - ends.lastNumberRight).toBe(2);
+  expect(ends.firstLeft).toBeGreaterThan(ends.stripLeft);
 
 
   // The first commit alone, which is the one range this fixture routes for a

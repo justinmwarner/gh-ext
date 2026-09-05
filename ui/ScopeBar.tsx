@@ -177,7 +177,18 @@ export function ScopeBar({
           {SEPARATOR}
           <span className="deletions">{`−${changed.deletions}`}</span>
         </span>
-        {narrowing !== null && <span className="scope-showing">{narrowing}</span>}
+        {narrowing !== null &&
+          (busy ? (
+            <span className="scope-showing">{narrowing}</span>
+          ) : (
+            // The sentence names what is on screen in the shortest form there
+            // is — a count, or one abbreviated sha. A reviewer who wants to
+            // know *which* ones has to go somewhere for it, and the picker is
+            // already that list.
+            <button type="button" className="scope-showing" onClick={onOpenPicker}>
+              {narrowing}
+            </button>
+          ))}
       </p>
 
       <CommitTabs commits={commits} scope={chosen} onScope={onScope} />

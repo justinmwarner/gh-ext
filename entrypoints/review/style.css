@@ -381,13 +381,34 @@ code {
 }
 
 /* Only ever on screen when the column is narrowed or is being narrowed, so it
-   is allowed to be the loud half of the sentence. */
+   is allowed to be the loud half of the sentence.
+
+   A button, because the sentence names what is on screen in the shortest form
+   there is — a count, or one abbreviated sha — and the reviewer who wants to
+   know *which* ones needs somewhere to go. Styled as the text it is: a control
+   shaped like a button here would read as a fourth thing on a row that already
+   has three. */
 .scope-showing {
   min-width: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
   font-weight: 600;
+  text-align: left;
   color: light-dark(#1f2328, #e6edf3);
+  border: 0;
+  background: none;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+button.scope-showing {
+  cursor: pointer;
+}
+
+button.scope-showing:hover {
+  color: light-dark(#0969da, #4493f8);
+  text-decoration: underline;
 }
 
 /* The whole point of the row: a state something is wrong in does not look like
@@ -477,14 +498,21 @@ code {
   background: var(--page-bg);
 }
 
-/* "All" is pinned to the right-hand end. The numbers are what grows, so a long
-   pull request scrolls them away — and "back to everything" is the one control
-   that must not go with them. `margin-left: auto` puts it at the end while the
-   strip still fits; `sticky` holds it there once it does not. */
+/* The whole group sits at the right-hand end, against "All", rather than the
+   numbers starting at the left and "All" alone being pushed over. On the first
+   child rather than `justify-content: flex-end` on the strip, which in a
+   scroll container puts the overflow off the unreachable start edge. When the
+   numbers do overflow, the auto margin resolves to zero and it scrolls. */
+.commit-tab:first-child {
+  margin-left: auto;
+}
+
+/* "All" is pinned to that end. The numbers are what grows, so a long pull
+   request scrolls them away — and "back to everything" is the one control that
+   must not go with them. */
 .commit-tab-all {
   position: sticky;
   right: 0;
-  margin-left: auto;
   /* Opaque, or the numbers it is sitting over show through it. */
   background: var(--scope-ground);
 }
@@ -1617,6 +1645,96 @@ code {
   color: light-dark(#59636e, #9198a1);
 }
 
+/* ---------------------------------------------- the Overview's commit log */
+
+/* The count beside the heading, in the same voice as the heading itself. */
+.overview-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.commit-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Row and link side by side. The row is the whole width; the link is a target
+   at the end of it rather than something the row's own click swallows. */
+.commit-log-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.commit-log-row + .commit-log-row {
+  border-top: 1px solid light-dark(#eaeef2, #21262d);
+}
+
+/* Three columns: the number the strip also uses, the subject, and the facts.
+   The subject gets whatever is left, because it is the part worth reading. */
+.commit-log-open {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--gap);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: inherit;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.commit-log-open:hover {
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.commit-log-number {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.commit-log-headline {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.commit-log-meta {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.commit-log-meta code {
+  font-size: 12px;
+}
+
+.commit-log-link {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  color: light-dark(#59636e, #9198a1);
+  border-radius: 6px;
+}
+
+.commit-log-link:hover {
+  color: light-dark(#0969da, #4493f8);
+  background: light-dark(#f6f8fa, #212830);
+}
+
 .overview-text {
   margin: 0 0 10px;
   /* The description is plain text with its markup removed, so long tokens and
@@ -2329,9 +2447,7 @@ code {
   font-style: italic;
 }
 
-/* The box the two images share. `isolation` is load-bearing: without it the
-   difference blend reaches through to whatever is painted behind the card,
-   and "anything unchanged goes black" stops being true. */
+/* The box the two images share. */
 /* A default box for an image whose dimensions we could not read, so the card
    is never zero pixels tall while it waits to decode. A stage that grows after
    it is on screen pushes the diff column out from under whoever is scrolling
@@ -2343,10 +2459,19 @@ code {
 .image-stage {
   position: relative;
   width: 100%;
-  isolation: isolate;
   border: 1px solid light-dark(#d1d9e0, #3d444d);
   border-radius: 4px;
   overflow: hidden;
+}
+
+/* The two layers and nothing else, so the difference filter has something to
+   apply to that is not also the stage's border. `isolation` is load-bearing:
+   without it the difference blend reaches through to whatever is painted
+   behind the card, and "anything unchanged goes black" stops being true. */
+.image-canvas {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
 }
 
 /* Both layers anchor top-left, which is the only corner two images of
@@ -2364,9 +2489,19 @@ code {
 }
 
 /* Black rather than the page background, so what the reviewer sees is the
-   difference itself rather than a blend against #0d1117. */
-.image-compare[data-variant='difference'] .image-stage {
+   difference itself rather than a blend against #0d1117. On the canvas rather
+   than the stage, so the filter above it has the black to work from. */
+.image-compare[data-variant='difference'] .image-canvas {
   background: #000000;
+}
+
+/* The filter definition draws nothing and must occupy nothing. Out of flow
+   rather than `display: none`, which in some engines takes the definition with
+   it. */
+.image-filter {
+  position: absolute;
+  width: 0;
+  height: 0;
 }
 
 .image-slider {

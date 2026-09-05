@@ -10,3 +10,16 @@ export function formatTimestamp(iso: string): string {
   if (Number.isNaN(at.getTime())) return iso;
   return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+/**
+ * A commit's date, as a date and nothing else.
+ *
+ * ISO rather than the reader's locale, and shared for the same reason
+ * `formatTimestamp` is: two surfaces list the same commit — the picker and the
+ * Overview's log — and two date formats is two ways for one commit to look
+ * like two.
+ */
+export function shortDate(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? '' : at.toISOString().slice(0, 10);
+}

@@ -17,6 +17,20 @@ export function pullRequestUrl(pr: PrRef): string {
 }
 
 /**
+ * The github.com URL for one commit.
+ *
+ * `/commit/<oid>` rather than `/pull/42/commits/<oid>`. The second exists and
+ * is the wrong destination: it is the commit as one step of a review, framed
+ * by the pull request, and what a reviewer following a link off a commit row
+ * wants is the commit.
+ */
+export function commitUrl(pr: PrRef, oid: string): string {
+  const owner = encodeURIComponent(pr.owner);
+  const repo = encodeURIComponent(pr.repo);
+  return `${GITHUB_ORIGIN}/${owner}/${repo}/commit/${encodeURIComponent(oid)}`;
+}
+
+/**
  * Accept a `permalink` from the API only if it points at github.com.
  *
  * The field is trusted in practice, but it is server-supplied data reaching an

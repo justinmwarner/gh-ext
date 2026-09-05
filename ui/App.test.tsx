@@ -52,7 +52,9 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Cache the diff on head SHA')).toBeDefined();
+    expect(
+      await screen.findByRole('heading', { name: 'Cache the diff on head SHA' }),
+    ).toBeDefined();
     expect(requestMock).toHaveBeenCalledWith({
       kind: 'get-pr',
       pr: { owner: 'acme', repo: 'widgets', number: 42 },
@@ -107,6 +109,8 @@ describe('App', () => {
 
     window.location.hash = '#/pr/acme/widgets/42';
 
-    expect(await screen.findByText('Cache the diff on head SHA')).toBeDefined();
+    expect(
+      await screen.findByRole('heading', { name: 'Cache the diff on head SHA' }),
+    ).toBeDefined();
   });
 });

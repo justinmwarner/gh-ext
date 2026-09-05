@@ -7,6 +7,16 @@
  * shift of a few pixels that neither of the first two would show. Difference
  * turns everything unchanged black, so what remains is exactly what moved.
  *
+ * Difference is *painted in one colour*, which it did not used to be.
+ * `mix-blend-mode: difference` is per channel, so a red pixel that became blue
+ * came out magenta and a green one that became blue came out cyan — colours
+ * that look like information and carry none. The only thing the mode has to
+ * say is "this pixel is not the same in both versions", and one colour says it
+ * once. An SVG filter over the blended result sums the three channels into an
+ * intensity, lifts the low end so a change of a few units is visible rather
+ * than merely present, and ramps that from black to the red this page uses for
+ * a deletion everywhere else.
+ *
  * Both images are `<img>` tags pointed at object URLs made from bytes the
  * worker fetched. That indirection is the whole security story: this page never
  * calls `fetch`, an `<img>` pointed at github.com would be a request from a
@@ -43,7 +53,7 @@
  * this renders.
  */
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { LoadedImage } from './fileSides';
 
 export type ImageVariant = 'side-by-side' | 'swipe' | 'onion' | 'difference';
@@ -120,6 +130,52 @@ function Plate({
   );
 }
 
+/**
+ * What turns a channel-wise blend into one colour.
+ *
+ * Three steps over the already-blended result. The first sums red, green and
+ * blue into a single intensity, so "differs in any channel" becomes one
+ * number and the magenta-and-cyan artefacts of a raw difference blend go away.
+ * The second lifts the low end — a four-unit change is a real change and at
+ * 4/255 it is invisible — and the third ramps that intensity from black to the
+ * red this page uses for a deletion everywhere else.
+ *
+ * `sRGB` rather than the default `linearRGB`: the input is already sRGB pixels
+ * and converting them twice would change which differences read as large.
+ *
+ * Rendered per card with an id of its own rather than once for the page: a
+ * `filter: url(#…)` that does not resolve makes the element **not render at
+ * all**, so a shared definition living somewhere else is a blank card waiting
+ * to happen.
+ */
+function DifferenceFilter({ id }: { id: string }) {
+  return (
+    <svg className="image-filter" aria-hidden="true" focusable="false">
+      <filter id={id} colorInterpolationFilters="sRGB">
+        <feColorMatrix
+          type="matrix"
+          values="1 1 1 0 0
+                  1 1 1 0 0
+                  1 1 1 0 0
+                  0 0 0 0 1"
+        />
+        <feComponentTransfer>
+          <feFuncR type="gamma" exponent={0.45} />
+          <feFuncG type="gamma" exponent={0.45} />
+          <feFuncB type="gamma" exponent={0.45} />
+        </feComponentTransfer>
+        <feColorMatrix
+          type="matrix"
+          values="0.973 0 0 0 0
+                  0.318 0 0 0 0
+                  0.286 0 0 0 0
+                  0     0 0 0 1"
+        />
+      </filter>
+    </svg>
+  );
+}
+
 export function ImageCompare({ variant, path, before, after }: ImageCompareProps) {
   // What the browser eventually reported, which is authoritative but late.
   const [beforeLoaded, setBeforeSize] = useState<Measured | null>(null);
@@ -131,6 +187,10 @@ export function ImageCompare({ variant, path, before, after }: ImageCompareProps
   const afterSize = afterLoaded ?? after?.size ?? null;
   /** Where the swipe divider sits, and how much of the new image shows. */
   const [position, setPosition] = useState(50);
+  // Per card. Two images in one pull request are two cards on one page, and a
+  // shared id means the second card quietly uses the first card's filter.
+  // React's ids contain colons, which a CSS `url(#…)` fragment cannot carry.
+  const filterId = `image-difference-${useId().replaceAll(':', '')}`;
 
   if (variant === 'side-by-side' || before === null || after === null) {
     return (
@@ -176,52 +236,62 @@ export function ImageCompare({ variant, path, before, after }: ImageCompareProps
           An AVIF or an ICO has no header reader here, so it arrives unsized and
           would otherwise be zero pixels tall until it decoded. */}
       <div className="image-stage" data-sized={measured} style={stage}>
-        <img
-          className="image-layer"
-          src={before.url}
-          alt={`${path} before this change`}
-          style={{
-            ...scale(beforeSize),
-            // The old image has to get out of the way, not just be covered up.
-            ...(variant === 'onion' ? { opacity: 1 - position / 100 } : {}),
-            ...(variant === 'swipe'
-              ? { clipPath: `inset(0 ${100 - position}% 0 0)` }
-              : {}),
-          }}
-          onLoad={(event) =>
-            setBeforeSize({
-              width: event.currentTarget.naturalWidth,
-              height: event.currentTarget.naturalHeight,
-            })
-          }
-        />
-        <img
-          className="image-layer image-layer-top"
-          src={after.url}
-          alt={`${path} after this change`}
-          style={{
-            ...scale(afterSize),
-            // Swipe clips rather than fades, so both halves stay at full
-            // fidelity and the seam is exactly where the reviewer put it. The
-            // other half of this inset is on the layer below.
-            ...(variant === 'swipe'
-              ? { clipPath: `inset(0 0 0 ${position}%)` }
-              : {}),
-            ...(variant === 'onion' ? { opacity: position / 100 } : {}),
-          }}
-          onLoad={(event) =>
-            setAfterSize({
-              width: event.currentTarget.naturalWidth,
-              height: event.currentTarget.naturalHeight,
-            })
-          }
-        />
+        {/* The filter goes on this, not on the stage: it applies to everything
+            the element draws, and the stage's 1px grey border summed to full
+            intensity is a red box drawn around every difference view. */}
+        <div
+          className="image-canvas"
+          style={variant === 'difference' ? { filter: `url(#${filterId})` } : undefined}
+        >
+          <img
+            className="image-layer"
+            src={before.url}
+            alt={`${path} before this change`}
+            style={{
+              ...scale(beforeSize),
+              // The old image has to get out of the way, not just be covered up.
+              ...(variant === 'onion' ? { opacity: 1 - position / 100 } : {}),
+              ...(variant === 'swipe'
+                ? { clipPath: `inset(0 ${100 - position}% 0 0)` }
+                : {}),
+            }}
+            onLoad={(event) =>
+              setBeforeSize({
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              })
+            }
+          />
+          <img
+            className="image-layer image-layer-top"
+            src={after.url}
+            alt={`${path} after this change`}
+            style={{
+              ...scale(afterSize),
+              // Swipe clips rather than fades, so both halves stay at full
+              // fidelity and the seam is exactly where the reviewer put it. The
+              // other half of this inset is on the layer below.
+              ...(variant === 'swipe'
+                ? { clipPath: `inset(0 0 0 ${position}%)` }
+                : {}),
+              ...(variant === 'onion' ? { opacity: position / 100 } : {}),
+            }}
+            onLoad={(event) =>
+              setAfterSize({
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              })
+            }
+          />
+        </div>
       </div>
+
+      {variant === 'difference' && <DifferenceFilter id={filterId} />}
 
       {variant === 'difference' ? (
         <p className="image-hint">
-          Anything identical in both versions is black. What you can see is what
-          changed.
+          Anything identical in both versions is black. Everything that changed
+          is picked out in red, however it changed.
         </p>
       ) : (
         // A range input rather than a draggable divider: it is the control the

@@ -155,3 +155,62 @@ describe('the overlay modes, which have to hide one side to show the other', () 
     expect(after?.style.opacity).toBe('');
   });
 });
+
+describe('what the difference is painted in', () => {
+  const difference = (path = 'assets/logo.png') =>
+    render(
+      <ImageCompare
+        variant="difference"
+        path={path}
+        before={image({ width: 100, height: 100 })}
+        after={image({ width: 100, height: 100 })}
+      />,
+    ).container;
+
+  const canvas = (container: HTMLElement) =>
+    container.querySelector('.image-canvas') as HTMLElement;
+
+  it('collapses the blend to one colour instead of leaving it channel-wise', () => {
+    // `mix-blend-mode: difference` is per channel, so a red pixel that became
+    // blue comes out magenta and a green one that became blue comes out cyan.
+    // Those colours look like information and are not — the only thing being
+    // said is "this pixel moved". One colour says it once.
+    const container = difference();
+
+    const reference = /^url\(["']?#(.+?)["']?\)$/.exec(canvas(container).style.filter);
+    expect(reference).not.toBeNull();
+    expect(container.querySelector(`filter#${reference?.[1] ?? ''}`)).not.toBeNull();
+  });
+
+  it('keeps the filter off the stage, so its border is not repainted too', () => {
+    // A filter applies to everything the element draws, its border included —
+    // and the stage's 1px grey border summed to full red is a red box around
+    // every difference view.
+    const container = difference();
+
+    expect((container.querySelector('.image-stage') as HTMLElement).style.filter).toBe('');
+  });
+
+  it('gives each card a filter of its own rather than one shared id', () => {
+    // Two images in one pull request are two cards on one page, and duplicate
+    // ids mean the second card silently uses the first card's filter.
+    const first = difference('assets/one.png');
+    const second = difference('assets/two.png');
+
+    expect(canvas(first).style.filter).not.toBe(canvas(second).style.filter);
+  });
+
+  it('filters nothing in the modes that are not a difference', () => {
+    const { container } = render(
+      <ImageCompare
+        variant="onion"
+        path="assets/logo.png"
+        before={image({ width: 100, height: 100 })}
+        after={image({ width: 100, height: 100 })}
+      />,
+    );
+
+    expect(canvas(container).style.filter).toBe('');
+    expect(container.querySelector('filter')).toBeNull();
+  });
+});

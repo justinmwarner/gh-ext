@@ -1,10 +1,11 @@
 /**
  * The Overview view: everything about the change that is not the change.
  *
- * Four regions, and each has a way of lying that these tests exist to prevent:
+ * Five regions, and each has a way of lying that these tests exist to prevent:
  * a description that injects HTML, a check list that renders only one arm of
- * the `statusCheckRollup.contexts` union, a reviewer list that drops teams, and
- * a branch pair that silently shows one branch twice.
+ * the `statusCheckRollup.contexts` union, a reviewer list that drops teams, a
+ * branch pair that silently shows one branch twice, and a commit log numbered
+ * differently from the strip it is meant to agree with.
  *
  * Threads are not here. They have a view of their own, because "what is still
  * outstanding" is the thing a reviewer looks at most and it was at the bottom
@@ -12,6 +13,7 @@
  */
 
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrPayload } from '@/lib/messages';
 import { DraftStore } from '@/lib/review/drafts';
@@ -27,17 +29,18 @@ beforeEach(() => {
   (request as unknown as Mock).mockReset();
 });
 
-function mount(payload: PrPayload) {
-  return render(
+function mount(payload: PrPayload, onReviewCommit = vi.fn()) {
+  const view = render(
     <ReviewSessionProvider
       pullRequest={payload.pullRequest}
       prRef={payload.ref}
       threads={payload.threads}
       drafts={new DraftStore(memoryStore())}
     >
-      <OverviewView payload={payload} />
+      <OverviewView payload={payload} onReviewCommit={onReviewCommit} />
     </ReviewSessionProvider>,
   );
+  return { ...view, onReviewCommit };
 }
 
 describe('the description', () => {
@@ -284,5 +287,31 @@ describe('the summaries beside each list', () => {
     expect(
       screen.getByRole('img', { name: /copilot-pull-request-reviewer \(bot\)/ }),
     ).toBeDefined();
+  });
+});
+
+describe('the commits', () => {
+  it('lists them with their subjects, which the strip cannot show', () => {
+    // The numbered strip above the diff says nothing but a number, on purpose.
+    // This is where the numbers get their subjects back.
+    mount(prPayload());
+
+    expect(screen.getByRole('list', { name: /commits/i })).toBeDefined();
+    expect(screen.getByText('Cache the diff on head SHA')).toBeDefined();
+  });
+
+  it('sends the reviewer to that commit’s diff when a row is chosen', async () => {
+    const { onReviewCommit } = mount(prPayload());
+
+    await userEvent.click(screen.getByRole('button', { name: /review commit 1/i }));
+
+    expect(onReviewCommit).toHaveBeenCalledOnce();
+  });
+
+  it('offers GitHub as a link rather than as the same click', async () => {
+    mount(prPayload());
+
+    const link = screen.getByRole('link', { name: /on github/i });
+    expect(link.getAttribute('href')).toContain('/commit/');
   });
 });

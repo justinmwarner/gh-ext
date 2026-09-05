@@ -133,10 +133,15 @@ test('the difference blend is applied, and is contained by its own stage', async
   await expect(stage).toBeVisible();
 
   const computed = await stage.evaluate((node) => {
+    const canvas = node.querySelector('.image-canvas');
     const top = node.querySelector('.image-layer-top');
     return {
-      isolation: getComputedStyle(node).isolation,
+      isolation: canvas === null ? null : getComputedStyle(canvas).isolation,
       blend: top === null ? null : getComputedStyle(top).mixBlendMode,
+      // The filter belongs to the layers, not to the stage. On the stage it
+      // would repaint the stage's own 1px border along with them.
+      stageFilter: getComputedStyle(node).filter,
+      canvasFilter: canvas === null ? null : getComputedStyle(canvas).filter,
     };
   });
 
@@ -144,6 +149,77 @@ test('the difference blend is applied, and is contained by its own stage', async
   // the card, and "anything unchanged goes black" stops being true.
   expect(computed.isolation).toBe('isolate');
   expect(computed.blend).toBe('difference');
+  expect(computed.stageFilter).toBe('none');
+  expect(computed.canvasFilter).toMatch(/^url\(/);
+});
+
+test('the difference comes out in one colour, whichever channel moved', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The bug this replaced: `mix-blend-mode: difference` is per channel, so a
+  // red pixel that became blue came out magenta and a green one that became
+  // blue came out cyan. Those look like information and carry none — the only
+  // thing the mode says is "this pixel is not the same in both versions".
+  //
+  // Run against the filter itself rather than against a screenshot. A canvas
+  // can draw *through* a `url(#…)` filter, which makes this a direct question:
+  // feed it a difference, read back what it paints.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await reach(page, IMAGE_FILE);
+
+  await modeButton(page, IMAGE_FILE, 'Difference').click();
+  await expect(card(page, IMAGE_FILE).locator('.image-canvas')).toBeVisible();
+
+  const painted = await card(page, IMAGE_FILE)
+    .locator('.image-canvas')
+    .evaluate((node) => {
+      const reference = /url\("?#([^")]+)"?\)/.exec(getComputedStyle(node).filter);
+      if (reference === null) throw new Error('no filter on the canvas');
+
+      /** What the filter paints for one blended pixel. */
+      const through = (fill: string): number[] => {
+        const source = document.createElement('canvas');
+        source.width = 1;
+        source.height = 1;
+        const sourceCtx = source.getContext('2d');
+        if (sourceCtx === null) throw new Error('no 2d context');
+        sourceCtx.fillStyle = fill;
+        sourceCtx.fillRect(0, 0, 1, 1);
+
+        const out = document.createElement('canvas');
+        out.width = 1;
+        out.height = 1;
+        const ctx = out.getContext('2d');
+        if (ctx === null) throw new Error('no 2d context');
+        ctx.filter = `url(#${reference[1] ?? ''})`;
+        ctx.drawImage(source, 0, 0);
+        return [...ctx.getImageData(0, 0, 1, 1).data];
+      };
+
+      return {
+        // A pixel that differs only in green, and one that differs only in
+        // blue. Channel-wise, these are two different colours.
+        green: through('#00ff00'),
+        blue: through('#0000ff'),
+        // Identical in both versions: the blend leaves it black.
+        same: through('#000000'),
+      };
+    });
+
+  // The same red for both, rather than green for one and blue for the other.
+  expect(painted.green.slice(0, 3)).toEqual(painted.blue.slice(0, 3));
+  // And it is red: dominant in the first channel, quiet in the other two.
+  const [r = 0, g = 0, b = 0] = painted.green;
+  expect(r).toBeGreaterThan(200);
+  expect(g).toBeLessThan(140);
+  expect(b).toBeLessThan(140);
+  // Unchanged stays black. A filter that tinted everything would be worse than
+  // the blend it replaced.
+  expect(painted.same.slice(0, 3)).toEqual([0, 0, 0]);
 });
 
 test('the overlay modes put both images in one coordinate space', async ({
