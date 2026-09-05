@@ -20,7 +20,6 @@ function Save-Img($c, [string]$path, $format) {
 $after = $Variant -eq 'after'
 $png  = [System.Drawing.Imaging.ImageFormat]::Png
 $jpeg = [System.Drawing.Imaging.ImageFormat]::Jpeg
-$gif  = [System.Drawing.Imaging.ImageFormat]::Gif
 $bmpF = [System.Drawing.Imaging.ImageFormat]::Bmp
 
 # 1. Same dimensions, one colour changes. The clean case for onion-skin,
@@ -55,11 +54,9 @@ $sq = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(140
 $c.g.FillRectangle($sq, $(if ($after) { 40 } else { 15 }), $(if ($after) { 40 } else { 15 }), 60, 60)
 Save-Img $c (Join-Path $Out 'transparent.png') $png
 
-# 5. Indexed colour, and a format a naive <img> swap handles but a canvas
-#    read-back may not.
-$c = New-Canvas 100 100 ([System.Drawing.Color]::FromArgb(0, 128, 128))
-$c.g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::Yellow)), $(if ($after) { 55 } else { 10 }), 25, 35, 50)
-Save-Img $c (Join-Path $Out 'animation.gif') $gif
+# 5. Indexed colour, animated. Not here: System.Drawing writes exactly one
+#    frame however many you give it, and a still GIF exercises nothing the
+#    other image fixtures do not. See tools/generate-gif.py.
 
 # 6. Small, uncompressed, and every pixel differs between the two sides.
 $c = New-Canvas 32 32 ([System.Drawing.Color]::White)
