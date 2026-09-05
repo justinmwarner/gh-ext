@@ -13,6 +13,7 @@
 
 import { RAW, modesForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
+import { type WhitespaceDiff, whitespaceNotice } from '@/lib/review/whitespace';
 import type { BlobRefs } from './blobLoader';
 import { ModeSwitcher } from './ModeSwitcher';
 import { RichCompare } from './RichCompare';
@@ -100,6 +101,15 @@ export interface FileCardProps {
   /** How this file is being compared. Already resolved against what it offers. */
   mode: string;
   onChangeMode: (path: string, mode: string) => void;
+  /**
+   * The rewrite this file is being read through, or null for GitHub's diff.
+   *
+   * Non-null is the state that has to be visible from across the room: the
+   * body below is then not what anyone else on this pull request is looking
+   * at, and nothing in a diff of code announces that by itself.
+   */
+  whitespace: WhitespaceDiff | null;
+  onToggleWhitespace: (path: string) => void;
   /** The two commits a rich comparison reads whole files from. */
   blobs: BlobRefs | null;
 }
@@ -112,15 +122,27 @@ export function FileCard({
   unanchored,
   mode,
   onChangeMode,
+  whitespace,
+  onToggleWhitespace,
   blobs,
 }: FileCardProps) {
   const body = fileBody(file);
   const raw = mode === RAW.id;
+  /**
+   * There is a text diff here to have an opinion about.
+   *
+   * Read off GitHub's patch rather than off what is drawn, so the control does
+   * not vanish at the moment it is used: a file whose every change was
+   * whitespace has an empty body once this is on, and a toggle that removed
+   * itself would leave the reviewer no way back.
+   */
+  const textDiff = raw && body.kind === 'diff';
   // Nothing to collapse: the card is already only its header, and a toggle that
   // reveals an empty rectangle is a lie about there being more to see. A card in
   // a rich mode is in exactly that state — its body is the comparison below,
-  // and the collapse toggle would be pointing at nothing.
-  const collapsible = raw && body.kind === 'diff';
+  // and the collapse toggle would be pointing at nothing. So is a file the
+  // recompute emptied.
+  const collapsible = textDiff && whitespace?.hunks !== 0;
   const modes = modesForFile(file);
 
   return (
@@ -164,12 +186,41 @@ export function FileCard({
         <ViewedCheckbox path={file.path} state={file.viewedState} />
       </div>
 
-      <ModeSwitcher
-        path={file.path}
-        modes={modes}
-        current={mode}
-        onChange={onChangeMode}
-      />
+      <div className="file-card-controls">
+        <ModeSwitcher
+          path={file.path}
+          modes={modes}
+          current={mode}
+          onChange={onChangeMode}
+        />
+
+        {/* Only where there is a text diff to take the whitespace out of. On a
+            binary, a withheld patch or a rich comparison it would be a button
+            with nothing behind it. */}
+        {textDiff && (
+          <button
+            type="button"
+            className="whitespace-toggle"
+            // `aria-pressed` rather than a class, for the same reason the mode
+            // buttons use it: this one changes what the card shows, and a
+            // visual-only toggle says nothing to a screen reader.
+            aria-pressed={whitespace !== null}
+            title="Hide changes where only the indentation or spacing moved."
+            onClick={() => onToggleWhitespace(file.path)}
+          >
+            Ignore whitespace
+          </button>
+        )}
+      </div>
+
+      {/* Not `role="status"`. This does not announce an event, it labels what
+          is underneath it for as long as it is underneath it — and it is the
+          only thing on the page that says the body is not GitHub's diff. */}
+      {whitespace !== null && (
+        <p className="file-note" data-whitespace-note role="note">
+          {whitespaceNotice(whitespace)}
+        </p>
+      )}
 
       {/* The sentence explaining an absent diff belongs to the raw view alone.
           Left on, a PNG in its side-by-side comparison would carry "Binary

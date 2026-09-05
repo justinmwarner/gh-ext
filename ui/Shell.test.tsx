@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Shell } from './Shell';
 import { request } from './background';
+import { diffLayout } from './pierreDom.fixture';
 import {
   fileFixture,
   prPayload,
@@ -173,6 +174,67 @@ describe('Shell', () => {
     expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
       'Files',
     );
+  });
+});
+
+/**
+ * The layout preference, from the kebab all the way to what Pierre drew.
+ *
+ * Worth an integration test rather than two unit ones because it crosses four
+ * components — the menu sets state in `ReviewSurface`, which drills it through
+ * `FilesView` into `DiffColumn` and out into an option on `CodeView` — and
+ * every seam in that chain is a place a prop can be quietly dropped.
+ */
+describe('the diff layout', () => {
+  const openLayoutMenu = async () => {
+    await userEvent.click(screen.getByRole('button', { name: /diff options/i }));
+    return screen.getByRole('menuitemcheckbox', { name: /split view/i });
+  };
+
+  it('opens unified, which is what the reviewer arrived from', async () => {
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    expect((await openLayoutMenu()).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('reaches the column when it is switched', async () => {
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    await userEvent.click(await openLayoutMenu());
+
+    await waitFor(() => {
+      expect(diffLayout('src/app.ts')).toBe('split');
+    });
+    expect((await openLayoutMenu()).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('goes back, so the choice is not one-way', async () => {
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    await userEvent.click(await openLayoutMenu());
+    await waitFor(() => {
+      expect(diffLayout('src/app.ts')).toBe('split');
+    });
+
+    await userEvent.click(await openLayoutMenu());
+    await waitFor(() => {
+      expect(diffLayout('src/app.ts')).toBe('single');
+    });
   });
 });
 

@@ -56,6 +56,7 @@ function mount(
         onSelectFromScroll={vi.fn()}
         jump={null}
         blobs={null}
+        diffStyle="unified"
         diff={{ source: 'unified', truncated: false }}
         sides={BOTH_SIDES}
       />

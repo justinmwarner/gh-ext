@@ -32,7 +32,9 @@ import {
   clickGutterUtility,
   clickHunkExpander,
   diffHasRendered,
+  diffLayout,
   dragGutterUtility,
+  gutterCell,
   hunkExpander,
 } from './pierreDom.fixture';
 import { pullRequestNode, reviewThread } from './prPayload.fixture';
@@ -954,5 +956,237 @@ describe('expanding unchanged context', () => {
 
     const notice = await screen.findByRole('alert');
     expect(notice.textContent).toMatch(/too large to load in full/i);
+  });
+});
+
+/**
+ * A file the reviewer has asked to read without its whitespace.
+ *
+ * The patch below is the case the mode exists for: one hunk in which nothing
+ * happened but an indent, and one in which something did. GitHub's diff shows
+ * both; ignoring whitespace should leave only the second, and must leave the
+ * second one's line numbers exactly where they were — because a comment is
+ * posted as a line number in GitHub's diff and there is nothing on screen that
+ * would say if one had drifted.
+ */
+const REINDENTED = (path: string): string =>
+  [
+    `diff --git a/${path} b/${path}`,
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,3 +1,3 @@',
+    ' one',
+    '-  spaced',
+    '+    spaced',
+    ' three',
+    '@@ -20,3 +20,3 @@',
+    ' twenty',
+    '-old',
+    '+new',
+    ' twentytwo',
+  ].join('\n');
+
+const whitespaceToggle = (path: string): HTMLElement =>
+  within(card(path)).getByRole('button', { name: /ignore whitespace/i });
+
+describe('DiffColumn, ignoring whitespace', () => {
+  it('shows GitHub’s diff until it is asked not to', async () => {
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    expect(whitespaceToggle('src/app.ts').getAttribute('aria-pressed')).toBe('false');
+    // The reindented line is still a change, as GitHub says it is.
+    expect(gutterCell('src/app.ts', 2, 'additions')).toBeDefined();
+  });
+
+  it('takes away a hunk in which nothing but whitespace moved', async () => {
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(whitespaceToggle('src/app.ts'));
+    });
+    await untilDrawn('src/app.ts');
+
+    // The first hunk is gone; the second is untouched and still numbered 20–22.
+    expect(() => gutterCell('src/app.ts', 2, 'additions')).toThrow();
+    expect(gutterCell('src/app.ts', 21, 'additions')).toBeDefined();
+  });
+
+  it('says on the card that this is not the diff GitHub is showing', async () => {
+    // The requirement that makes the mode honest. Everyone else on this pull
+    // request is looking at something else, and the reviewer has to be able to
+    // tell that from the card rather than from memory.
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(whitespaceToggle('src/app.ts'));
+    });
+
+    const note = within(card('src/app.ts')).getByRole('note');
+    expect(note.textContent).toMatch(/recomputed here/i);
+    expect(note.textContent).toMatch(/not the diff GitHub/i);
+  });
+
+  it('is per file, so one card’s choice is not every card’s', async () => {
+    mount([
+      file({ path: 'a.ts', patch: REINDENTED('a.ts') }),
+      file({ path: 'b.ts', patch: REINDENTED('b.ts') }),
+    ]);
+    await untilDrawn('a.ts');
+
+    await act(async () => {
+      fireEvent.click(whitespaceToggle('a.ts'));
+    });
+
+    // Asserted on the cards rather than on the rows: both headers are always
+    // in the light DOM, where the second file's diff may still be virtualized
+    // out of the scrollport.
+    expect(whitespaceToggle('a.ts').getAttribute('aria-pressed')).toBe('true');
+    expect(whitespaceToggle('b.ts').getAttribute('aria-pressed')).toBe('false');
+    expect(card('a.ts').querySelector('[data-whitespace-note]')).not.toBeNull();
+    expect(card('b.ts').querySelector('[data-whitespace-note]')).toBeNull();
+  });
+
+  it('keeps a comment on a vanished hunk, in the list rather than nowhere', async () => {
+    // The failure this must not have. Pierre drops an annotation outside a
+    // rendered hunk in silence, so a comment on the hunk that just disappeared
+    // has to come back somewhere the reviewer will still find it.
+    const thread = reviewThread({
+      id: 'T1',
+      path: 'src/app.ts',
+      line: 2,
+      diffSide: 'RIGHT',
+    });
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], {}, [thread]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(whitespaceToggle('src/app.ts'));
+    });
+
+    await waitFor(() => {
+      expect(section('src/app.ts').textContent).toMatch(/nothing but whitespace/i);
+    });
+    expect(annotationIsVisible('src/app.ts', 'additions', 2)).toBe(false);
+  });
+
+  it('still draws a comment on a hunk that survived', async () => {
+    const thread = reviewThread({
+      id: 'T2',
+      path: 'src/app.ts',
+      line: 21,
+      diffSide: 'RIGHT',
+    });
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], {}, [thread]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(whitespaceToggle('src/app.ts'));
+    });
+    await untilDrawn('src/app.ts');
+
+    await waitFor(() => {
+      expect(annotationIsVisible('src/app.ts', 'additions', 21)).toBe(true);
+    });
+  });
+
+  it('anchors a new comment on the line GitHub numbers it, not on a row index', async () => {
+    // The whole safety argument in one assertion. The first hunk has been
+    // taken off the screen, so line 21 is now the *second* addition row in the
+    // file rather than the fifth. If anything downstream were counting rows
+    // instead of reading GitHub's numbers, this is where it would show.
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(whitespaceToggle('src/app.ts'));
+    });
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickGutterUtility('src/app.ts', 21, 'additions');
+    });
+
+    expect(await screen.findByRole('textbox', { name: /comment on src\/app\.ts/i })).toBeDefined();
+    await waitFor(() => {
+      expect(annotationIsVisible('src/app.ts', 'additions', 21)).toBe(true);
+    });
+  });
+
+  it('offers nothing to press on a file with no text diff', async () => {
+    mount([file({ path: 'logo.png', isBinary: true, patch: '' })]);
+
+    expect(
+      within(card('logo.png')).queryByRole('button', { name: /ignore whitespace/i }),
+    ).toBeNull();
+  });
+});
+
+/**
+ * Unified against split.
+ *
+ * `diffStyle` is an option handed to the library, so the only honest evidence
+ * that it took is what came out in the shadow root — hence `diffLayout` rather
+ * than an assertion about the props that went in. Comment anchoring is checked
+ * in both, because split is a different path inside Pierre: `getAnnotations`
+ * returns two spans there and one row in unified.
+ */
+describe('DiffColumn, unified against split', () => {
+  it('draws the layout the reviewer arrived from unless asked otherwise', async () => {
+    mount([file({ path: 'src/app.ts' })]);
+    await untilDrawn('src/app.ts');
+
+    expect(diffLayout('src/app.ts')).toBe('single');
+  });
+
+  it('draws the two files side by side when asked for split', async () => {
+    mount([file({ path: 'src/app.ts' })], { diffStyle: 'split' });
+    await untilDrawn('src/app.ts');
+
+    expect(diffLayout('src/app.ts')).toBe('split');
+  });
+
+  it('still draws a comment where it belongs in split', async () => {
+    // §B.3: switching between the two needs no annotation data change. That is
+    // a claim about a library, so it is checked rather than believed — and
+    // `assignedSlot` is the only thing that tells "drawn" apart from "emitted
+    // into a slot that does not exist", which is what silent loss looks like.
+    const thread = reviewThread({
+      id: 'T1',
+      path: 'src/app.ts',
+      line: 1,
+      diffSide: 'RIGHT',
+    });
+    mount([file({ path: 'src/app.ts' })], { diffStyle: 'split' }, [thread]);
+    await untilDrawn('src/app.ts');
+
+    await waitFor(() => {
+      expect(annotationIsVisible('src/app.ts', 'additions', 1)).toBe(true);
+    });
+  });
+
+  it('still refuses a drag across both sides in split', async () => {
+    // Split is what makes this gesture ordinary rather than exotic: the two
+    // sides are separate columns there, so dragging out of one and into the
+    // other is an easy thing to do by accident. GitHub can express it in
+    // neither layout.
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], {
+      diffStyle: 'split',
+    });
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      dragGutterUtility(
+        'src/app.ts',
+        { lineNumber: 2, side: 'deletions' },
+        { lineNumber: 2, side: 'additions' },
+      );
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/both sides/i);
+    expect(requestMock).not.toHaveBeenCalled();
   });
 });

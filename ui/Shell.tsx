@@ -33,7 +33,7 @@ import {
 } from '@/lib/review/diffScope';
 import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
-import type { DiffColumnHandle, ThreadJump } from './DiffColumn';
+import type { DiffColumnHandle, DiffStyle, ThreadJump } from './DiffColumn';
 import { FilesView } from './FilesView';
 import { OverviewView } from './OverviewView';
 import { ReviewFooter } from './ReviewFooter';
@@ -107,6 +107,27 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const [focusedThread, setFocusedThread] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(NO_OVERLAY);
   const [view, setView] = useState<ReviewView>('files');
+
+  /**
+   * Unified or side by side, for the session and no longer.
+   *
+   * This is the natural place to have started persisting interface state, and
+   * it is deliberately not the place. Nothing on this page is remembered —
+   * not the rail width, not which files are collapsed, not the per-file
+   * comparison mode, whose own control says so and says why. One preference in
+   * `chrome.storage` would not be a feature, it would be the first half of a
+   * settings system, and the second half arrives one control at a time.
+   *
+   * The reason for it not being the exception is specific rather than tidy.
+   * The review page's job is to be honest about what the reviewer has seen, and
+   * a remembered display preference decides what a pull request looks like
+   * before they have opened it — for split that is merely surprising, but it is
+   * the same door that "ignore whitespace, everywhere, still on from last
+   * Tuesday" walks through, and that one hides lines. Per session, both of
+   * them, and the reviewer is never reading a diff shaped by a decision they
+   * have forgotten making.
+   */
+  const [diffStyle, setDiffStyle] = useState<DiffStyle>('unified');
 
   const column = useRef<DiffColumnHandle>(null);
 
@@ -399,6 +420,10 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
                 );
               }}
               onShowAll={() => setScope(WHOLE_DIFF)}
+              splitView={diffStyle === 'split'}
+              onToggleSplitView={() => {
+                setDiffStyle((now) => (now === 'split' ? 'unified' : 'split'));
+              }}
             />
 
             <FilesView
@@ -418,6 +443,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
                   : { source: payload.diff.source, truncated: payload.diff.truncated }
               }
               sides={sides}
+              diffStyle={diffStyle}
               columnRef={column}
             />
           </div>

@@ -57,6 +57,8 @@ function mount(overrides: Partial<ScopeBarProps> = {}) {
     onOpenPicker: vi.fn(),
     onSinceReview: vi.fn(),
     onShowAll: vi.fn(),
+    splitView: false,
+    onToggleSplitView: vi.fn(),
     ...overrides,
   };
   return { ...render(<ScopeBar {...props} />), props };
@@ -73,7 +75,7 @@ const status = (): string => document.querySelector('.scope-status')?.textConten
 /** Open the kebab and hand back the item, which is where the controls live. */
 const menuItem = async (name: RegExp): Promise<HTMLElement> => {
   const user = userEvent.setup();
-  const kebab = screen.getByRole('button', { name: /commit options/i });
+  const kebab = screen.getByRole('button', { name: /diff options/i });
   if (kebab.getAttribute('aria-expanded') !== 'true') await user.click(kebab);
   const found = [
     ...screen.getByRole('menu').querySelectorAll<HTMLElement>('.menu-item'),
@@ -157,12 +159,12 @@ describe('what it says is on screen', () => {
 
 describe('the controls', () => {
   it('keeps the row to tabs by putting the rest behind one kebab', () => {
-    // The strip is the control the reviewer uses; the other three are
-    // occasional. Left on the row they take the width the numbers need and
-    // break the strip's own edge.
+    // The strip is the control the reviewer uses; the rest are occasional.
+    // Left on the row they take the width the numbers need and break the
+    // strip's own edge.
     mount();
 
-    expect(screen.getByRole('button', { name: /commit options/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /diff options/i })).toBeDefined();
     expect(screen.queryByRole('button', { name: /choose commits/i })).toBeNull();
   });
 
@@ -211,6 +213,43 @@ describe('the controls', () => {
 
     const item = await menuItem(/choose commits/i);
     expect(item.getAttribute('aria-disabled')).toBe('true');
+  });
+});
+
+describe('the diff layout', () => {
+  // In the kebab rather than on the row. The row is deliberately three things —
+  // sentence, tabs, kebab — and a fourth control beside the tabs would be the
+  // shape of the three-row bar this one replaced.
+
+  it('offers the split layout, ticked while it is on', async () => {
+    mount({ splitView: true });
+
+    const item = await menuItem(/split view/i);
+    expect(item.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(item.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('is not ticked while the column is unified', async () => {
+    mount({ splitView: false });
+
+    expect((await menuItem(/split view/i)).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('asks for the layout to change rather than changing it', async () => {
+    const { props } = mount();
+
+    await userEvent.click(await menuItem(/split view/i));
+
+    expect(props.onToggleSplitView).toHaveBeenCalled();
+  });
+
+  it('offers the layout even when there are no commits to scope by', async () => {
+    // The two things in this menu fail independently. A pull request whose
+    // commit list could not be read still has a diff on screen, and how that
+    // diff is drawn is still worth changing.
+    mount({ commitCount: 0, commits: [] });
+
+    expect(await menuItem(/split view/i)).toBeDefined();
   });
 });
 

@@ -18,7 +18,12 @@
 import type { Ref } from 'react';
 import { useCallback, useMemo } from 'react';
 import type { PrPayload } from '@/lib/messages';
-import { DiffColumn, type DiffColumnHandle, type ThreadJump } from './DiffColumn';
+import {
+  DiffColumn,
+  type DiffColumnHandle,
+  type DiffStyle,
+  type ThreadJump,
+} from './DiffColumn';
 import { FileTree } from './FileTree';
 import { Resizer } from './Resizer';
 import type { BlobRefs } from './blobLoader';
@@ -48,6 +53,8 @@ export interface FilesViewProps {
    * to refuse an anchor on a side that does not.
    */
   sides: AnchorableSides;
+  /** Unified or side by side. Passed straight through, like `sides`. */
+  diffStyle: DiffStyle;
   columnRef?: Ref<DiffColumnHandle>;
 }
 
@@ -61,6 +68,7 @@ export function FilesView({
   blobs,
   diff,
   sides,
+  diffStyle,
   columnRef,
 }: FilesViewProps) {
   const session = useReviewSession();
@@ -158,6 +166,7 @@ export function FilesView({
           files={files}
           diff={diff}
           sides={sides}
+          diffStyle={diffStyle}
           current={current}
           onScrollTo={onSelectFromScroll}
           jump={jump}

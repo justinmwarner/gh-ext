@@ -28,6 +28,11 @@ const REASONS: Record<ListedReason, string> = {
   'other-commit':
     'Written against the whole pull request, which is not the diff on screen. ' +
     'Show all commits to see it in place.',
+  // Named by the reviewer's own action rather than by "not shown", because it
+  // is the one reason in this list they turned on themselves and can turn off.
+  'whitespace-only':
+    'Nothing but whitespace changed where this was written, and this file is ' +
+    'set to ignore that. Stop ignoring whitespace to see it in place.',
 };
 
 export function UnanchoredThreads({

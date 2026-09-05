@@ -252,6 +252,96 @@ describe('layoutThreads on a diff taken between other commits', () => {
   });
 });
 
+/**
+ * A file showing a locally recomputed diff.
+ *
+ * `drawn` is what the renderer has on screen when that is *less* than what
+ * GitHub's patch describes — which is the only direction it can differ, because
+ * ignoring whitespace can drop a hunk and can never invent one. GitHub's patch
+ * stays the authority on where a comment goes; `drawn` can only take an anchor
+ * away, never add or move one. The tests below are that asymmetry, stated in
+ * both directions.
+ */
+describe('layoutThreads on a locally recomputed diff', () => {
+  /** The first hunk survived the recompute; the second was all whitespace. */
+  const FIRST_HUNK_ONLY = {
+    additions: [{ start: 1, end: 3 }],
+    deletions: [{ start: 1, end: 3 }],
+  };
+
+  it('still anchors a thread on a hunk the recompute kept', () => {
+    const thread = reviewThread({ path: 'src/app.ts', line: 2 });
+
+    const layout = layoutThreads([thread], twoHunks(), {
+      sides: BOTH_SIDES,
+      drawn: FIRST_HUNK_ONLY,
+    });
+
+    expect(layout.annotations).toHaveLength(1);
+    expect(layout.listed).toHaveLength(0);
+  });
+
+  it('lists a thread on a hunk that turned out to be only whitespace', () => {
+    // Line 21 is inside GitHub's second hunk, so without `drawn` this anchors.
+    // The recompute dropped that hunk, so there is no row to draw on — and
+    // Pierre drops such an annotation in silence, which is the whole reason
+    // the listing exists.
+    const thread = reviewThread({ path: 'src/app.ts', line: 21 });
+
+    const layout = layoutThreads([thread], twoHunks(), {
+      sides: BOTH_SIDES,
+      drawn: FIRST_HUNK_ONLY,
+    });
+
+    expect(layout.annotations).toHaveLength(0);
+    expect(layout.listed).toEqual([{ thread, reason: 'whitespace-only' }]);
+  });
+
+  it('never anchors a line GitHub’s patch does not have, however much is drawn', () => {
+    // The load-bearing direction. Line 10 is in the gap between GitHub's two
+    // hunks. A `drawn` that claims to cover it must not promote it: what a
+    // comment is posted against is GitHub's diff, and this cross-check is the
+    // thing that keeps the recompute from ever deciding that.
+    const thread = reviewThread({ path: 'src/app.ts', line: 10 });
+
+    const layout = layoutThreads([thread], twoHunks(), {
+      sides: BOTH_SIDES,
+      drawn: { additions: [{ start: 1, end: 40 }], deletions: [{ start: 1, end: 40 }] },
+    });
+
+    expect(layout.annotations).toHaveLength(0);
+    expect(layout.listed).toEqual([{ thread, reason: 'out-of-hunk' }]);
+  });
+
+  it('prefers the commit mismatch, which is the reason that outranks it', () => {
+    const thread = reviewThread({ path: 'src/app.ts', line: 21 });
+
+    const layout = layoutThreads([thread], twoHunks(), {
+      sides: { additions: false, deletions: true },
+      drawn: FIRST_HUNK_ONLY,
+    });
+
+    expect(layout.listed).toEqual([{ thread, reason: 'other-commit' }]);
+  });
+
+  it('lets an expanded line count as drawn', () => {
+    // Expanding context inside the recomputed diff puts real rows on screen,
+    // and the renderer is the only thing that knows it — same escape hatch as
+    // for the patch's own hunks, and it has to apply to both tests or the
+    // second one silently undoes the first.
+    const thread = reviewThread({ path: 'src/app.ts', line: 21 });
+
+    const layout = layoutThreads([thread], twoHunks(), {
+      sides: BOTH_SIDES,
+      drawn: FIRST_HUNK_ONLY,
+      revealed: new Set([21]),
+    });
+
+    expect(layout.annotations).toHaveLength(1);
+    expect(layout.listed).toHaveLength(0);
+  });
+});
+
 describe('threadPosition', () => {
   it('names the single line a thread sits on', () => {
     expect(threadPosition(reviewThread({ path: 'a.ts', line: 12 }))).toBe('Line 12');

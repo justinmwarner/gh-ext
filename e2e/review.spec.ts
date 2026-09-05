@@ -59,7 +59,7 @@ async function cardTops(page: Page): Promise<{ path: string; top: number }[]> {
  * run — a disabled one — leaves the menu where it was.
  */
 async function scopeMenuItem(page: Page, name: RegExp) {
-  const kebab = page.getByRole('button', { name: /commit options/i });
+  const kebab = page.getByRole('button', { name: /diff options/i });
   if ((await kebab.getAttribute('aria-expanded')) !== 'true') await kebab.click();
   return page.getByRole('menu').locator('.menu-item').filter({ hasText: name });
 }

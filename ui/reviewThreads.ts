@@ -56,7 +56,9 @@ export type ListedReason =
   | 'no-line'
   | 'out-of-hunk'
   /** The diff on screen numbers this side's lines against a different commit. */
-  | 'other-commit';
+  | 'other-commit'
+  /** This file is ignoring whitespace, and the line it sat on only moved. */
+  | 'whitespace-only';
 
 export interface ListedThread {
   thread: ReviewThread;
@@ -129,6 +131,21 @@ export interface ThreadLayoutOptions {
   metadata?: Map<string, ThreadMetadata>;
   /** Lines the renderer has reported drawable after expanding context. */
   revealed?: ReadonlySet<number>;
+  /**
+   * What the renderer has on screen, when that is less than `fileDiff`.
+   *
+   * Set only while a file is showing a locally recomputed diff — ignoring
+   * whitespace can leave a hunk with nothing changed in it, and such a hunk is
+   * dropped. `fileDiff` stays GitHub's patch throughout, because a comment is
+   * posted as a line number in *that* diff and nothing else may be allowed to
+   * decide one.
+   *
+   * So this is a filter and never a source: it can take an anchor away, and it
+   * is asked *after* the patch has already said yes. A `drawn` that claimed to
+   * cover a line outside GitHub's hunks would not promote it, which is the
+   * property that keeps the recompute from ever moving a comment.
+   */
+  drawn?: RenderedLines;
 }
 
 /**
@@ -153,7 +170,7 @@ export function layoutThreads(
   fileDiff: FileDiffMetadata,
   options: ThreadLayoutOptions,
 ): FileThreadLayout {
-  const { sides, metadata = new Map(), revealed = EMPTY_LINES } = options;
+  const { sides, metadata = new Map(), revealed = EMPTY_LINES, drawn } = options;
   const lines = renderedLines(fileDiff);
   const { anchored, unanchorable } = partitionThreads([...threads]);
 
@@ -195,6 +212,20 @@ export function layoutThreads(
       !(anchor.side === 'additions' && revealed.has(anchor.lineNumber))
     ) {
       listed.push({ thread, reason: 'out-of-hunk' });
+      continue;
+    }
+
+    // Asked last, and only ever able to say no. GitHub's patch has already
+    // agreed the line is one this thread can be drawn on; this narrows that to
+    // what is actually on screen after a hunk of pure whitespace was taken out
+    // from under it. `revealed` is the same escape hatch as above, for the same
+    // reason: expanded context is on screen and the metadata cannot say so.
+    if (
+      drawn !== undefined &&
+      !isRenderedLine(drawn, anchor.side, anchor.lineNumber) &&
+      !(anchor.side === 'additions' && revealed.has(anchor.lineNumber))
+    ) {
+      listed.push({ thread, reason: 'whitespace-only' });
       continue;
     }
 

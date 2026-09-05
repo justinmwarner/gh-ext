@@ -50,6 +50,7 @@ import { RAW, resolveModeForFile } from '@/lib/compare/modes';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { AnnotationSide } from '@/lib/review/threads';
+import { type WhitespaceDiff, withoutWhitespaceChanges } from '@/lib/review/whitespace';
 import { Composer } from './Composer';
 import { FileCard } from './FileCard';
 import { ThreadCard } from './ThreadCard';
@@ -75,6 +76,35 @@ import {
   renderedLines,
   sourceLines,
 } from './reviewThreads';
+
+/**
+ * Reading one file without its whitespace, on demand and never by default.
+ *
+ * The same shape as expanding context: an affordance on the file the reviewer
+ * is actually looking at, not a policy over the pull request. The recompute is
+ * a rewrite of GitHub's own patch — see `lib/review/whitespace.ts` — so it
+ * costs no request, which is why it can be instant and per file at all.
+ *
+ * The rule this obeys, and the reason it is safe: **GitHub's patch stays the
+ * authority on where a comment goes.** `layouts` below is built from
+ * `fileDiffFor(file)` — the patch as GitHub sent it — throughout, and the
+ * recomputed geometry is handed in separately as `drawn`, where it can only
+ * take an anchor away. Nothing anchored here is anchored *because* of the
+ * recompute, so no comment can move; some become listed instead, which is a
+ * failure mode this column already has a surface for.
+ */
+
+/**
+ * Which of Pierre's two layouts the column draws.
+ *
+ * The library's own default is `'split'`; ours is `'unified'`, because the
+ * reviewer arrived from GitHub's Files-changed tab and that is what it shows.
+ * That is a good default and was a bad fixed answer — people hold this
+ * preference firmly and hold it both ways, and §B.3 is explicit that moving
+ * between the two needs no change to the annotation data, so nothing about
+ * comments depends on which one is up.
+ */
+export type DiffStyle = 'unified' | 'split';
 
 /** Where the file list came from, and whether it was cut short getting here. */
 export interface DiffOrigin {
@@ -137,11 +167,14 @@ export interface DiffColumnProps {
    * handles by drawing no expander rather than one that always fails.
    */
   blobs?: BlobRefs | null;
+  /** Unified or side by side. Not remembered anywhere — see `Shell`. */
+  diffStyle?: DiffStyle;
   ref?: Ref<DiffColumnHandle>;
 }
 
 const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata> = {
-  // The reviewer arrived from GitHub's Files-changed tab, which is unified.
+  // The default rather than the answer: the reviewer arrived from GitHub's
+  // Files-changed tab, which is unified, and the `diffStyle` prop overrides it.
   diffStyle: 'unified',
   stickyHeaders: true,
   // The "+" in the gutter, and the drag that turns it into a range.
@@ -231,6 +264,7 @@ export function DiffColumn({
   onScrollTo,
   jump = null,
   blobs = null,
+  diffStyle = 'unified',
   ref,
 }: DiffColumnProps) {
   const session = useReviewSession();
@@ -251,6 +285,19 @@ export function DiffColumn({
    */
   const [chosenModes, setChosenModes] = useState<ReadonlyMap<string, string>>(
     () => new Map(),
+  );
+  /**
+   * The files being read without their whitespace.
+   *
+   * A set of paths rather than a flag, for the same reason `chosenModes` is a
+   * map: two files in one pull request are asking different questions, and one
+   * of them being a reformat says nothing about the next. Sparse and
+   * unremembered — see the note on `diffStyle` in `Shell`, which this is the
+   * sharper half of: a preference that hides lines must not be able to arrive
+   * already on.
+   */
+  const [ignoringWhitespace, setIgnoringWhitespace] = useState<ReadonlySet<string>>(
+    () => new Set(),
   );
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
@@ -288,7 +335,46 @@ export function DiffColumn({
    * `revealed` in this same pass, and an effect would let it build one round
    * of annotations from the dead renderer's answers first.
    */
-  const generation = diffGeneration(files);
+  /** The rewrite, per file that asked for one. Nothing else pays for it. */
+  const recomputed = useMemo(() => {
+    const built = new Map<string, WhitespaceDiff>();
+    for (const file of files) {
+      if (!ignoringWhitespace.has(file.path)) continue;
+      built.set(file.path, withoutWhitespaceChanges(file.patch));
+    }
+    return built;
+  }, [files, ignoringWhitespace]);
+
+  /**
+   * The list as it is *drawn*, which is the list `files` is not.
+   *
+   * Only this feeds the renderer. Everything about where a comment goes keeps
+   * reading `files`, and the two are kept apart deliberately rather than
+   * merged into one list with a flag on it.
+   */
+  const drawnFiles = useMemo(() => {
+    // The prop itself while nothing is being recomputed, which is almost
+    // always. `generation` is derived from this array's identity and remounts
+    // the viewer when it moves, and `useMemo` is a hint React is entitled to
+    // discard — so a mapped copy here would mean a dropped memo could throw
+    // away the reviewer's scroll position and every line of context they had
+    // expanded, at a moment nothing on screen had changed.
+    if (recomputed.size === 0) return files;
+    return files.map((file) => {
+      const recompute = recomputed.get(file.path);
+      return recompute === undefined ? file : { ...file, patch: recompute.patch };
+    });
+  }, [files, recomputed]);
+  const drawnByPath = useMemo(
+    () => new Map(drawnFiles.map((file) => [file.path, file])),
+    [drawnFiles],
+  );
+
+  // Derived from the drawn list, so toggling whitespace on one file remounts
+  // the viewer exactly as replacing the file list does. It has to: `CodeView`
+  // keeps the code it first rendered for an item id, so a new patch under an
+  // existing path would leave the old rows on screen under the new header.
+  const generation = diffGeneration(drawnFiles);
   const lastGeneration = useRef(generation);
   if (lastGeneration.current !== generation) {
     lastGeneration.current = generation;
@@ -347,8 +433,14 @@ export function DiffColumn({
     for (const file of files) {
       const threads = session.byPath.get(file.path) ?? [];
       const open = revealed.current.get(file.path);
+      // The drawn parse is only in the signature, never the anchor: what
+      // changes when whitespace starts being ignored is which of these
+      // verdicts is still true, not how any of them is reached.
+      const drawnFile = drawnByPath.get(file.path);
+      const recomputing = drawnFile !== undefined && drawnFile !== file;
       const signature =
         `${fileDiffSignature(file)}#${open?.size ?? 0}#${sidesKey}#` +
+        `${recomputing ? fileDiffSignature(drawnFile) : '-'}#` +
         threads.map(anchorSignature).join('|');
       const cached = cache.current.get(file.path);
       if (cached !== undefined && cached.signature === signature) {
@@ -362,6 +454,9 @@ export function DiffColumn({
               sides,
               metadata: metadata.current,
               revealed: open,
+              // GitHub's patch is the first argument and stays the authority.
+              // This is the second gate and can only close.
+              ...(recomputing ? { drawn: renderedLines(fileDiffFor(drawnFile)) } : {}),
             });
       cache.current.set(file.path, { signature, layout });
       built.set(file.path, layout);
@@ -371,7 +466,7 @@ export function DiffColumn({
     // above has moved. Pierre hydrates in place and fires no callback a
     // consumer can subscribe to, so a render has to be provoked from the
     // outside or the memo would never be asked the question again.
-  }, [files, session.byPath, expansion, sidesKey]);
+  }, [files, drawnByPath, session.byPath, expansion, sidesKey]);
 
   const annotationsByPath = useMemo(() => {
     const built = new Map<string, DiffLineAnnotation<AnnotationMetadata>[]>();
@@ -410,6 +505,14 @@ export function DiffColumn({
     return built;
   }, [files, chosenModes]);
 
+  const toggleWhitespace = useCallback((path: string) => {
+    setIgnoringWhitespace((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(path)) next.add(path);
+      return next;
+    });
+  }, []);
+
   const changeMode = useCallback((path: string, mode: string) => {
     setChosenModes((previous) => {
       const next = new Map(previous);
@@ -419,9 +522,12 @@ export function DiffColumn({
   }, []);
 
   const items = useMemo(
-    () => codeViewItems(files, collapsed, annotationsByPath, modes),
-    [files, collapsed, annotationsByPath, modes],
+    () => codeViewItems(drawnFiles, collapsed, annotationsByPath, modes),
+    [drawnFiles, collapsed, annotationsByPath, modes],
   );
+  // GitHub's files, not the drawn ones. The card reports the pull request's
+  // own counts and the composer seeds suggestions from the patch GitHub sent,
+  // and neither should change because a hunk was hidden from the screen.
   const byPath = useMemo(
     () => new Map(files.map((file) => [file.path, file])),
     [files],
@@ -483,7 +589,9 @@ export function DiffColumn({
    * arrived by `j`, by the tree, or by scrolling — so `J` always means "the
    * next hunk from here" rather than "the next hunk from wherever I last was".
    */
-  const stops = useMemo(() => hunkStops(files), [files]);
+  // Over the drawn list: `J` has to land on hunks that are on screen, and a
+  // hunk the recompute took away is not one of them.
+  const stops = useMemo(() => hunkStops(drawnFiles), [drawnFiles]);
   const hunkCursor = useRef(-1);
   const currentPath = useRef(current.path);
   currentPath.current = current.path;
@@ -645,6 +753,10 @@ export function DiffColumn({
   const options = useMemo<CodeViewReactOptions<AnnotationMetadata>>(
     () => ({
       ...CODE_VIEW_OPTIONS,
+      // Rebuilding `options` re-renders every mounted diff, which is exactly
+      // what changing the layout has to do and the reason this is in the
+      // dependency list rather than read through a ref.
+      diffStyle,
       // Present only when there is somewhere to load from. Its mere presence
       // is what makes Pierre draw an expander at all, so an always-present
       // loader that always failed would be worse than none.
@@ -669,7 +781,7 @@ export function DiffColumn({
         noticeExpansion.current(path, fileDiff, instance);
       },
     }),
-    [loadDiffFiles],
+    [loadDiffFiles, diffStyle],
   );
 
   /** The source text under the composer's selection, for the suggestion button. */
@@ -856,6 +968,8 @@ export function DiffColumn({
                 unanchored={layouts.get(file.path)?.listed ?? []}
                 mode={modes.get(file.path) ?? RAW.id}
                 onChangeMode={changeMode}
+                whitespace={recomputed.get(file.path) ?? null}
+                onToggleWhitespace={toggleWhitespace}
                 blobs={blobs}
               />
             );

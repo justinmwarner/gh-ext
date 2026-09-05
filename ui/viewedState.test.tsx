@@ -55,6 +55,8 @@ function mount(viewedState: FileViewedState) {
         unanchored={[]}
         mode={RAW.id}
         onChangeMode={() => {}}
+        whitespace={null}
+        onToggleWhitespace={() => {}}
         blobs={null}
       />
     </ReviewSessionProvider>,

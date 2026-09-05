@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { withoutWhitespaceChanges } from '@/lib/review/whitespace';
 import { codeViewItems, fileBody, hasHunks, hunkStops } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
 
@@ -329,5 +330,34 @@ describe('hunkStops', () => {
 
   it('has nothing to offer for a file with no patch', () => {
     expect(hunkStops([file({ path: 'logo.png', patch: '', isBinary: true })])).toEqual([]);
+  });
+
+  it('offers no stop on a hunk the whitespace rewrite took away', () => {
+    // `J` moves between hunks that are *drawn*, so the column asks this over
+    // the rewritten patches rather than over GitHub's. A stop on a hunk that
+    // is no longer on screen scrolls to a row that does not exist — the same
+    // failure as naming an addition line in a pure deletion, one line above.
+    const reindented = [
+      'diff --git a/a.ts b/a.ts',
+      '--- a/a.ts',
+      '+++ b/a.ts',
+      '@@ -1,3 +1,3 @@',
+      ' one',
+      '-  spaced',
+      '+    spaced',
+      ' three',
+      '@@ -20,3 +20,3 @@',
+      ' twenty',
+      '-old',
+      '+new',
+      ' twentytwo',
+    ].join('\n');
+
+    const drawn = withoutWhitespaceChanges(reindented);
+
+    expect(hunkStops([file({ path: 'a.ts', patch: reindented })])).toHaveLength(2);
+    expect(hunkStops([file({ path: 'a.ts', patch: drawn.patch })])).toEqual([
+      { path: 'a.ts', side: 'additions', line: 20 },
+    ]);
   });
 });

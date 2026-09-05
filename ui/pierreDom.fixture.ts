@@ -78,6 +78,21 @@ export function annotationIsVisible(
   return annotationNode(path, side, lineNumber)?.assignedSlot != null;
 }
 
+/**
+ * Which of the two layouts Pierre actually drew for one file.
+ *
+ * `'single'` for unified and `'split'` for side by side — the library's own
+ * spelling, which is not the spelling of the `diffStyle` option that asks for
+ * them. `diffStyle` is something we pass in, so the only honest check that it
+ * took is what came out in the shadow root.
+ */
+export function diffLayout(path: string): string | null {
+  return (
+    fileShadow(path).querySelector('[data-diff-type]')?.getAttribute('data-diff-type') ??
+    null
+  );
+}
+
 const LINE_TYPES: Record<AnnotationSide, string[]> = {
   additions: ['change-addition', 'context'],
   deletions: ['change-deletion', 'context'],
