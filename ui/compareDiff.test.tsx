@@ -24,7 +24,7 @@
  */
 
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrPayload } from '@/lib/messages';
 import { Shell } from './Shell';
@@ -122,9 +122,31 @@ function payloadWith(options: PayloadOptions = {}): PrPayload {
   };
 }
 
-const sinceButton = () => screen.getByRole('button', { name: /since my last review/i });
-const pickerButton = () => screen.getByRole('button', { name: /choose commits/i });
-const showAll = () => screen.getByRole('button', { name: /show all commits/i });
+/**
+ * Every scope control but the numbered strip lives behind one kebab now, so
+ * reaching one is two steps rather than one. Reopening is idempotent: an item
+ * that refuses to run — a disabled one — leaves the menu where it was.
+ */
+const menuItem = async (user: UserEvent, name: RegExp): Promise<HTMLElement> => {
+  const kebab = screen.getByRole('button', { name: /commit options/i });
+  if (kebab.getAttribute('aria-expanded') !== 'true') await user.click(kebab);
+  const found = [
+    ...screen.getByRole('menu').querySelectorAll<HTMLElement>('.menu-item'),
+  ].find((item) => name.test(item.textContent ?? ''));
+  if (found === undefined) throw new Error(`no menu item matching ${String(name)}`);
+  return found;
+};
+
+const since = (user: UserEvent) => menuItem(user, /since my last review/i);
+const clickSince = async (user: UserEvent): Promise<void> => {
+  await user.click(await since(user));
+};
+const clickPicker = async (user: UserEvent): Promise<void> => {
+  await user.click(await menuItem(user, /choose commits/i));
+};
+const clickShowAll = async (user: UserEvent): Promise<void> => {
+  await user.click(await menuItem(user, /show all commits/i));
+};
 const scopeBar = (): HTMLElement => {
   const bar = document.querySelector<HTMLElement>('[data-scope]');
   if (bar === null) throw new Error('the scope bar is not on the page');
@@ -179,21 +201,22 @@ describe('the scope bar', () => {
 });
 
 describe('the "since my last review" preset', () => {
-  it('is disabled when the viewer has never reviewed this pull request', () => {
+  it('is disabled when the viewer has never reviewed this pull request', async () => {
     // There is no earlier commit to compare against, so there is nothing
     // honest the control could do.
+    const user = userEvent.setup();
     render(<Shell retry={() => {}} payload={payloadWith()} />);
 
-    const button = sinceButton();
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(button.getAttribute('title')).toMatch(/not reviewed|no earlier/i);
+    const item = await since(user);
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(item.getAttribute('title')).toMatch(/not reviewed|no earlier/i);
   });
 
   it('asks for nothing when it is disabled', async () => {
     const user = userEvent.setup();
     render(<Shell retry={() => {}} payload={payloadWith()} />);
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     expect(requestMock).not.toHaveBeenCalled();
   });
@@ -203,7 +226,7 @@ describe('the "since my last review" preset', () => {
     requestMock.mockResolvedValue(compareReply);
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     await waitFor(() => {
       expect(requestMock).toHaveBeenCalledWith({
@@ -230,7 +253,7 @@ describe('the "since my last review" preset', () => {
     });
     expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     await waitFor(() => {
       expect(document.querySelector('[data-unanchored="src/app.ts"]')).not.toBeNull();
@@ -255,7 +278,7 @@ describe('the "since my last review" preset', () => {
       expect(columnLines()).toContain('1');
     });
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     // Both halves in one wait: the viewer is remounted, so there is a frame
     // where it has drawn nothing and "line 1 is gone" is true for the wrong
@@ -271,17 +294,17 @@ describe('the "since my last review" preset', () => {
     requestMock.mockResolvedValue(compareReply);
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    await user.click(sinceButton());
-    await waitFor(() => {
-      expect(sinceButton().getAttribute('aria-pressed')).toBe('true');
+    await clickSince(user);
+    await waitFor(async () => {
+      expect((await since(user)).getAttribute('aria-checked')).toBe('true');
     });
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     await waitFor(() => {
       expect(document.querySelector('[data-unanchored="src/app.ts"]')).toBeNull();
     });
-    expect(sinceButton().getAttribute('aria-pressed')).toBe('false');
+    expect((await since(user)).getAttribute('aria-checked')).toBe('false');
     // And the first hunk is back on screen, not just back in the file list.
     await waitFor(() => {
       expect(columnLines()).toContain('1');
@@ -296,7 +319,7 @@ describe('the "since my last review" preset', () => {
     });
     render(<Shell retry={() => {}} payload={payloadWith({ reviewed: true })} />);
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/No commit/);
@@ -306,7 +329,8 @@ describe('the "since my last review" preset', () => {
     // last review" over the whole pull request is the one thing this row
     // exists to make impossible.
     expect(scopeBar().getAttribute('data-scope')).toBe('failed');
-    expect(scopeBar().textContent).toMatch(/all 3 commits/i);
+    expect(scopeBar().textContent).toMatch(/showing the whole pull request/i);
+    expect(document.querySelector('.scope-status')?.textContent).not.toMatch(/since/i);
   });
 
   it('asks for nothing when the reviewer has already reviewed the head commit', async () => {
@@ -327,7 +351,7 @@ describe('the "since my last review" preset', () => {
       />,
     );
 
-    await user.click(sinceButton());
+    await clickSince(user);
 
     expect(
       requestMock.mock.calls.filter(([m]) => m?.kind === 'compare-diff'),
@@ -338,7 +362,7 @@ describe('the "since my last review" preset', () => {
 
 describe('picking commits', () => {
   const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(pickerButton());
+    await clickPicker(user);
     return screen.getByRole('dialog', { name: /commits/i });
   };
 
@@ -432,7 +456,7 @@ describe('picking commits', () => {
       expect(scopeBar().getAttribute('data-scope')).toBe('narrowed');
     });
 
-    await user.click(showAll());
+    await clickShowAll(user);
 
     await waitFor(() => {
       expect(scopeBar().getAttribute('data-scope')).toBe('whole');
@@ -475,7 +499,7 @@ describe('expanding unchanged context on a narrowed diff', () => {
     });
 
     render(<Shell retry={() => {}} payload={payloadWith()} />);
-    await user.click(pickerButton());
+    await clickPicker(user);
     const dialog = screen.getByRole('dialog', { name: /commits/i });
     await user.click(within(dialog).getByRole('button', { name: /select commit bbbbbbb/i }));
     await waitFor(() => {
@@ -534,6 +558,6 @@ describe('a commit that was force-pushed away', () => {
 });
 
 async function openPickerOn(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(pickerButton());
+  await clickPicker(user);
   return screen.getByRole('dialog', { name: /commits/i });
 }

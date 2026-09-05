@@ -49,7 +49,7 @@ import { type CurrentFile, NO_FILE, fromCommand, fromScroll, fromTree } from './
 import { pullRequestUrl } from './githubUrl';
 import type { BlobRefs } from './blobLoader';
 import { prBaseSha, prPermalink, prViewerIsAuthor, prViewerReviewedAt } from './prNode';
-import { type ReviewFile, reviewFiles } from './reviewFiles';
+import { type ReviewFile, changeTotals, reviewFiles } from './reviewFiles';
 import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 import { orderedThreads } from './reviewThreads';
 import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
@@ -336,28 +336,14 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     [session.threads],
   );
 
+  // What the bar above the diff counts: the list the column is drawing, which
+  // while a comparison is showing is that comparison rather than the pull
+  // request.
+  const changed = useMemo(() => changeTotals(files), [files]);
+
   return (
     <div className="shell" data-current-file={current.path ?? ''} data-view={view}>
       <TopBar payload={payload} />
-      <ScopeBar
-        scope={resolved}
-        commits={payload.commits}
-        chosen={scope}
-        onScope={setScope}
-        commitCount={payload.commits.length}
-        commitsTruncated={payload.truncated.commits}
-        sinceReviewAvailable={reviewedAt !== null}
-        sinceReviewActive={scope.kind === 'since-review'}
-        busy={compare.status === 'loading'}
-        requestError={compare.status === 'failed' ? compare.message : null}
-        onOpenPicker={() => setOverlay({ kind: 'commits' })}
-        onSinceReview={() => {
-          setScope((current) =>
-            current.kind === 'since-review' ? WHOLE_DIFF : { kind: 'since-review' },
-          );
-        }}
-        onShowAll={() => setScope(WHOLE_DIFF)}
-      />
       <TruncationNotice
         truncated={payload.truncated}
         pr={payload.ref}
@@ -389,6 +375,32 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
             aria-labelledby={viewTabId('files')}
             style={{ visibility: view === 'files' ? 'visible' : 'hidden' }}
           >
+            {/* Inside the Files view rather than above all three, because what
+                it describes is the column underneath it. On the Overview and
+                the Conversations there is no diff on screen to be wrong about,
+                and a bar up there was one more row between the reviewer and
+                the thing it names. */}
+            <ScopeBar
+              scope={resolved}
+              commits={payload.commits}
+              chosen={scope}
+              onScope={setScope}
+              changed={changed}
+              commitCount={payload.commits.length}
+              commitsTruncated={payload.truncated.commits}
+              sinceReviewAvailable={reviewedAt !== null}
+              sinceReviewActive={scope.kind === 'since-review'}
+              busy={compare.status === 'loading'}
+              requestError={compare.status === 'failed' ? compare.message : null}
+              onOpenPicker={() => setOverlay({ kind: 'commits' })}
+              onSinceReview={() => {
+                setScope((current) =>
+                  current.kind === 'since-review' ? WHOLE_DIFF : { kind: 'since-review' },
+                );
+              }}
+              onShowAll={() => setScope(WHOLE_DIFF)}
+            />
+
             <FilesView
               payload={payload}
               files={files}

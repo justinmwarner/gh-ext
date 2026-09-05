@@ -168,3 +168,28 @@ export function reviewFiles(payload: PrPayload): ReviewFile[] {
     };
   });
 }
+
+/** How much changed, summed over whatever list is being drawn. */
+export interface ChangeTotals {
+  files: number;
+  additions: number;
+  deletions: number;
+}
+
+/**
+ * How much is on screen, which is not always how much is in the pull request.
+ *
+ * Summed over the list the column is actually drawing, so while a narrowed
+ * diff is showing this describes that. Totalling the whole pull request would
+ * contradict the diff underneath the sentence it feeds.
+ */
+export function changeTotals(files: readonly ReviewFile[]): ChangeTotals {
+  return files.reduce<ChangeTotals>(
+    (sum, file) => ({
+      files: sum.files + 1,
+      additions: sum.additions + file.additions,
+      deletions: sum.deletions + file.deletions,
+    }),
+    { files: 0, additions: 0, deletions: 0 },
+  );
+}

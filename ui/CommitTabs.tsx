@@ -6,12 +6,17 @@
  * say the same thing as each other — a strip of them is unscannable, and what a
  * reviewer is doing here is stepping along a history rather than reading it.
  *
- * What a number cannot say, the line underneath says. Whichever commit the
- * pointer or the keyboard is on is spelled out in **one fixed place**, and the
- * fixedness is the point: a tooltip that follows the pointer makes the eye
- * chase it, and the whole value of a strip is that you can sweep along it. It
- * also means the keyboard gets the same thing the pointer does for free, which
- * a hover card would have had to be taught.
+ * What a number cannot say goes on each tab's title and its accessible name.
+ * There was a line under the strip that said it as well, and it cost more than
+ * it returned: a second row above the diff, and a strip that could no longer
+ * meet the content below it, which is the whole of what makes a tab look
+ * attached to what it opens. What a reviewer actually has to know — which
+ * commits are on screen — is said beside the strip by whoever renders it.
+ *
+ * **"All" is last, and pinned there.** The numbers are what grows; a hundred
+ * commits push the right-hand end off the row. "Back to everything" is the one
+ * control that must survive that, so it sits at the end of the sequence rather
+ * than in front of it, and the stylesheet sticks it to the edge.
  *
  * `role="toolbar"` with a roving tabindex rather than a tablist: these buttons
  * do not control panels, they set one filter, and a pull request with two
@@ -28,14 +33,6 @@ export interface CommitTabsProps {
   commits: readonly PrCommit[];
   scope: DiffScope;
   onScope: (scope: DiffScope) => void;
-  /**
-   * What the line says when nothing is hovered and no number is selected.
-   *
-   * The whole diff has no commit to describe, and a blank line there would
-   * move everything below it the moment the pointer touched the strip. The
-   * caller passes what it would have said anyway.
-   */
-  fallback?: string;
 }
 
 /** `null` for the whole diff; otherwise an index into `commits`. */
@@ -49,8 +46,7 @@ const describe = (commit: PrCommit, index: number): string =>
   `Commit ${index + 1}, ${commit.abbreviatedOid} — ${commit.messageHeadline} — ` +
   `${author(commit)}, ${formatTimestamp(commit.committedDate)}`;
 
-export function CommitTabs({ commits, scope, onScope, fallback = '' }: CommitTabsProps) {
-  const [hovered, setHovered] = useState<Slot>(null);
+export function CommitTabs({ commits, scope, onScope }: CommitTabsProps) {
   const [focusSlot, setFocusSlot] = useState<Slot>(null);
   const elements = useRef(new Map<string, HTMLElement>());
 
@@ -119,8 +115,8 @@ export function CommitTabs({ commits, scope, onScope, fallback = '' }: CommitTab
    */
   type Entry = { kind: 'all' } | { kind: 'commit'; index: number; commit: PrCommit };
   const entries: Entry[] = [
-    { kind: 'all' },
     ...commits.map((commit, index): Entry => ({ kind: 'commit', index, commit })),
+    { kind: 'all' },
   ];
 
   const slots: Slot[] = entries.map((entry) => (entry.kind === 'all' ? null : entry.index));
@@ -151,88 +147,51 @@ export function CommitTabs({ commits, scope, onScope, fallback = '' }: CommitTab
   // A strip with only an "All" tab on it is a control that appears broken.
   if (commits.length === 0) return null;
 
-  /**
-   * What the line underneath says: the commit under the pointer or the
-   * keyboard, and failing that the one the column is actually showing.
-   */
-  const shown = hovered ?? focusSlot;
-  const detail = ((): string => {
-    if (shown !== null) {
-      const commit = commits[shown];
-      return commit === undefined ? '' : describe(commit, shown);
-    }
-    if (span === null) return fallback;
-    if (span.first !== span.last) {
-      const first = commits[span.first];
-      const last = commits[span.last];
-      return first === undefined || last === undefined
-        ? ''
-        : `${span.last - span.first + 1} commits, ${first.abbreviatedOid} to ${last.abbreviatedOid}`;
-    }
-    const commit = commits[span.first];
-    return commit === undefined ? '' : describe(commit, span.first);
-  })();
-
   return (
-    <div className="commit-tabs">
-      <div
-        className="commit-strip"
-        role="toolbar"
-        aria-orientation="horizontal"
-        aria-label="Scope the diff to a commit"
-        onKeyDown={onKeyDown}
-        onMouseLeave={() => setHovered(null)}
-      >
-        {entries.map((entry) => {
-          const slot: Slot = entry.kind === 'all' ? null : entry.index;
-          const label =
-            entry.kind === 'all'
-              ? 'All'
-              : `Commit ${entry.index + 1}, ${entry.commit.abbreviatedOid}`;
+    <div
+      className="commit-strip"
+      role="toolbar"
+      aria-orientation="horizontal"
+      aria-label="Scope the diff to a commit"
+      onKeyDown={onKeyDown}
+    >
+      {entries.map((entry) => {
+        const slot: Slot = entry.kind === 'all' ? null : entry.index;
+        const label =
+          entry.kind === 'all'
+            ? 'All'
+            : `Commit ${entry.index + 1}, ${entry.commit.abbreviatedOid}`;
 
-          return (
-            <button
-              key={key(slot)}
-              ref={(node) => {
-                if (node === null) elements.current.delete(key(slot));
-                else elements.current.set(key(slot), node);
-              }}
-              type="button"
-              className="commit-tab"
-              // A digit is not a name. The strip is scannable *because* the
-              // button says one character; everything else it has to say goes
-              // here and on the title.
-              aria-label={label}
-              title={
-                entry.kind === 'all'
-                  ? 'The whole pull request'
-                  : describe(entry.commit, entry.index)
-              }
-              aria-pressed={selected(slot)}
-              tabIndex={slot === tabbable ? 0 : -1}
-              onMouseEnter={() => setHovered(slot)}
-              onFocus={() => setFocusSlot(slot)}
-              onBlur={() => setFocusSlot(null)}
-              onClick={(event) => {
-                choose(slot, event.shiftKey || event.ctrlKey || event.metaKey);
-                // Focus stays on the button, but it stops driving the line.
-                // Otherwise a range the reviewer has just made goes on being
-                // described by whichever of its ends they clicked — which is
-                // the one moment they want to be told what the range *is*.
-                setFocusSlot(null);
-              }}
-            >
-              {entry.kind === 'all' ? 'All' : entry.index + 1}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* One fixed place, always rendered. A line that appears and disappears
-          moves everything below it every time the pointer crosses the strip. */}
-      <p className="commit-detail" data-testid="commit-details">
-        {detail}
-      </p>
+        return (
+          <button
+            key={key(slot)}
+            ref={(node) => {
+              if (node === null) elements.current.delete(key(slot));
+              else elements.current.set(key(slot), node);
+            }}
+            type="button"
+            className={entry.kind === 'all' ? 'commit-tab commit-tab-all' : 'commit-tab'}
+            // A digit is not a name. The strip is scannable *because* the
+            // button says one character; everything else it has to say goes
+            // here and on the title.
+            aria-label={label}
+            title={
+              entry.kind === 'all'
+                ? 'The whole pull request'
+                : describe(entry.commit, entry.index)
+            }
+            aria-pressed={selected(slot)}
+            tabIndex={slot === tabbable ? 0 : -1}
+            onFocus={() => setFocusSlot(slot)}
+            onBlur={() => setFocusSlot(null)}
+            onClick={(event) => {
+              choose(slot, event.shiftKey || event.ctrlKey || event.metaKey);
+            }}
+          >
+            {entry.kind === 'all' ? 'All' : entry.index + 1}
+          </button>
+        );
+      })}
     </div>
   );
 }

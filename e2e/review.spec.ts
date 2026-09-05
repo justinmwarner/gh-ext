@@ -53,6 +53,27 @@ async function cardTops(page: Page): Promise<{ path: string; top: number }[]> {
   }, VIEW);
 }
 
+/**
+ * Every scope control but the numbered strip lives behind one kebab, so
+ * reaching one is two steps. Opening is idempotent: an item that refuses to
+ * run — a disabled one — leaves the menu where it was.
+ */
+async function scopeMenuItem(page: Page, name: RegExp) {
+  const kebab = page.getByRole('button', { name: /commit options/i });
+  if ((await kebab.getAttribute('aria-expanded')) !== 'true') await kebab.click();
+  return page.getByRole('menu').locator('.menu-item').filter({ hasText: name });
+}
+
+const chooseScope = async (page: Page, name: RegExp): Promise<void> => {
+  await (await scopeMenuItem(page, name)).click();
+};
+
+/** Read a toggle's state, and leave the menu shut so it is not over the diff. */
+async function scopeChecked(page: Page, name: RegExp, value: string): Promise<void> {
+  await expect(await scopeMenuItem(page, name)).toHaveAttribute('aria-checked', value);
+  await page.keyboard.press('Escape');
+}
+
 const currentFile = (page: Page) =>
   page.locator('.shell').getAttribute('data-current-file');
 
@@ -341,7 +362,7 @@ test('each file in the diff is a block of its own', async ({ context, extensionI
   expect(style.bg).not.toBe(body);
 });
 
-test('the two header rows keep their height and do not overlap the body', async ({
+test('the header rows keep their height and do not overlap the body', async ({
   context,
   extensionId,
   api,
@@ -350,8 +371,8 @@ test('the two header rows keep their height and do not overlap the body', async 
   // `.shell` is a flex column exactly one viewport tall, and the diff inside it
   // is enormous — so every child that does not refuse to shrink gets shrunk.
   // The top bar lost 21px of its declared 52 the moment a second header row was
-  // added, and the scope bar, which sticks itself at `--topbar-height`, then sat
-  // 21px over the top of the body. Only a layout engine can see any of that.
+  // added, and the row below it then sat 21px over the top of the body. Only a
+  // layout engine can see any of that.
   const page = await context.newPage();
   await openReview(page, extensionId);
 
@@ -365,12 +386,17 @@ test('the two header rows keep their height and do not overlap the body', async 
     parseInt(getComputedStyle(document.documentElement).getPropertyValue('--topbar-height'), 10),
   );
   const topbar = await box('.topbar');
-  const scope = await box('.scope-bar');
   const body = await box('.shell-body');
+  const scope = await box('.scope-bar');
+  const files = await box('.filesview');
 
   expect(topbar.height).toBe(declared);
-  expect(scope.top).toBe(topbar.bottom);
-  expect(body.top).toBe(scope.bottom);
+  expect(body.top).toBe(topbar.bottom);
+  // The scope bar is the first row inside the Files view now, and the diff
+  // begins exactly where it ends: the tabs open straight onto what they scope.
+  expect(scope.top).toBe(body.top);
+  expect(scope.height).toBeGreaterThan(0);
+  expect(files.top).toBe(scope.bottom);
 });
 
 test('switching views and back leaves the diff exactly where it was', async ({
@@ -794,11 +820,8 @@ test('a comment expanded into view survives narrowing the diff', async ({
   // Narrow to what landed since the last review. That patch's only hunk covers
   // lines 1-3, so line 10 is out of hunk again and the comment belongs back in
   // the list.
-  await page.getByRole('button', { name: 'Since my last review' }).click();
-  await expect(page.getByRole('button', { name: 'Since my last review' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  await chooseScope(page, /since my last review/i);
+  await scopeChecked(page, /since my last review/i, 'true');
   // Prove the narrowing actually landed rather than assuming it: the compare
   // endpoint was called, and the column now holds that patch's one file
   // instead of the pull request's fourteen.
@@ -817,26 +840,22 @@ test('a comment expanded into view survives narrowing the diff', async ({
 
   // And back. The full diff returns collapsed, so the verdict is the same one
   // the page reaches on a cold load: listed, not drawn.
-  await page.getByRole('button', { name: 'Since my last review' }).click();
-  await expect(page.getByRole('button', { name: 'Since my last review' })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
+  await chooseScope(page, /since my last review/i);
+  await scopeChecked(page, /since my last review/i, 'false');
   // Drawn this time rather than listed, and that is right: the blobs are warm
   // from the expansion above, so the column's standing request for the line is
   // granted immediately. Either surface is correct — being on neither is not.
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
 });
 
-test('the numbered strip scopes the diff, and says which commit on hover', async ({
+test('the numbered strip scopes the diff, and keeps All within reach', async ({
   context,
   extensionId,
   api,
 }) => {
   // Numbers rather than subjects, because a strip of subjects is unscannable.
-  // What a number cannot say goes on the line underneath, in one fixed place —
-  // and that line is what makes the strip usable at all, so it is worth a
-  // browser test rather than a jsdom one.
+  // What a number cannot say goes on its title, and which commits are on
+  // screen is said once, to the left of the strip.
   const page = await context.newPage();
   await openReview(page, extensionId);
 
@@ -847,10 +866,26 @@ test('the numbered strip scopes the diff, and says which commit on hover', async
     'true',
   );
 
-  const detail = page.locator('.commit-detail');
-  await strip.getByRole('button', { name: /^Commit 2/ }).hover();
-  await expect(detail).toContainText('Handle renames');
-  await expect(detail).toContainText('rowan');
+  await expect(strip.getByRole('button', { name: /^Commit 2/ })).toHaveAttribute(
+    'title',
+    /Handle renames.*rowan/,
+  );
+
+  // "All" is last in the sequence and pinned to the right-hand end of it, so a
+  // pull request long enough to scroll its numbers away cannot scroll away the
+  // way back. Only a layout engine can show that the sticky actually holds.
+  const ends = await strip.evaluate((node) => {
+    const all = node.querySelector('.commit-tab-all');
+    if (all === null) throw new Error('no All tab');
+    return {
+      last: node.lastElementChild === all,
+      stripRight: Math.round(node.getBoundingClientRect().right),
+      allRight: Math.round(all.getBoundingClientRect().right),
+    };
+  });
+  expect(ends.last).toBe(true);
+  expect(ends.allRight).toBe(ends.stripRight);
+
 
   // The first commit alone, which is the one range this fixture routes for a
   // single commit. Its own parent is the pull request's base.
@@ -862,10 +897,68 @@ test('the numbered strip scopes the diff, and says which commit on hover', async
     'true',
   );
   expect(api.urls.some((url) => url.includes(`${BASE_SHA}...${FIRST_SHA}`))).toBe(true);
+  await expect(page.locator('.scope-status')).toContainText('Commit ccccccc');
 
-  // With the pointer away, the line falls back to what is actually on screen.
-  await page.locator('.pr-title').hover();
-  await expect(detail).toContainText('Add the parser');
+  // Pinned means painted. Unpressed now, so it is not the diff's colour — and
+  // it sits over whatever numbers have scrolled past it, so it has to be the
+  // bar's own rather than transparent. Read as "the same as the bar" rather
+  // than as a literal, so a state that recolours the bar cannot leave a grey
+  // patch stranded on it.
+  //
+  // Polled rather than read once: the tab is mid-transition from the colour it
+  // wore while it was pressed, and a single read lands on an interpolated
+  // value a few units off.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const bar = document.querySelector('.scope-bar');
+        const all = document.querySelector('.commit-tab-all');
+        if (bar === null || all === null) throw new Error('no strip');
+        const painted = getComputedStyle(all).backgroundColor;
+        return {
+          pressed: all.getAttribute('aria-pressed'),
+          matchesBar: painted === getComputedStyle(bar).backgroundColor,
+          transparent: painted === 'rgba(0, 0, 0, 0)',
+        };
+      }),
+    )
+    .toEqual({ pressed: 'false', matchesBar: true, transparent: false });
+});
+
+test('a strip too long for the row still keeps All on screen', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The reason "All" is sticky rather than merely last. Forced by squeezing
+  // the strip rather than by inventing a hundred-commit fixture: what is being
+  // checked is the sticky, and a narrow scrollport is what makes it do
+  // anything at all.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const strip = page.locator('.commit-strip');
+  await strip.evaluate((node) => {
+    node.style.maxWidth = '80px';
+  });
+
+  const scrolled = await strip.evaluate((node) => {
+    node.scrollLeft = 0;
+    const all = node.querySelector('.commit-tab-all');
+    if (all === null) throw new Error('no All tab');
+    return {
+      overflows: node.scrollWidth > node.clientWidth,
+      right: Math.round(node.getBoundingClientRect().right),
+      allRight: Math.round(all.getBoundingClientRect().right),
+    };
+  });
+
+  // Vacuous otherwise: nothing is scrolled away, so nothing has to stay.
+  expect(scrolled.overflows).toBe(true);
+  // Scrolled hard left, with two numbered tabs still to its left, and it is
+  // nonetheless flush against the right-hand end of the strip.
+  expect(scrolled.allRight).toBe(scrolled.right);
 });
 
 test('shift-clicking the strip takes the span between two commits', async ({
@@ -893,10 +986,7 @@ test('shift-clicking the strip takes the span between two commits', async ({
     'aria-pressed',
     'true',
   );
-  // The pointer is still on the tab that was just clicked, and the line says
-  // what is under the pointer. Move away and it says what is on screen.
-  await page.locator('.pr-title').hover();
-  await expect(page.locator('.commit-detail')).toContainText('2 commits');
+  await expect(page.locator('.scope-status')).toContainText('2 commits');
   expect(api.urls.some((url) => url.includes(`${BASE_SHA}...${PRIOR_SHA}`))).toBe(true);
 });
 
@@ -926,7 +1016,7 @@ test('scoping the diff to one commit never draws a comment on the wrong line', a
     'true',
   );
 
-  await page.getByRole('button', { name: 'Choose commits…' }).click();
+  await chooseScope(page, /choose commits/i);
   const picker = page.getByRole('dialog', { name: 'Commits' });
   await expect(picker).toBeVisible();
   await picker.getByRole('button', { name: /Select commit ccccccc/ }).click();
@@ -976,7 +1066,7 @@ test('scoping the diff to one commit never draws a comment on the wrong line', a
   // reachable from the keyboard. Its base is the parent of the *first*
   // selection, which is what makes one commit and a one-commit range the same
   // request.
-  await page.getByRole('button', { name: 'Choose commits…' }).click();
+  await chooseScope(page, /choose commits/i);
   const again = page.getByRole('dialog', { name: 'Commits' });
   await again.getByRole('button', { name: /Compare from ccccccc/ }).click();
   await again.getByRole('button', { name: /Select commit bbbbbbb/ }).click();
@@ -988,7 +1078,7 @@ test('scoping the diff to one commit never draws a comment on the wrong line', a
   await expect(page.locator('[data-file-card="src/beta.ts"]')).toHaveCount(1);
 
   // Back to everything, and the comment is drawn again.
-  await page.getByRole('button', { name: 'Show all commits' }).click();
+  await chooseScope(page, /show all commits/i);
   await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'whole');
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),

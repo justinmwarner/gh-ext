@@ -7,13 +7,14 @@
  * is unscannable, and the thing a reviewer is actually doing here is stepping
  * along a history rather than reading it.
  *
- * What a number cannot say, the details line says: whichever commit the pointer
- * or the keyboard is on is spelled out in one fixed place. Fixed on purpose. A
- * tooltip that follows the pointer makes the eye chase it, and the whole point
- * of a strip is that you sweep along it.
+ * What a number cannot say goes on the tab's title and its accessible name.
+ * There used to be a line under the strip saying it as well; the row it needed
+ * pushed the diff down and broke the strip's own edge, and what a reviewer
+ * actually has to know — which commits are on screen — is said to the left of
+ * the strip by whoever renders it.
  */
 
-import { act, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrCommit } from '@/lib/github/types';
@@ -43,7 +44,6 @@ function mount(scope: DiffScope = WHOLE_DIFF, commits = COMMITS) {
 
 const tabs = () => screen.getAllByRole('button');
 const tab = (name: string) => screen.getByRole('button', { name });
-const details = () => screen.getByTestId('commit-details').textContent ?? '';
 
 /**
  * Held rather than passed: user-event models modifiers as keyboard state.
@@ -68,7 +68,16 @@ describe('the strip', () => {
     // numbers match what a reviewer sees anywhere else.
     mount();
 
-    expect(tabs().map((t) => t.textContent)).toEqual(['All', '1', '2', '3']);
+    expect(tabs().map((t) => t.textContent)).toEqual(['1', '2', '3', 'All']);
+  });
+
+  it('puts All at the end, where the strip cannot scroll it away', () => {
+    // The numbers are what grows — a long pull request pushes them off the
+    // right — and "back to everything" is the one control that has to survive
+    // that, so it sits at the end and is pinned there.
+    mount();
+
+    expect(tabs().at(-1)?.textContent).toBe('All');
   });
 
   it('names each tab properly, since a digit is not a name', () => {
@@ -211,75 +220,6 @@ describe('choosing', () => {
   });
 });
 
-describe('the details line', () => {
-  it('spells out whichever commit the pointer is on', async () => {
-    mount();
-
-    await userEvent.hover(tab('Commit 3, 3333333'));
-
-    expect(details()).toContain('Commit number 3');
-    expect(details()).toContain('3333333');
-    expect(details()).toContain('dev3');
-  });
-
-  it('does the same for the keyboard, which has no pointer', async () => {
-    mount();
-
-    act(() => tab('Commit 2, 2222222').focus());
-
-    expect(details()).toContain('Commit number 2');
-  });
-
-  it('falls back to the commit that is selected', () => {
-    // With nothing hovered the line still has something true to say, and it is
-    // the thing the column is actually showing.
-    mount({ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[0]!.oid });
-
-    expect(details()).toContain('Commit number 1');
-  });
-
-  it('says what a range is, rather than one end of it', () => {
-    mount({ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[2]!.oid });
-
-    expect(details()).toContain('3 commits');
-  });
-
-  it('describes the range it just made, not the tab that made it', async () => {
-    // Clicking leaves focus on the tab, and focus is one of the things the line
-    // follows. Left alone that meant a freshly made range was described by one
-    // of its ends for as long as focus stayed there — which is exactly when the
-    // reviewer wants to know what the range is.
-    const { onScope, rerender } = mount({
-      kind: 'commits',
-      from: COMMITS[0]!.oid,
-      to: COMMITS[0]!.oid,
-    });
-
-    await shiftClick(tab('Commit 3, 3333333'));
-    // The pointer is still on the tab, and the line legitimately follows the
-    // pointer. This is about what it says once the pointer has gone.
-    await userEvent.unhover(tab('Commit 3, 3333333'));
-    rerender(
-      <CommitTabs
-        commits={COMMITS}
-        scope={{ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[2]!.oid }}
-        onScope={onScope}
-      />,
-    );
-
-    expect(details()).toContain('3 commits');
-  });
-
-  it('goes back to the selection when the pointer leaves', async () => {
-    mount({ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[0]!.oid });
-
-    await userEvent.hover(tab('Commit 3, 3333333'));
-    await userEvent.unhover(tab('Commit 3, 3333333'));
-
-    expect(details()).toContain('Commit number 1');
-  });
-});
-
 describe('the keyboard', () => {
   it('keeps one tab in the tab order rather than all of them', () => {
     // A two-hundred-commit pull request is two hundred tab stops otherwise.
@@ -291,20 +231,20 @@ describe('the keyboard', () => {
   it('steps along the strip with the arrow keys', async () => {
     mount();
 
-    tab('All').focus();
+    tab('Commit 1, 1111111').focus();
     await userEvent.keyboard('{ArrowRight}');
 
-    expect(document.activeElement?.textContent).toBe('1');
+    expect(document.activeElement?.textContent).toBe('2');
   });
 
   it('jumps to the ends with Home and End', async () => {
     mount();
 
-    tab('All').focus();
+    tab('Commit 2, 2222222').focus();
     await userEvent.keyboard('{End}');
-    expect(document.activeElement?.textContent).toBe('3');
+    expect(document.activeElement?.textContent).toBe('All');
 
     await userEvent.keyboard('{Home}');
-    expect(document.activeElement?.textContent).toBe('All');
+    expect(document.activeElement?.textContent).toBe('1');
   });
 });

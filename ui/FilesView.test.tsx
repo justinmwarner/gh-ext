@@ -2,7 +2,7 @@
  * The Files view: the tree and the diff, side by side.
  *
  * Which commits are on screen is not decided here — `ScopeBar` owns that, on
- * its own row above every view, because the answer changes what `files`
+ * the row directly above this one, because the answer changes what `files`
  * contains and so what the Conversations view calls "not in this diff".
  */
 
@@ -77,25 +77,6 @@ describe('FilesView', () => {
     const separator = screen.getByRole('separator', { name: /sidebar/i });
     expect(separator.getAttribute('aria-orientation')).toBe('vertical');
     expect(separator.getAttribute('tabindex')).toBe('0');
-  });
-
-  it('says how much changed, in the bar above the diff', () => {
-    // The bar held one button and a border. This is the only place the page
-    // says how big the change is at all.
-    mount();
-
-    const bar = document.querySelector('.filesview-bar');
-    expect(bar?.textContent).toContain('1 file changed');
-  });
-
-  it('counts what is on screen rather than the whole pull request', () => {
-    // While the comparison is showing, `files` is the narrowed list — so this
-    // has to describe that, or it contradicts the column beneath it.
-    const { container } = mount();
-
-    const counts = container.querySelector('.filesview-counts');
-    expect(counts?.textContent).toContain('+1');
-    expect(counts?.textContent).toContain('1');
   });
 
   it('marks a file in the tree that has an open conversation', () => {

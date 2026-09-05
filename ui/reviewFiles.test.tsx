@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { fileFixture, prPayloadWithFiles } from './prPayload.fixture';
-import { countPatchLines, reviewFiles } from './reviewFiles';
+import { changeTotals, countPatchLines, reviewFiles } from './reviewFiles';
 
 const patchOf = (path: string, added: number, removed: number): string =>
   [
@@ -199,5 +199,25 @@ describe('countPatchLines', () => {
 
   it('survives a patch with no hunk at all', () => {
     expect(countPatchLines('')).toEqual({ additions: 0, deletions: 0 });
+  });
+});
+
+describe('changeTotals', () => {
+  it('adds up what is on screen, which is not always the whole pull request', () => {
+    // Counted from the list being drawn, so a diff narrowed to one commit
+    // describes that. Totalling the pull request here would contradict the
+    // column directly beneath the sentence.
+    const files = reviewFiles(
+      prPayloadWithFiles([
+        fileFixture({ path: 'src/a.ts', additions: 4, deletions: 2 }),
+        fileFixture({ path: 'src/b.ts', additions: 1, deletions: 9 }),
+      ]),
+    );
+
+    expect(changeTotals(files)).toEqual({ files: 2, additions: 5, deletions: 11 });
+  });
+
+  it('has an answer for an empty list rather than none', () => {
+    expect(changeTotals([])).toEqual({ files: 0, additions: 0, deletions: 0 });
   });
 });

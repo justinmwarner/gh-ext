@@ -4,12 +4,11 @@
  * The same shape as GitHub's Files-changed tab, deliberately. A reviewer who
  * arrives here from that page should not have to find anything twice.
  *
- * It owns two things that used to be somewhere else. The tree is here rather
- * than in a rail of its own, because there is no longer a rail — the view
- * switcher took that job and this view is what it switches to. And the
- * comparison toggle is here rather than in the top bar, where it sat beside the
- * pull request's title as though it described the pull request; it describes
- * what this column is showing.
+ * The tree is here rather than in a rail of its own, because there is no longer
+ * a rail — the view switcher took that job and this view is what it switches
+ * to. What the column is showing, and how much of it, is said by `ScopeBar`
+ * directly above this: one row rather than the two it used to take, sitting on
+ * the diff it describes.
  *
  * Both Pierre surfaces virtualize against a scrollport they measure, so this is
  * a flex row with `min-height: 0` throughout — an unconstrained host measures
@@ -32,37 +31,6 @@ import { useDragSize } from './useDragSize';
 
 /** Wide enough for a deep path, narrow enough to leave the diff its width. */
 const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
-
-/**
- * How much is on screen, which is not always how much is in the pull request.
- *
- * Counted from the list the column is actually drawing, so while a narrowed
- * diff is showing this describes that. Totalling the whole pull request here
- * would contradict the diff directly underneath it.
- */
-function Summary({ files }: { files: readonly ReviewFile[] }) {
-  const totals = useMemo(
-    () =>
-      files.reduce(
-        (sum, file) => ({
-          additions: sum.additions + file.additions,
-          deletions: sum.deletions + file.deletions,
-        }),
-        { additions: 0, deletions: 0 },
-      ),
-    [files],
-  );
-
-  return (
-    <p className="filesview-summary">
-      {`${files.length} ${files.length === 1 ? 'file' : 'files'} changed`}
-      <span className="filesview-counts">
-        <span className="additions">{`+${totals.additions}`}</span>
-        <span className="deletions">{`−${totals.deletions}`}</span>
-      </span>
-    </p>
-  );
-}
 
 export interface FilesViewProps {
   payload: PrPayload;
@@ -160,10 +128,6 @@ export function FilesView({
 
   return (
     <div className="filesview">
-      <div className="filesview-bar">
-        <Summary files={files} />
-      </div>
-
       <div className="filesview-body">
         <nav
           className="filetree"

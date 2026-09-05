@@ -308,118 +308,144 @@ code {
 /* -------------------------------------------------------------- scope bar */
 
 /*
- * Which commits the column is showing.
+ * What the diff column is showing, and how to change it, on one row.
  *
- * Its own row under the top bar rather than a chip inside it, and present in
- * every state including "all of them". A diff scoped to one commit and the
- * whole pull request are the same picture, and the difference between them is
- * the difference between "nobody changed that" and "nobody changed that in
- * this commit" — so this is not allowed to be something the reviewer has to
- * remember to look for.
+ * It sits inside the Files view rather than above all three, because what it
+ * describes is the column directly underneath it — and because that is the
+ * only place its bottom edge can meet what it opens onto.
  *
- * Sticky beneath the bar above it, not scrolled away with the diff, for the
- * same reason.
+ * It was three rows. A summary bar belonging to the Files view, the strip with
+ * a caption under it, and the scope buttons off to one side. Each was
+ * defensible alone; stacked they were three rows of chrome above a diff that
+ * wants the room, and the strip could never meet the content below it.
+ *
+ * Now: sentence, tabs, kebab. The sentence goes left because it is the part
+ * that varies in length — growing there shifts the tabs right and costs
+ * nothing, where growing between them would move the numbers under whoever is
+ * pointing at them.
  */
-/* The same refusal, and for a sharper reason: this bar sticks itself at
-   `--topbar-height`, so a top bar that has been squeezed below its declared
-   height leaves this one sitting over the top of the body. */
 .scope-bar {
-  position: sticky;
-  top: var(--topbar-height);
-  z-index: 9;
+  /* Above the diff, so the menu can hang over it. */
+  position: relative;
+  z-index: 10;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
   grid-template-areas:
-    'strip actions'
-    'detail detail';
+    'status strip menu'
+    'note note note';
+  /* The tabs stand on the floor of this bar; everything beside them lines up
+     with their labels rather than with their boxes. */
   align-items: end;
   column-gap: var(--gap);
-  row-gap: 0;
-  padding: 0 0 5px;
   font-size: 13px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#ffffff, #0d1117);
+  /* Tinted ground, and no rule along the bottom. The seam is the tone change,
+     which the selected tab breaks by being the same colour as the diff — that
+     is the whole of what makes a tab look attached to what it opens.
+
+     Named, because the pinned "All" tab has to paint itself the same colour to
+     hide the numbers scrolling under it, and a state that recolours the bar
+     would otherwise leave a grey patch on an amber one. */
+  --scope-ground: light-dark(#f6f8fa, #010409);
+  background: var(--scope-ground);
 }
 
-/* The strip is a row of its own and the two things under it share the next
-   one, so `.commit-tabs` steps out of the way rather than boxing them in. */
-.commit-tabs {
-  display: contents;
-}
-
-.commit-strip {
-  grid-area: strip;
-}
-
-.commit-detail {
-  grid-area: detail;
-  padding: 5px 12px 0;
-}
-
-.scope-showing {
-  grid-area: detail;
-  padding-left: 12px;
-}
-
-.scope-actions {
-  grid-area: actions;
-  padding: 0 12px 6px;
-}
-
-/* Full width, under everything else. */
-.scope-note {
-  grid-column: 1 / -1;
-  padding: 0 12px;
-}
-
-/* The whole point of the row: narrowed does not look like whole. A tinted
-   band and a left rule, so it reads as a state the page is in rather than as
-   a message about something that happened.
-
-   Only for the states that are wrong. A scoped diff used to tint the whole bar
-   blue as well, and it no longer needs to: the pressed tab says which commits
-   are on screen, in the control the reviewer is already looking at, and a band
-   behind it was the same fact a second time in a heavier voice. */
-.scope-bar[data-scope='lost'],
-.scope-bar[data-scope='failed'] {
-  border-left: 4px solid light-dark(#bf8700, #d29922);
-  background: light-dark(#fff8c5, #272115);
-}
-
-.scope-showing {
+.scope-status {
+  grid-area: status;
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
   margin: 0;
-  font-weight: 600;
+  min-width: 0;
+  padding: 0 0 11px 12px;
+  color: light-dark(#59636e, #9198a1);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+.scope-counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.scope-counts .additions {
+  color: light-dark(#1a7f37, #3fb950);
+}
+
+.scope-counts .deletions {
+  color: light-dark(#cf222e, #f85149);
+}
+
+/* Only ever on screen when the column is narrowed or is being narrowed, so it
+   is allowed to be the loud half of the sentence. */
+.scope-showing {
+  min-width: 0;
+  font-weight: 600;
+  color: light-dark(#1f2328, #e6edf3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The whole point of the row: a state something is wrong in does not look like
+   an ordinary one. Only for those — a scoped diff says so through the pressed
+   tab, in the control the reviewer is already looking at, and a band behind it
+   was the same fact a second time in a heavier voice. */
+.scope-bar[data-scope='lost'],
+.scope-bar[data-scope='failed'] {
+  /* Inset rather than a left border: a border would shove the whole row 4px
+     sideways the moment something went wrong. */
+  box-shadow: inset 4px 0 0 light-dark(#bf8700, #d29922);
+  --scope-ground: light-dark(#fff8c5, #272115);
+}
+
+/* Full width, under everything else. */
+.scope-note {
+  grid-area: note;
+  margin: 0;
+  padding: 0 12px 6px;
+  font-size: 12px;
+  color: light-dark(#59636e, #9198a1);
+}
+
+.scope-note[role='alert'] {
+  color: light-dark(#cf222e, #f85149);
+}
+
 /* ------------------------------------------------------- the commit strip */
 
 /* Scrolls rather than wraps. A wrapped strip changes height as the pull
-   request does, and this bar sits above the diff — a second row appearing
+   request does, and this bar sits on top of the diff — a second row appearing
    would move the column under whoever is reading it. */
-/* No bottom border of its own: the tabs sit on the bar's floor and open into
-   it, the way the page's own tabs do. */
 .commit-strip {
+  grid-area: strip;
   display: flex;
+  align-items: flex-end;
   gap: 2px;
   min-width: 0;
-  padding: 5px 12px 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  scrollbar-width: thin;
+  /* Hidden rather than thin: a scrollbar under the tabs would draw a second
+     line along the seam they are supposed to be crossing. */
+  scrollbar-width: none;
 }
 
-/* Real tabs: rounded at the top, square and open at the bottom, so a selected
-   one reads as attached to the bar underneath rather than as a chip lying on
-   top of it. The border is transparent rather than absent, so selecting a
-   commit does not move its number by a pixel. */
+.commit-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Rounded at the top, square and open at the bottom, so a selected one reads
+   as attached to the diff underneath rather than as a chip lying on top of it.
+   The border is transparent rather than absent, so selecting a commit does not
+   move its number by a pixel. */
 .commit-tab {
+  position: relative;
   flex: 0 0 auto;
-  min-width: 34px;
-  padding: 8px 14px 9px;
+  min-width: 38px;
+  padding: 10px 14px 11px;
   font: inherit;
   font-size: 13px;
   /* So the strip does not jitter as the numbers gain a digit. */
@@ -428,7 +454,7 @@ code {
   color: light-dark(#59636e, #9198a1);
   border: 1px solid transparent;
   border-bottom: 0;
-  border-radius: 8px 8px 0 0;
+  border-radius: 10px 10px 0 0;
   background: none;
   cursor: pointer;
   transition:
@@ -438,50 +464,129 @@ code {
 
 .commit-tab:hover {
   color: light-dark(#1f2328, #e6edf3);
-  background: light-dark(#eef1f4, #212830);
+  background: light-dark(#eaeef2, #151b23);
 }
 
-/* Grey rather than the accent. The strip is a row of a dozen small controls
-   and a saturated fill on one of them shouts across the whole bar; the shape
-   is already saying which one it is. */
+/* The page's own colour, which is the diff's. A saturated fill on one of a
+   dozen small controls shouts across the whole bar; being the same colour as
+   what it opens says the same thing, about the right thing. */
 .commit-tab[aria-pressed='true'] {
   color: light-dark(#1f2328, #e6edf3);
   font-weight: 600;
   border-color: light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--page-bg);
 }
 
-/* One line, one place, always rendered. A line that appears only on hover
-   moves everything below it every time the pointer crosses the strip. */
-.commit-detail {
-  margin: 0;
-  min-height: 16px;
-  font-size: 12px;
-  line-height: 16px;
-  color: light-dark(#59636e, #9198a1);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+/* "All" is pinned to the right-hand end. The numbers are what grows, so a long
+   pull request scrolls them away — and "back to everything" is the one control
+   that must not go with them. `margin-left: auto` puts it at the end while the
+   strip still fits; `sticky` holds it there once it does not. */
+.commit-tab-all {
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  /* Opaque, or the numbers it is sitting over show through it. */
+  background: var(--scope-ground);
 }
 
-.scope-actions {
+.commit-tab-all::before {
+  /* The edge the scrolled numbers disappear behind. */
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -9px;
+  width: 8px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--scope-ground));
+}
+
+/* ------------------------------------------------------------- kebab menu */
+
+.menu-host {
+  grid-area: menu;
+  position: relative;
+  padding: 0 8px 6px 0;
+}
+
+.menu-trigger {
   display: flex;
   align-items: center;
-  gap: var(--gap);
-  margin-left: auto;
-}
-
-/* Wraps onto its own line rather than squeezing the controls, which all
-   refuse to shrink. */
-.scope-note {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: 12px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   color: light-dark(#59636e, #9198a1);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
 }
 
-.scope-note[role='alert'] {
-  color: light-dark(#cf222e, #f85149);
+.menu-trigger:hover,
+.menu-trigger[aria-expanded='true'] {
+  color: light-dark(#1f2328, #e6edf3);
+  border-color: light-dark(#d1d9e0, #3d444d);
+  background: var(--page-bg);
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 8px;
+  background: var(--page-bg);
+  box-shadow: 0 8px 24px light-dark(rgba(31, 35, 40, 0.16), rgba(1, 4, 9, 0.6));
+}
+
+/* A column for the tick, always, so switching one on does not shunt its own
+   label sideways. */
+.menu-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 6px 6px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  color: inherit;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.menu-item::before {
+  content: '';
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+}
+
+.menu-item[aria-checked='true']::before {
+  content: '\2713';
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: light-dark(#eaeef2, #212830);
+}
+
+.menu-item[aria-disabled='true'] {
+  color: light-dark(#8c959f, #656c76);
+  cursor: default;
+}
+
+.menu-item[aria-disabled='true']:hover {
+  background: none;
 }
 
 /* --------------------------------------------------------- commit picker */
@@ -727,35 +832,6 @@ code {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-}
-
-/* Thin, and right-aligned against the diff rather than the tree: it describes
-   what the column is showing. */
-.filesview-bar {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap);
-  padding: 6px 12px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
-}
-
-.filesview-summary {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap);
-  margin: 0;
-  min-width: 0;
-  font-size: 13px;
-  color: light-dark(#59636e, #9198a1);
-}
-
-.filesview-counts {
-  display: inline-flex;
-  gap: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
 }
 
 .filesview-error {
