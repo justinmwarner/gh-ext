@@ -10,7 +10,11 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
-import { UNRESOLVE_THREAD } from '@/lib/github/mutations';
+import {
+  DELETE_COMMENT,
+  UNRESOLVE_THREAD,
+  UPDATE_COMMENT,
+} from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { ThreadCard } from './ThreadCard';
@@ -395,5 +399,243 @@ describe('a thread holding an unposted comment', () => {
 
     expect(screen.queryByText(/not posted yet/i)).toBeNull();
     expect(container.querySelector('.thread-unpublished')).toBeNull();
+  });
+});
+
+/**
+ * Fixing a comment, and taking one back.
+ *
+ * Until these existed, a typo posted into a pending review could only be
+ * corrected on github.com — the one place this extension exists to avoid.
+ *
+ * Both controls are *absent* rather than disabled when the viewer may not use
+ * them, which is the opposite of the rule the resolve button follows. The
+ * difference is what the absence means: a thread offers one resolve control to
+ * every reader, so a disabled one says "not you". A comment offers these to its
+ * author, so on the four comments in a thread that somebody else wrote a
+ * disabled Delete says nothing at all and is just clutter in the way of the
+ * conversation.
+ */
+describe('editing a comment', () => {
+  const EDITED = {
+    ok: true,
+    data: {
+      data: {
+        updatePullRequestReviewComment: {
+          pullRequestReviewComment: {
+            id: 'PRRC_1',
+            body: 'This allocates once per call.',
+            author: { login: 'dana', avatarUrl: '' },
+            createdAt: '2026-08-30T09:15:00Z',
+            url: '',
+            viewerCanUpdate: true,
+            viewerCanDelete: true,
+          },
+        },
+      },
+    },
+  };
+
+  it('offers to edit a comment the viewer may update', () => {
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeDefined();
+  });
+
+  it('does not offer to edit a comment the viewer may not update', () => {
+    // Not offered rather than offered-and-disabled: this control belongs to
+    // the comment's author, and on everyone else's it is only noise.
+    mount(
+      reviewThread({
+        path: 'src/app.ts',
+        comments: { totalCount: 1, nodes: [reviewComment({ viewerCanUpdate: false })] },
+      }),
+    );
+
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  });
+
+  it('opens on the comment’s own words rather than an empty box', async () => {
+    // An editor that starts blank is a rewrite, not an edit, and the mutation
+    // replaces the body wholesale — so a save from an empty box erases it.
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const box = screen.getByRole('textbox', { name: /edit/i }) as HTMLTextAreaElement;
+    expect(box.value).toBe('This allocates on every call.');
+  });
+
+  it('saves the edit and shows what GitHub sent back', async () => {
+    requestMock.mockResolvedValue(EDITED);
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const box = screen.getByRole('textbox', { name: /edit/i });
+    await userEvent.clear(box);
+    await userEvent.type(box, 'This allocates once per call.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('This allocates once per call.')).toBeDefined(),
+    );
+    expect(requestMock.mock.calls[0]?.[0]?.document).toBe(UPDATE_COMMENT);
+    // The editor closes only on success; leaving it open over saved text
+    // invites the same edit to be sent twice.
+    expect(screen.queryByRole('textbox', { name: /edit/i })).toBeNull();
+  });
+
+  it('sends nothing and changes nothing when the edit is cancelled', async () => {
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await userEvent.type(screen.getByRole('textbox', { name: /edit/i }), ' rubbish');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(screen.getByText('This allocates on every call.')).toBeDefined();
+  });
+
+  it('keeps the editor open over the words a failed save could not deliver', async () => {
+    // Closing it would throw away the reviewer's correction while the wrong
+    // body is still the one on GitHub.
+    requestMock.mockResolvedValue(FAILURE);
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const box = screen.getByRole('textbox', { name: /edit/i }) as HTMLTextAreaElement;
+    await userEvent.clear(box);
+    await userEvent.type(box, 'This allocates once per call.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
+    expect(
+      (screen.getByRole('textbox', { name: /edit/i }) as HTMLTextAreaElement).value,
+    ).toBe('This allocates once per call.');
+  });
+
+  it('lets a comment queued on a pending review be fixed', async () => {
+    // The whole point. A typo in a comment nobody else can see yet is the one
+    // most worth correcting, and until now github.com was the only way.
+    requestMock.mockResolvedValue(EDITED);
+    mount(reviewThread({ path: 'src/app.ts' }), {
+      viewerLatestReview: { id: 'PRR_pending', state: 'PENDING' },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const box = screen.getByRole('textbox', { name: /edit/i });
+    await userEvent.clear(box);
+    await userEvent.type(box, 'This allocates once per call.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('This allocates once per call.')).toBeDefined(),
+    );
+    expect(requestMock.mock.calls[0]?.[0]?.document).toBe(UPDATE_COMMENT);
+  });
+});
+
+describe('deleting a comment', () => {
+  const DELETED = {
+    ok: true,
+    data: {
+      data: {
+        deletePullRequestReviewComment: {
+          pullRequestReview: { id: 'PRR_1', state: 'PENDING' },
+        },
+      },
+    },
+  };
+
+  const twoComments = (overrides: Partial<Parameters<typeof reviewComment>[0]> = {}) =>
+    reviewThread({
+      path: 'src/app.ts',
+      comments: {
+        totalCount: 2,
+        nodes: [
+          reviewComment({ id: 'PRRC_1', body: 'This allocates on every call.' }),
+          reviewComment({ id: 'PRRC_2', body: 'Fixed in the next commit.', ...overrides }),
+        ],
+      },
+    });
+
+  it('does not offer to delete a comment the viewer may not delete', () => {
+    mount(
+      reviewThread({
+        path: 'src/app.ts',
+        comments: { totalCount: 1, nodes: [reviewComment({ viewerCanDelete: false })] },
+      }),
+    );
+
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  });
+
+  it('asks first, and sends nothing on the first press', async () => {
+    // Irreversible on GitHub, and unlike an edit nothing keeps a copy. One
+    // click away from destroying somebody's writing is not an interface.
+    requestMock.mockResolvedValue(DELETED);
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('group', { name: /delete/i })).toBeDefined();
+  });
+
+  it('deletes once the confirmation is given', async () => {
+    requestMock.mockResolvedValue(DELETED);
+    mount(twoComments());
+
+    const comment = screen.getByText('This allocates on every call.').closest('li');
+    await userEvent.click(
+      within(comment as HTMLElement).getByRole('button', { name: 'Delete' }),
+    );
+    await userEvent.click(
+      within(comment as HTMLElement).getByRole('button', { name: 'Delete comment' }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText('This allocates on every call.')).toBeNull(),
+    );
+    expect(requestMock.mock.calls[0]?.[0]?.document).toBe(DELETE_COMMENT);
+    expect(screen.getByText('Fixed in the next commit.')).toBeDefined();
+  });
+
+  it('changes nothing when the confirmation is declined', async () => {
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(screen.getByText('This allocates on every call.')).toBeDefined();
+  });
+
+  it('keeps the comment and says so when the delete is refused', async () => {
+    requestMock.mockResolvedValue(FAILURE);
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete comment' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toMatch(/the network went away/),
+    );
+    expect(screen.getByText('This allocates on every call.')).toBeDefined();
+  });
+
+  it('lets a comment queued on a pending review be taken back', async () => {
+    requestMock.mockResolvedValue(DELETED);
+    mount(reviewThread({ path: 'src/app.ts' }), {
+      viewerLatestReview: { id: 'PRR_pending', state: 'PENDING' },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete comment' }));
+
+    // The thread went with its last comment, so the card is gone entirely.
+    await waitFor(() =>
+      expect(screen.queryByText('This allocates on every call.')).toBeNull(),
+    );
   });
 });

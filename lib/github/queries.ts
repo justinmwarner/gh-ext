@@ -26,6 +26,15 @@ export const FILE_FIELDS = `fragment FileFields on PullRequestChangedFile {
  * fifty replies is vanishingly rare next to a pull request with more than a
  * hundred files. `totalCount` is selected so that when it does happen the
  * shortfall is visible (`totalCount > nodes.length`) rather than silent.
+ *
+ * `viewerCanUpdate` / `viewerCanDelete` are per *comment*, not per thread, and
+ * that is why they are here rather than beside `viewerCanReply` above: a thread
+ * routinely holds one comment the viewer wrote and four they did not. They come
+ * from the `Updatable` and `Deletable` interfaces `PullRequestReviewComment`
+ * implements — introspected 2026-09-05, along with the mutations they gate. A
+ * missing flag has only one safe reading, "do not offer the control", so
+ * dropping them here takes the edit and delete affordances off every comment
+ * on the page.
  */
 export const REVIEW_THREAD_FIELDS = `fragment ReviewThreadFields on PullRequestReviewThread {
   id isResolved isOutdated isCollapsed
@@ -35,7 +44,10 @@ export const REVIEW_THREAD_FIELDS = `fragment ReviewThreadFields on PullRequestR
   resolvedBy { login }
   comments(first: 50) {
     totalCount
-    nodes { id author { login avatarUrl } body createdAt url }
+    nodes {
+      id author { login avatarUrl } body createdAt url
+      viewerCanUpdate viewerCanDelete
+    }
   }
 }`;
 

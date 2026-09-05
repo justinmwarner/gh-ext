@@ -193,6 +193,12 @@ export function prPayloadWithFiles(
  * `author` is nullable in the schema — a comment left by a since-deleted
  * account arrives with it null — so the fixture types it that way rather than
  * letting a component assume a login is always there.
+ *
+ * `viewerCanUpdate` / `viewerCanDelete` default true, matching the thread
+ * fixture's own permission flags: the interesting case is the affordance being
+ * offered, and a fixture defaulting them off would let it go missing
+ * everywhere without a single test noticing. Tests that care about the refusal
+ * turn them off explicitly.
  */
 export function reviewComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   return {
@@ -201,6 +207,8 @@ export function reviewComment(overrides: Partial<ReviewComment> = {}): ReviewCom
     body: 'This allocates on every call.',
     createdAt: '2026-08-30T09:15:00Z',
     url: 'https://github.com/acme/widgets/pull/42#discussion_r1',
+    viewerCanUpdate: true,
+    viewerCanDelete: true,
     ...overrides,
   };
 }

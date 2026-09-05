@@ -83,6 +83,23 @@ describe('the read documents', () => {
     expect(REVIEW_THREAD_FIELDS).toMatch(/comments\(first: 50\) \{\s*totalCount/);
   });
 
+  it('asks whether the viewer may edit and delete each comment it reads', () => {
+    // The gate for the edit and delete affordances. Without these two the page
+    // cannot tell "you may not" from "we did not ask", and the only safe
+    // reading of a missing flag is that the control must not be offered — so
+    // dropping them here removes the affordance from every existing comment.
+    //
+    // Asserted on the far side of `comments(` because they belong to the
+    // comment and not to the thread: one thread routinely holds a comment the
+    // viewer wrote and four they did not, and a thread-level flag would offer
+    // to edit somebody else's.
+    const [thread = '', comment = ''] = REVIEW_THREAD_FIELDS.split('comments(');
+    expect(comment).toContain('viewerCanUpdate');
+    expect(comment).toContain('viewerCanDelete');
+    expect(thread).not.toContain('viewerCanUpdate');
+    expect(thread).not.toContain('viewerCanDelete');
+  });
+
   it('spreads every member of the RequestedReviewer union it knows about', () => {
     // Selecting only `... on User` is what made teams and bots vanish.
     for (const member of ['User', 'Bot', 'Mannequin', 'Team', 'EnterpriseTeam']) {

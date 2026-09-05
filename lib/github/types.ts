@@ -13,6 +13,22 @@ export interface ReviewComment {
   body: string;
   createdAt: string;
   url: string;
+  /**
+   * Whether the viewer may rewrite this comment's body, and whether they may
+   * destroy it.
+   *
+   * Per comment rather than per thread, which is the whole reason they are not
+   * beside `viewerCanReply` on `ReviewThread`: one thread routinely holds a
+   * comment the viewer wrote and four they did not, and offering to edit
+   * somebody else's is a control that can only fail.
+   *
+   * Not optional and not defaulted to true anywhere. GitHub sends both on
+   * every comment, and the only safe reading of an absent flag is "no" — a
+   * `true` invented for a comment nobody asked about is an affordance that
+   * throws.
+   */
+  viewerCanUpdate: boolean;
+  viewerCanDelete: boolean;
 }
 
 /**

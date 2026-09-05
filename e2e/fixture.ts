@@ -154,6 +154,11 @@ const comment = (id: string, body: string) => ({
   body,
   createdAt: '2026-08-30T09:15:00Z',
   url: `https://github.com/acme/widgets/pull/42#discussion_${id}`,
+  // The gate for the Edit and Delete affordances. Left out, the fake GitHub
+  // would serve comments the page correctly refuses to offer them on, and the
+  // browser would never see the controls at all.
+  viewerCanUpdate: true,
+  viewerCanDelete: true,
 });
 
 const thread = (over: Record<string, unknown>) => ({
