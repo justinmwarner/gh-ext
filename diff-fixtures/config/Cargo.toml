@@ -1,0 +1,18 @@
+[package]
+name = "review-indexer"
+version = "0.4.1"
+edition = "2021"
+# Kept at 1.74 for the CI image; bumping means bumping that too.
+rust-version = "1.74"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.35", features = ["full"] }
+tracing = "0.1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
