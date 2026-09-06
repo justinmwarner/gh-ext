@@ -29,6 +29,8 @@ import {
   HEAD_SHA,
   IMAGE_BYTES,
   IMAGE_FILE,
+  MARKDOWN_FILE,
+  MARKDOWN_TEXT,
   PRIOR_SHA,
   POSTED_THREAD,
   PR,
@@ -295,6 +297,16 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
       }
       if (path === TABLE_FILE) {
         await route.fulfill({ status: 200, contentType: 'text/csv', body: TABLE_TEXT[side] });
+        return;
+      }
+      // Real Markdown, including the parts a pull request should not be able to
+      // execute here. See `MARKDOWN_TEXT` for why this cannot be asked in jsdom.
+      if (path === MARKDOWN_FILE) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/markdown',
+          body: MARKDOWN_TEXT[side],
+        });
         return;
       }
 

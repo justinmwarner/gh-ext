@@ -20,7 +20,16 @@
  */
 
 import { REACHED } from '@/ui/currentFile';
-import { BASE_SHA, FILES, FIRST_SHA, PRIOR_SHA, THREADS } from './fixture';
+import {
+  BASE_SHA,
+  FILES,
+  FIRST_SHA,
+  IMAGE_FILE,
+  MARKDOWN_FILE,
+  PRIOR_SHA,
+  TABLE_FILE,
+  THREADS,
+} from './fixture';
 import { expect, reviewUrl, test } from './extension';
 import type { Page } from '@playwright/test';
 
@@ -439,7 +448,12 @@ test('scrolling the diff column walks the tree selection forward, in file order'
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const order = new Map<string, number>(FILES.map((path, index) => [path, index]));
+  // The whole column, not just `FILES`: the image and the table follow it in
+  // `UNIFIED_DIFF`, and the walk reaches them now that the tail gives the column
+  // the scroll range its rich cards were costing it.
+  const order = new Map<string, number>(
+    [...FILES, IMAGE_FILE, TABLE_FILE].map((path, index) => [path, index]),
+  );
   const seen: string[] = [];
 
   const height = await page.locator(VIEW).evaluate((node) => node.scrollHeight);
@@ -465,10 +479,20 @@ test('scrolling the diff column walks the tree selection forward, in file order'
   expect(order.get(seen.at(-1) as string)).toBeGreaterThan(FILES.length - 4);
 
   // And the file it names is genuinely the topmost one on screen, measured
-  // rather than inferred. The nudge re-fires the handler against the layout as
-  // it finally settled — `CodeView` remeasures item heights as real content
-  // replaces its estimates, and the reported file is otherwise one render
-  // behind that.
+  // rather than inferred. Asked just short of the end rather than at it: the
+  // tail is deliberately long enough to scroll past the last card — that is
+  // what lets the last card reach the top at all — so the very bottom of the
+  // column is empty space with no card to be topmost. Moving re-fires the
+  // handler against the layout as it finally settled, which the reported file
+  // is otherwise one render behind.
+  await page.evaluate((selector) => {
+    const view = document.querySelector(selector);
+    if (view !== null) view.scrollTop = (view.scrollHeight - view.clientHeight) * 0.88;
+  }, VIEW);
+  await page.waitForTimeout(300);
+  // Then the nudge, as before: it is what re-fires the handler against the
+  // layout as it finally settled, which the reported file is otherwise one
+  // render behind.
   await page.evaluate((selector) => {
     const view = document.querySelector(selector);
     if (view !== null) view.scrollTop += 1;
@@ -1241,4 +1265,121 @@ test('the corner-button fallback comes back after leaving a pull request', async
     document.body.append(document.createElement('span'));
   });
   await expect(button).toBeVisible({ timeout: 10_000 });
+});
+
+/**
+ * The bottom of the column is reachable, however tall the cards above it are.
+ *
+ * `CodeView` sizes a *collapsed* item at one global metric — read
+ * `computeApproximateSize` in `VirtualizedFileDiff`: it adds the header region
+ * and returns before the measured correction the expanded path applies. Every
+ * rich comparison is a collapsed item whose custom header is 126-179px rather
+ * than the ~44px the metric assumes, so the viewer under-counts the column once
+ * per rich card and the error accumulates downward as scroll range it does not
+ * know it owes.
+ *
+ * Which showed up as the last file of a review being unreadable: at maximum
+ * scroll its header sat 627px into a 628px scrollport, with nowhere further to
+ * go. `lib/review/columnTail.ts` buys the range back on the footer, which is
+ * the one element whose height the viewer does measure.
+ */
+test('the last card can still be read when the column is full of rich ones', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const cardTop = async (): Promise<number | null> =>
+    page.evaluate(
+      ([selector, path]) => {
+        const view = document.querySelector(selector as string) as HTMLElement;
+        const card = document.querySelector(`[data-file-card="${path}"]`);
+        if (card === null) return null;
+        return Math.round(
+          card.getBoundingClientRect().top - view.getBoundingClientRect().top,
+        );
+      },
+      [VIEW, TABLE_FILE] as const,
+    );
+
+  const scrollFraction = (fraction: number) =>
+    page.evaluate(
+      ([selector, value]) => {
+        const view = document.querySelector(selector as string) as HTMLElement;
+        view.scrollTop = (view.scrollHeight - view.clientHeight) * (value as number);
+      },
+      [VIEW, fraction] as const,
+    );
+
+  // Near the end first, and in its own turn: the viewer mounts a card only when
+  // it is close to the viewport, and cannot mount anything while the thread is
+  // still inside the `evaluate` that moved the scroll. This is also what proves
+  // the card exists at all, so that its *absence* at the bottom below can only
+  // mean it was scrolled past.
+  await scrollFraction(0.9);
+  await expect.poll(cardTop).not.toBeNull();
+
+  await scrollFraction(1);
+  await expect
+    .poll(() =>
+      page.evaluate((selector) => {
+        const view = document.querySelector(selector as string) as HTMLElement;
+        return Math.round(view.scrollHeight - view.clientHeight - view.scrollTop);
+      }, VIEW),
+    )
+    .toBe(0);
+
+  // Either at the top of the scrollport, or scrolled clean past it — both mean
+  // the column goes far enough. Before the tail was sized for rich cards this
+  // sat at 627px into a 628px scrollport with nowhere further to go: the last
+  // file of the review was on screen, and only its top edge was.
+  const settled = await cardTop();
+  expect(settled === null || settled < 80).toBe(true);
+});
+
+/**
+ * Markdown, rendered and marked, in a browser that will actually run things.
+ *
+ * The unit tests for this live in jsdom, and jsdom cannot answer the question
+ * that matters: it loads no images, so an `onerror` never fires, and it runs no
+ * script assigned through `innerHTML`. An assertion that nothing was executed
+ * passes there whether or not anything is sanitising. Chrome will do both, so
+ * this is the only place the sanitiser is really tested — and the origin it
+ * defends holds a GitHub token.
+ */
+test('a rendered Markdown diff marks the prose and executes none of it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const row = page.locator(`[data-path="${MARKDOWN_FILE}"]`);
+  await row.click();
+
+  const card = page.locator(`[data-file-card="${MARKDOWN_FILE}"]`);
+  await expect(card.locator('.markdown-rendered')).toBeVisible();
+
+  // The word that changed is marked in place, which is the whole point of a
+  // rendered *diff* rather than a rendered preview.
+  await expect(card.locator('.markdown-rendered ins')).toContainText('structured');
+  await expect(card.locator('.markdown-rendered del')).toContainText('plain');
+
+  // Nothing that can fetch, run, or navigate survived into the document.
+  const rendered = card.locator('.markdown-rendered');
+  await expect(rendered.locator('img')).toHaveCount(0);
+  await expect(rendered.locator('script')).toHaveCount(0);
+  await expect(rendered.locator('iframe')).toHaveCount(0);
+  await expect(rendered.locator('[onerror]')).toHaveCount(0);
+  await expect(rendered.locator('a[href^="javascript:"]')).toHaveCount(0);
+
+  // And the payload's own report: it sets this from three different places.
+  expect(await page.evaluate(() => (globalThis as { __pwned?: boolean }).__pwned)).toBe(
+    undefined,
+  );
 });

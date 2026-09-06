@@ -642,13 +642,17 @@ breaking Shiki's module graph.
 execute in this extension. It would pay for every other decision in this
 document combined.
 
-### Decision 13 — A rich card in the middle of the column mis-measures
+### Decision 13 — A rich card in the middle of the column mis-measures — **FIXED**
 
 Found on 2026-09-05 while taking decision 1, and it is not a Markdown problem —
 Markdown is only the first file type common enough to expose it.
 
-`CodeView` measures a collapsed item at about the height of its header row,
-38 px in a browser, and never re-measures it. Every rich comparison renders in
+`CodeView` sizes a collapsed item from one global metric and never measures it
+at all. Read `computeApproximateSize` in `VirtualizedFileDiff`: it adds the
+header region and, if the item is collapsed, **returns there** — before the
+measured correction the expanded path applies. There is no per-item height input
+anywhere in its options, so no version bump, re-render or reconciliation can
+correct it; the arithmetic has nowhere to put the number. Every rich comparison renders in
 a collapsed card's header, and its body arrives later, from the worker: a
 rendered Markdown diff settles at ~153 px, an image at ~126 px, a CSV grid at
 ~179 px. The shortfall is scroll range the viewer does not know it has, it
@@ -675,6 +679,33 @@ cover this would quietly couple the two. The browser fixture keeps its `docs/`
 files as `.txt` so that it goes on testing what it was built to test; the
 consequence is that **the Markdown mode has no browser coverage**, which is the
 main thing worth fixing about it once B lands.
+
+**Fixed on 2026-09-05.** `lib/review/columnTail.ts` sizes `.column-tail` to
+cover the shortfall, on the one element whose height the viewer does measure.
+Two things were learned doing it, both from the shipped package and neither
+documented:
+
+- **A second measurement bug sits behind the first.** `reconcileHost`
+  re-measures the footer only when the render callback's *identity* changes, and
+  the React wrapper replaces that callback with a stable internal `noopRender`
+  and delivers the real content through a portal. Its `ResizeObserver` does
+  observe the footer element, and `handleResize` drops every entry that is not
+  the sticky container. So the footer is measured exactly once, at mount, and a
+  tail that grows afterwards is ignored — the core goes on clamping scroll to
+  the stale number. That is why the slack is *estimated from the file list* at
+  mount rather than measured from the headers as they settle: the measurement
+  arrives long after the only reading that counts has been taken.
+- **The reachability and the aim are separate symptoms.** Sizing the tail
+  restores how far the column *can* scroll, and it does not fix where
+  `scrollTo({type: 'item'})` lands, because that targets the item's modelled
+  top and is short by the deficit of every rich card above it. Measured: with
+  three rich cards above it, choosing the last file from the tree lands 331 px
+  short. A post-hoc correction was tried — measure the card and adjust
+  `scrollTop` over a few frames — and made it *worse*, 331 px to 607 px,
+  because `CodeView` re-clamps and re-anchors a manual write. It was backed out
+  rather than shipped unproven. **This half is still open.**
+
+---
 
 ---
 
@@ -718,10 +749,10 @@ order of value per byte:
    **+25,860 B gzipped** rather than the 27,341 B estimated — `htmldiff-js` was
    vendored rather than depended on, which is where most of the difference
    went. §3.7 records it.
-5. **Decision 13 (the mid-column measurement shortfall).** New, and the only
-   one of these that is a defect rather than an absence: a rich card anywhere
-   but the bottom of the column costs the last card its scroll range. It is
-   also what keeps the Markdown mode out of the browser fixture.
+5. ~~**Decision 13 (the mid-column measurement shortfall).**~~ Fixed on
+   2026-09-05 — see the section above. `docs/readme.md` is back in the browser
+   fixture, and the Markdown mode has browser coverage including a sanitiser
+   test that jsdom could not make.
 6. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
 
 Two libraries examined on 2026-09-05 and rejected outright, recorded so nobody

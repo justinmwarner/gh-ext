@@ -35,6 +35,7 @@
  */
 
 import {
+  type CSSProperties,
   type Ref,
   useCallback,
   useEffect,
@@ -50,6 +51,7 @@ import { RAW, resolveModeForFile } from '@/lib/compare/modes';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { AnnotationSide } from '@/lib/review/threads';
+import { tailDeficit } from '@/lib/review/columnTail';
 import { type WhitespaceDiff, withoutWhitespaceChanges } from '@/lib/review/whitespace';
 import { Composer } from './Composer';
 import { FileCard } from './FileCard';
@@ -63,6 +65,7 @@ import {
   fileDiffFor,
   fileDiffSignature,
   hunkStops,
+  showsTextDiff,
 } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
 import { NEW_THREAD, useReviewSession } from './reviewSession';
@@ -213,6 +216,7 @@ export const CODE_VIEW_SAFE_PROPS = {
  * on this callback's identity.
  */
 const renderTail = () => <div className="column-tail" aria-hidden="true" />;
+
 
 const NO_ANNOTATIONS: DiffLineAnnotation<AnnotationMetadata>[] = [];
 const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: [] };
@@ -524,6 +528,28 @@ export function DiffColumn({
   const items = useMemo(
     () => codeViewItems(drawnFiles, collapsed, annotationsByPath, modes),
     [drawnFiles, collapsed, annotationsByPath, modes],
+  );
+
+  /**
+   * How much slack the tail needs, decided before the column has rendered.
+   *
+   * It has to be decided here rather than measured later: `CodeView` takes the
+   * footer's height once, when it mounts, and never looks again — so a tail
+   * that grew as the rich comparisons arrived would be ignored, and the core
+   * would go on clamping scroll to the stale number. `lib/review/columnTail.ts`
+   * has the two library facts behind that and the measurements.
+   *
+   * Counted off the same predicate `codeViewItems` collapses on, because they
+   * are the same cards: the ones whose header carries a comparison the metric
+   * knows nothing about.
+   */
+  const tailSlack = useMemo(
+    () =>
+      tailDeficit(
+        drawnFiles.filter((file) => !showsTextDiff(file, modes.get(file.path) ?? RAW.id))
+          .length,
+      ),
+    [drawnFiles, modes],
   );
   // GitHub's files, not the drawn ones. The card reports the pull request's
   // own counts and the composer seeds suggestions from the patch GitHub sent,
@@ -911,7 +937,11 @@ export function DiffColumn({
   }, [jumpId, jumpToken]);
 
   return (
-    <main className="column" aria-label="Diff">
+    <main
+      className="column"
+      aria-label="Diff"
+      style={{ '--tail-deficit': `${tailSlack}px` } as CSSProperties}
+    >
       {diff.source === 'files-api' && (
         <p className="notice" role="status">
           GitHub would not generate a unified diff for this pull request, so the

@@ -3055,20 +3055,30 @@ button.scope-showing:hover {
    It is also, unintentionally, the budget for a second problem, and the two
    compete. CodeView measures a collapsed item at roughly the height of its
    header row — 38px in a browser — and never re-measures it. Every card in a
-   rich comparison mode is collapsed, and its body arrives later, from the
-   worker: a rendered Markdown diff settles at ~153px, an image at ~126px, a
-   CSV grid at ~179px. The difference is scroll range the viewer does not know
-   it has, it accumulates down the column, and past 40vh of it the last card
-   can no longer reach the top after all.
+   rich comparison mode is collapsed, and `CodeView` sizes a collapsed item at
+   one global metric: read `computeApproximateSize` in `VirtualizedFileDiff`,
+   which adds the header region and returns before the measured correction the
+   expanded path applies. There is no per-item height input anywhere in its
+   options, so no amount of re-rendering can tell it the truth.
 
-   Measured on the browser fixture: two image-and-table cards cost ~229px and
-   fit; adding two rendered-Markdown cards above them costs ~459px and does
-   not. Reproduced on the commit *before* Markdown existed by moving a single
-   `.csv` into the middle of the column, so this is a property of rich cards in
-   general rather than of any one of them — Markdown is only the first file
-   type common enough to land in the middle of a real pull request. The fix is
-   for CodeView to observe its header slots rather than for this number to grow,
-   so this number is deliberately not being grown to hide it. */
+   Measured in Chrome on the browser fixture, against the ~44px the metric
+   assumes: a rendered Markdown card is 153px, an image 126px, a CSV grid 179px.
+   The difference is scroll range the viewer does not know it has, it
+   accumulates down the column, and past 40vh of it the last card can no longer
+   reach the top — 627px into a 628px scrollport, so the final file of a review
+   could not be read at all.
+
+   `--tail-deficit` buys that range back here, on the one element whose height
+   the viewer does measure. It is an estimate rather than a measurement on
+   purpose: `reconcileHost` re-measures the footer only when the render
+   callback's identity changes, and the React wrapper pins that callback to a
+   stable internal `noopRender` — so the height that counts is whichever one
+   this had when the column mounted, and growing it later is ignored.
+   `lib/review/columnTail.ts` carries the arithmetic and the rest of the
+   reasoning. */
 .column-tail {
-  height: 40vh;
+  /* 40vh is what an ordinary column needs. `--tail-deficit` is the part the
+     viewer under-counted, measured from the mounted headers by `DiffColumn` —
+     see `lib/review/columnTail.ts` for why it cannot be known any other way. */
+  height: calc(40vh + var(--tail-deficit, 0px));
 }

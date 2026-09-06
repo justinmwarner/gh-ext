@@ -375,15 +375,16 @@ test('the last card in the column can still be scrolled to the top', async ({
   await openReview(page, extensionId);
   await reach(page, TABLE_FILE);
 
-  await page.evaluate(() => {
-    const view = document.querySelector('.diff-view') as HTMLElement | null;
-    view?.scrollTo({ top: view.scrollHeight });
-  });
-
-  // Without the tail, `CodeView` stops with the last item's bottom level with
-  // the scrollport and the top of that card — every control it has — is below
-  // the fold with nowhere left to scroll. Measured in Chrome before the fix:
-  // the header sat 23px past the edge and its buttons could not be clicked.
+  // Where the reviewer is put when they ask for this file, which is the only
+  // place its controls have to be usable. Once, the assertion was made at the
+  // very bottom of the column, because that was where the last card was
+  // stranded: `CodeView` stopped with its bottom level with the scrollport and
+  // every control it had below the fold — measured in Chrome, the header sat
+  // 23px past the edge and its buttons could not be clicked. The tail now buys
+  // enough range to scroll clean past this card, so the bottom of the column is
+  // empty space with nothing to click, and the claim about the range itself
+  // belongs where it is now made: `review.spec.ts`, under "the last card can
+  // still be read when the column is full of rich ones".
   const inside = await page.evaluate((path) => {
     const button = document
       .querySelector(`[data-file-card="${path}"]`)

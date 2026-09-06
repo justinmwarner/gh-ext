@@ -38,10 +38,12 @@ export const FIRST_SHA = 'c'.repeat(40);
  * Every entry has to be a file that opens on the *text* diff, for the same
  * reason `IMAGE_FILE` and `TABLE_FILE` are kept out of this list below: what
  * reads it is counting text files with two hunks each. The two documents under
- * `docs/` are `.txt` rather than `.md` because `.md` stopped qualifying when
- * Markdown got a rendered diff — see the note on `.column-tail` in
- * `entrypoints/review/style.css` for what a rich card in the middle of this
- * column does to the ones below it.
+ * `docs/readme.md` is deliberately one of them, and is the only entry that does
+ * not: it opens on the rendered Markdown diff, which makes it a rich card in
+ * the middle of the column. That used to cost the cards below it their scroll
+ * range — see `lib/review/columnTail.ts` — and it is here now precisely so that
+ * a regression in the tail is caught by the browser suite rather than by a
+ * reviewer who cannot reach the last file.
  */
 export const FILES = [
   'src/app.ts',
@@ -56,8 +58,8 @@ export const FILES = [
   'lib/format.ts',
   'lib/util/clamp.ts',
   'lib/util/debounce.ts',
-  'docs/readme.txt',
-  'docs/changelog.txt',
+  'docs/readme.md',
+  'docs/changelog.md',
 ] as const;
 
 /**
@@ -93,6 +95,44 @@ const patchFor = (path: string): string =>
  */
 export const IMAGE_FILE = 'assets/logo.png';
 export const TABLE_FILE = 'data/rows.csv';
+
+/** The one file served as real Markdown, so the rendered diff has prose to mark. */
+export const MARKDOWN_FILE = 'docs/readme.md';
+
+/**
+ * Markdown with something hostile in it, on both sides.
+ *
+ * A `.md` file in a pull request is written by whoever opened it, and this
+ * origin holds a GitHub token. jsdom cannot answer whether the sanitiser holds:
+ * it loads no images, so `onerror` never fires, and it runs no script assigned
+ * through `innerHTML` — so the obvious assertion passes there whether or not
+ * anything is sanitising. A real browser will do both, which is the only place
+ * the question can actually be asked.
+ */
+export const MARKDOWN_TEXT: Record<'base' | 'head', string> = {
+  base: [
+    '# Review notes',
+    '',
+    'The parser handles **plain** input.',
+    '',
+    '<img src=\"x\" onerror=\"globalThis.__pwned = true\">',
+    '<script>globalThis.__pwned = true</script>',
+    '',
+    '[a link](javascript:globalThis.__pwned=true)',
+    '',
+  ].join('\n'),
+  head: [
+    '# Review notes',
+    '',
+    'The parser handles **structured** input.',
+    '',
+    '<img src=\"x\" onerror=\"globalThis.__pwned = true\">',
+    '<script>globalThis.__pwned = true</script>',
+    '',
+    '[a link](javascript:globalThis.__pwned=true)',
+    '',
+  ].join('\n'),
+};
 
 /**
  * Two eight-by-eight PNGs, generated rather than borrowed.
