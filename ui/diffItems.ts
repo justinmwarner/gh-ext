@@ -163,7 +163,7 @@ export function fileDiffFor(file: ReviewFile): FileDiffMetadata {
  * **Identity alone is not enough either, and this is the subtler half.** When
  * `loadDiffFiles` hydrates a partial diff, Pierre upgrades the metadata *in
  * place*: `CodeView.recomputeLayout` calls `Object.assign(item.item.fileDiff,
- * hydrated)` on the very object handed to it (verified against 1.3.6 — see the
+ * hydrated)` on the very object handed to it (verified against 1.4.1 — see the
  * test that pins it). `isPartial` flips to false, `hunks` is rebuilt and both
  * line arrays grow to the whole file, and through all of it `===` still holds.
  * A `WeakMap`-keyed revision number can never notice, so a thread demoted while
@@ -210,13 +210,15 @@ export function fileDiffSignature(file: ReviewFile): string {
 /**
  * A number identifying one *set* of parsed diffs.
  *
- * `CodeView` reuses the record it holds for an item id and, in practice, keeps
- * the code it first rendered for it: handing the same path a different
- * `fileDiff` updates the item and leaves the old rows on screen (verified
- * against 1.3.6 — see the test that pins it). Replacing the whole diff is
- * exactly what "changes since my last review" does, so the viewer is remounted
- * under a new key instead, which is the library's own advice for changing what
- * a viewer holds.
+ * `CodeView` reuses the record it holds for an item id. Through 1.3.6 that
+ * record kept the code it first rendered: handing the same path a different
+ * `fileDiff` updated the item and left the old rows on screen, which under
+ * "changes since my last review" would have shown the wrong diff silently.
+ * **1.4.1 draws the new patch** — see the test that pins it — so the remount is
+ * no longer what keeps the right code on screen. It is kept because replacing
+ * every patch at once is also the one moment where resetting the scroll and
+ * each card's collapsed and mode choices is the honest thing to do, and
+ * remounting under a new key is the library's own advice for that.
  *
  * Keyed on the array so this is O(1) and idempotent: the file list is memoized
  * upstream, so a re-render that changed nothing produces the same number and

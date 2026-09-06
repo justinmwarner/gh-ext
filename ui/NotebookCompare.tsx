@@ -38,7 +38,7 @@ import type {
  */
 const MAX_RENDERED_DIFFS = 40;
 
-const DIFF_OPTIONS: FileDiffOptions<undefined> = { diffStyle: 'unified' };
+const DIFF_OPTIONS: FileDiffOptions<undefined, undefined> = { diffStyle: 'unified' };
 
 function OutputView({ output }: { output: NotebookOutput }) {
   if (output.kind === 'image' && output.image !== null) {

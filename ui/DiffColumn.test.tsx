@@ -553,18 +553,21 @@ describe('review threads in the column', () => {
 });
 
 describe('what CodeView does with a new patch for an item it already has', () => {
-  it('keeps the code it first rendered, which is why the viewer is remounted', async () => {
+  it('draws the new patch, which is why the remount is no longer load-bearing', async () => {
     // Not a test of this codebase. `CodeView` reconciles controlled items by
-    // id and reuses the record, and reusing it keeps the rows it already drew
-    // even though the item now carries a different `fileDiff` and a bumped
-    // `version`. Verified against @pierre/diffs 1.3.6.
+    // id and reuses the record it holds for one. Through 1.3.6 that record
+    // kept the rows it had already drawn even when the item arrived carrying a
+    // different `fileDiff` and a bumped `version`, so the reviewer would have
+    // been shown the *old* diff under the new file list — silently — and
+    // `DiffColumn` remounted the whole viewer under `diffGeneration` to avoid
+    // it. **1.4.1 passes the new patch through**, which is what this now pins.
     //
-    // "Changes since my last review" replaces the patch for paths the column
-    // already has cards for, so if this were not true the reviewer would be
-    // shown the *old* diff under the new file list — silently. `DiffColumn`
-    // remounts the viewer under `diffGeneration` because of it. If this ever
-    // starts passing a new patch through, the remount is dead weight; while it
-    // holds, removing the remount shows the wrong code.
+    // "Changes since my last review" is the feature that replaces a patch
+    // under a path the column already has a card for, so this is the exact
+    // motion it makes. The remount is kept for now — it also resets the scroll
+    // and every per-card choice, which is defensible when the whole comparison
+    // changes — but it is no longer what keeps the right code on screen, and
+    // this test failing in the other direction is what would say so.
     const rowsOf = (root: ShadowRoot): string[] =>
       [...root.querySelectorAll('[data-column-number]')].map(
         (node) => `${node.getAttribute('data-line-type')}:${node.getAttribute('data-column-number')}`,
@@ -620,7 +623,13 @@ describe('what CodeView does with a new patch for an item it already has', () =>
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    expect(rowsOf(root)).toEqual(before);
+    // The whole of the new patch, and nothing of the old one. Asserted both
+    // ways round: `before` alone would still pass if the viewer had drawn
+    // nothing at all, which is the failure this is most likely to decay into.
+    const after = rowsOf(root);
+    expect(after).not.toEqual(before);
+    expect(after).not.toContain('context:1');
+    expect(after).toContain('context:20');
   });
 });
 
@@ -902,7 +911,7 @@ describe('expanding unchanged context', () => {
 
   it('upgrades the very object it was handed, which is why the memo watches its contents', async () => {
     // Not a test of this codebase. It pins the library behaviour the memo
-    // signature is built around, verified against 1.3.6: `CodeView` hydrates
+    // signature is built around, verified against 1.4.1: `CodeView` hydrates
     // through `Object.assign(item.item.fileDiff, hydrated)`, so the metadata
     // object we parsed and cached is upgraded where it stands. Identity does
     // not move, which is exactly why an identity-keyed revision cannot see it.

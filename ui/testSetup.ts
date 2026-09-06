@@ -9,6 +9,7 @@
 
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
+import { DEFAULT_THEMES, getThemes, preloadHighlighter } from '@pierre/diffs';
 
 afterEach(cleanup);
 
@@ -98,3 +99,26 @@ if (!('browser' in globalThis)) {
     configurable: true,
   });
 }
+
+/**
+ * The shared highlighter, loaded before any test mounts a viewer.
+ *
+ * `@pierre/diffs` 1.4.0 made `CodeView.isReady` wait for it. With
+ * `disableWorkerPool` — which this project always sets, and which leaves the
+ * viewer with no worker manager at all — 1.3.6 answered `true` on the spot and
+ * projected the custom headers synchronously. 1.4.1 renders *nothing* until
+ * `preloadHighlighter` has resolved and the themes are attached, and then
+ * re-renders itself, which is a better first paint and a worse test fixture:
+ * the first viewer mounted in a fresh module registry projects its headers one
+ * macrotask late and every later one is synchronous. That makes "is this test
+ * the first in its file?" something the assertions depend on, and the failure
+ * it produces — a card that is simply not there — says nothing about why.
+ *
+ * Warming it here is the same job as the polyfills above: hand jsdom the thing
+ * the library expects a browser to have done already. No theme is named for
+ * the same reason `DiffColumn` names none, and `preferredHighlighter` is left
+ * unset so this takes the WebAssembly-free path the extension itself takes.
+ * Whether the real page paints promptly is a browser question, and
+ * `e2e/review.spec.ts` waits for a card before it asserts anything.
+ */
+await preloadHighlighter({ themes: getThemes(DEFAULT_THEMES), langs: [] });

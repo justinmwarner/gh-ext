@@ -6,6 +6,26 @@
 > Do not treat anything unmarked as a guess — but also do not add API surface
 > that is not in here without re-checking the source.
 
+> **This document describes 1.3.6. The project installs 1.4.1 as of
+> 2026-09-06.** It was not rewritten, because everything below was verified
+> against a real tarball and rewriting it from a newer one is its own job. Four
+> differences are known and are recorded in
+> `docs/superpowers/specs/2026-09-04-rich-diff-types-comparison.md` under
+> Decision 13; the ones that change how this API is used are:
+>
+> - `CodeViewOptions`, `CodeViewReactOptions`, `CodeViewHandle` and
+>   `FileDiffOptions` take a **second type parameter** for caret metadata. This
+>   project passes `undefined`; the components default it, only the exported
+>   aliases require it spelled out.
+> - The edit-mode callbacks changed shape entirely — `onItemEditChange` now
+>   takes an `EditorChangeEvent`, `onItemEditComplete` returns an accept or
+>   reject decision, and `createEditor` takes an editor type. Unused here.
+> - `CodeView.isReady` now waits for the shared highlighter even with
+>   `disableWorkerPool`, so the first viewer on a page renders nothing until
+>   `preloadHighlighter` has resolved.
+> - Handing an existing item id a different `fileDiff` now draws the new patch
+>   rather than keeping the old rows.
+
 ## Version and refs examined
 
 | Item | Value |

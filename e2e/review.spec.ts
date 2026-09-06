@@ -706,8 +706,14 @@ test('nothing unmodified fires while a comment is being typed', async ({
   const page = await context.newPage();
   await openReview(page, extensionId);
 
+  // No `scrollIntoViewIfNeeded` before the click, here or anywhere below.
+  // `click` scrolls to its target as part of its own actionability checks and
+  // retries a node that was detached under it; the bare scroll fails outright.
+  // That matters from @pierre/diffs 1.4.1 on: it draws the rows, then replaces
+  // every one of them when the highlighter is ready — measured with a
+  // `MutationObserver` at 44 nodes out and 44 back in, about 200ms after the
+  // first card appears — so anything resolved before that is detached.
   const reply = page.locator('[data-reply-for]').first();
-  await reply.scrollIntoViewIfNeeded();
   await reply.click();
   await reply.fill('');
   await reply.pressSequentially('jjk');
@@ -734,8 +740,9 @@ test('expanding unchanged context anchors a comment the diff could not show', as
   const card = page
     .locator('diffs-container')
     .filter({ has: page.locator('[data-file-card="src/beta.ts"]') });
+  // Scrolled by `click` rather than beforehand, for the reason given on the
+  // reply box above: the row this sits in is replaced once after first paint.
   const expander = card.locator('[data-expand-button]').first();
-  await expander.scrollIntoViewIfNeeded();
   await expander.click();
 
   // Both sides were read, each at its own commit.
@@ -834,9 +841,13 @@ test('a comment expanded into view survives narrowing the diff', async ({
     .locator('diffs-container')
     .filter({ has: page.locator('[data-file-card="src/beta.ts"]') });
 
-  // Expand, so the comment moves out of the list and into the diff.
+  // The comment starts out listed as something the diff cannot show. Asserted
+  // rather than assumed: it is the precondition the rest of this test changes.
+  await expect(listed).toHaveCount(1);
+
+  // Expand, so the comment moves out of the list and into the diff. Scrolled
+  // by `click` rather than beforehand, for the reason on the reply box above.
   const expander = card.locator('[data-expand-button]').first();
-  await expander.scrollIntoViewIfNeeded();
   await expander.click();
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
   await expect(listed).toHaveCount(0);

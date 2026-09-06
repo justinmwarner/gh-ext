@@ -1,8 +1,9 @@
 /**
  * The scroll range the viewer does not know it owes, and why it is a guess.
  *
- * Two facts about `@pierre/diffs@1.3.6`, both read out of the shipped package
- * and both confirmed by measurement in Chrome. Neither is in its documentation.
+ * Two facts about `@pierre/diffs`, both read out of the shipped package and
+ * both confirmed by measurement in Chrome. Neither is in its documentation.
+ * Only the first is still true.
  *
  * **A collapsed item is one global number.** `computeApproximateSize` in
  * `VirtualizedFileDiff` adds the header region and, if the item is collapsed,
@@ -13,25 +14,30 @@
  * rich comparison that is the comparison itself. Measured on the browser
  * fixture, against the ~44px the metric assumes: a rendered Markdown card is
  * 153px, an image 126px, a table 179px. Every one is under-counted by the
- * difference, and the error accumulates downward until the last card cannot be
- * brought to the top of the column — 627px into a 628px scrollport, so the last
- * file of a review could not be read at all.
+ * difference, and the error shows up twice — it accumulates downward until the
+ * last card cannot be brought to the top of the column, and it makes the
+ * column lurch by a card's whole shortfall each time one is released while
+ * scrolling. **Unchanged in 1.4.1**, which is why this file still exists.
  *
- * **The footer is measured exactly once.** `renderCodeViewFooter` is the
- * library's own answer to a short column, and its height *is* included — but
- * `reconcileHost` re-measures only when the render callback's identity changes,
- * and the React wrapper pins that callback to a stable internal `noopRender`
- * and delivers the real content through a portal. So the height that counts is
- * whichever one the tail had when `CodeView` mounted, and a tail that grows
- * afterwards is ignored: the core goes on clamping scroll to the stale number.
- * Its `ResizeObserver` does observe the footer element and its handler drops
- * every entry that is not the sticky container.
+ * **The footer used to be measured exactly once.** Through 1.3.6,
+ * `reconcileHost` re-measured only when the render callback's *identity*
+ * changed, and the React wrapper pins that callback to a stable internal
+ * `noopRender` and delivers the real content through a portal; `handleResize`
+ * then dropped every observer entry that was not the sticky container. So the
+ * height that counted was whichever one the tail had when `CodeView` mounted,
+ * and a tail that grew afterwards was ignored. That is why the slack below is
+ * *estimated from the file list* rather than measured from the headers as they
+ * settle: the measurement arrived long after the only reading that counted.
  *
- * That second fact is the whole reason this is an estimate. Measuring the real
- * headers is easy and useless — they settle when their blobs arrive, long after
- * the only measurement that matters has been taken. What *is* known at mount is
- * how many cards will open on a rich comparison, because that follows from the
- * file list. So the tail is sized from a count, before anything has rendered.
+ * **1.4.1 fixed it.** `handleResize` gained a branch for the header and footer
+ * host elements that calls `setHostHeight(host, blockSize)`. Measured on the
+ * fixture: growing this tail by 940px after mount took `scrollHeight` from
+ * 5,018 to 5,958 and the scroll actually reached the new end. So the estimate
+ * below is no longer *forced* — a `ResizeObserver` over the mounted headers
+ * could now set the true shortfall instead of a per-card guess, and would suit
+ * a two-line Markdown file and a forty-row CSV rather than splitting the
+ * difference. That is a change worth making deliberately, not as a side
+ * effect of a dependency bump, so it has not been made yet.
  *
  * Pure, like everything under `lib/`: a count in, a number of pixels out.
  */

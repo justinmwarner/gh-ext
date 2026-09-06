@@ -33,7 +33,7 @@ import { SYNTAX_NAMES, type StructuredSyntax, formatStructured } from '@/lib/com
  */
 const MAX_FORMATTED_CHARS = 250_000;
 
-const DIFF_OPTIONS: FileDiffOptions<undefined> = {
+const DIFF_OPTIONS: FileDiffOptions<undefined, undefined> = {
   diffStyle: 'unified',
   // Deliberately absent, exactly as in `DiffColumn`: `preferredHighlighter` is
   // never set, because the default `shiki-js` touches no WebAssembly and the

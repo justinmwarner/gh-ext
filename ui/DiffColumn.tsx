@@ -175,7 +175,11 @@ export interface DiffColumnProps {
   ref?: Ref<DiffColumnHandle>;
 }
 
-const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata> = {
+// The second type parameter is caret metadata, added in 1.4.0 for the editor
+// this page does not use: no item is ever handed `edit`, and `createEditor` is
+// not on the React options at all. `undefined` is what the components
+// themselves default it to; only the exported aliases require it spelled out.
+const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata, undefined> = {
   // The default rather than the answer: the reviewer arrived from GitHub's
   // Files-changed tab, which is unified, and the `diffStyle` prop overrides it.
   diffStyle: 'unified',
@@ -559,7 +563,7 @@ export function DiffColumn({
     [files],
   );
 
-  const viewer = useRef<CodeViewHandle<AnnotationMetadata>>(null);
+  const viewer = useRef<CodeViewHandle<AnnotationMetadata, undefined>>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const headers = useRef(new Map<string, HTMLElement>());
 
@@ -776,7 +780,7 @@ export function DiffColumn({
     };
   }, [refsKey]);
 
-  const options = useMemo<CodeViewReactOptions<AnnotationMetadata>>(
+  const options = useMemo<CodeViewReactOptions<AnnotationMetadata, undefined>>(
     () => ({
       ...CODE_VIEW_OPTIONS,
       // Rebuilding `options` re-renders every mounted diff, which is exactly
@@ -971,11 +975,14 @@ export function DiffColumn({
       ) : (
         <CodeView<AnnotationMetadata>
           // Remounted when the file list is replaced wholesale — a refreshed
-          // payload, or the switch to "changes since my last review". CodeView
-          // keeps the code it first rendered for an item id, so a new patch
-          // under an existing path would otherwise leave the old diff on
-          // screen under the new headers. Stable across every other render,
-          // because the generation is derived from the list's identity.
+          // payload, or the switch to "changes since my last review". Through
+          // 1.3.6 this was load-bearing: CodeView kept the code it first
+          // rendered for an item id, so a new patch under an existing path
+          // left the old diff on screen under the new headers. 1.4.1 draws the
+          // new patch, and this stays for the weaker reason — every card's
+          // collapsed and mode choice was made about a comparison that no
+          // longer exists. Stable across every other render, because the
+          // generation is derived from the list's identity.
           key={generation}
           ref={viewer}
           disableWorkerPool

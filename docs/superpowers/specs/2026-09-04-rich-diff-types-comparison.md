@@ -642,7 +642,7 @@ breaking Shiki's module graph.
 execute in this extension. It would pay for every other decision in this
 document combined.
 
-### Decision 13 — A rich card in the middle of the column mis-measures — **FIXED**
+### Decision 13 — A rich card in the middle of the column mis-measures — **PARTLY FIXED**
 
 Found on 2026-09-05 while taking decision 1, and it is not a Markdown problem —
 Markdown is only the first file type common enough to expose it.
@@ -705,6 +705,73 @@ documented:
   because `CodeView` re-clamps and re-anchors a manual write. It was backed out
   rather than shipped unproven. **This half is still open.**
 
+- **A third symptom, found on 2026-09-06, and the one a reviewer notices
+  first: the column skips cards.** Reported against the `test/diff-fixtures`
+  pull request, whose first four files are a `README.md` and three binaries —
+  four rich cards in a row. Scrolling down from the top goes straight past the
+  zip, the woff2 and the pdf and lands on `code/app.js`. Measured in Chrome on
+  the browser fixture, walking the scrollport 25 px at a time and watching one
+  card's top: the content tracks the scroll exactly, 25 px for 25 px, until an
+  item is *released* at the top of the render window — and then it lurches by
+  that item's whole under-count.
+
+  | released card | real header | lurch |
+  | --- | --- | --- |
+  | `docs/readme.md` | 166 px | 122 px |
+  | `docs/changelog.md` | 153 px | 109 px |
+  | `assets/logo.png` | 126 px | 82 px |
+
+  Each lurch is the card's real header less the 44 px the metric assumes, to
+  the pixel. It is the same wrong number seen from the other side: `CodeView`
+  picks its render window from modelled tops and anchors the mounted stack at
+  the modelled top of the first item in it, so releasing a card that was
+  modelled 122 px short pulls everything below it up by 122 px in one frame.
+  Four in a row is ~300 px of the review vanishing over a few pixels of scroll.
+  A plain-text control walked over the same distance holds 1.00 throughout.
+
+  **None of this is the page moving the scroll.** `shouldScrollDiff` is false
+  for `origin === 'scroll'`, so a scroll never scrolls back, and the only
+  `scrollTo` calls in the column are hunk navigation, a tree click and a thread
+  jump. Nor is it the tail: `recomputeLayout` accumulates item heights alone
+  and the tail is the footer, after every item, so it can change how far the
+  column scrolls and nothing about where an item is modelled. Ablating it
+  reproduces the *original* defect instead — `scrollHeight` falls to 4,458,
+  max scroll to 3,830, and the last card sits at 641 px in a 628 px scrollport.
+
+- **1.4.1 fixes one of the two library bugs and not the other.** Checked on
+  2026-09-06 against the published package rather than its notes, then
+  **upgraded to it**. `handleResize` gained a branch for the header and footer
+  host elements that calls `setHostHeight(host, blockSize)`: growing the tail
+  by 940 px after mount now takes `scrollHeight` from 5,018 to 5,958 and the
+  scroll reaches the new end, where 1.3.6 ignored it entirely. So the estimate
+  above is no longer *forced* and a `ResizeObserver` over the mounted headers
+  could set the true shortfall — deliberately, though, not as a side effect of
+  a dependency bump. `computeApproximateSize` is unchanged: a collapsed item is
+  still one global metric and `CodeViewDiffItem` still carries no per-item
+  height, so **the skipping survives the upgrade**.
+
+  Three other things the upgrade turned up, all measured rather than read:
+
+  - **A new patch under an existing item id now draws.** Through 1.3.6
+    `CodeView` kept the code it first rendered for an id, which is what
+    `diffGeneration` remounts around; 1.4.1 draws the new patch. The remount
+    stays for the weaker reason that every card's collapsed and mode choice was
+    made about a comparison that no longer exists.
+  - **The first viewer on a page now waits for the highlighter.** With
+    `disableWorkerPool` — which this project always sets — 1.3.6's `isReady`
+    answered `true` on the spot; 1.4.1 defers to `isSharedHighlighterReady` and
+    renders nothing until `preloadHighlighter` resolves. In jsdom that put the
+    custom headers one macrotask out, so whichever test was *first in its file*
+    failed and the identical second one passed. `ui/testSetup.ts` warms the
+    shared highlighter, which is the same job as its `ResizeObserver` and
+    `scrollTo` polyfills; not one assertion changed.
+  - **The rendered rows are now replaced wholesale once, after first paint.**
+    A `MutationObserver` on the shadow roots from before first render: 1.3.6
+    removes 2 nodes and settles; 1.4.1 removes 44 and adds 44 back, about
+    200 ms after the first card appears. Harmless to a reviewer, who cannot
+    click that fast, and enough to detach an element a browser test had already
+    resolved.
+
 ---
 
 ---
@@ -749,10 +816,14 @@ order of value per byte:
    **+25,860 B gzipped** rather than the 27,341 B estimated — `htmldiff-js` was
    vendored rather than depended on, which is where most of the difference
    went. §3.7 records it.
-5. ~~**Decision 13 (the mid-column measurement shortfall).**~~ Fixed on
-   2026-09-05 — see the section above. `docs/readme.md` is back in the browser
-   fixture, and the Markdown mode has browser coverage including a sanitiser
-   test that jsdom could not make.
+5. **Decision 13 (rich cards mis-measure).** The reachability half was fixed
+   on 2026-09-05 — see the section above — and `docs/readme.md` is back in the
+   browser fixture with the sanitiser test jsdom could not make. **Two halves
+   are still open**, both reported or measured on 2026-09-06: where
+   `scrollTo({type: 'item'})` lands, and the column skipping cards as it
+   releases them. They are the same missing number, and no fix for either sits
+   inside the library's options — it takes moving a rich comparison out of the
+   card header, which is where the next design call is.
 6. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
 
 Two libraries examined on 2026-09-05 and rejected outright, recorded so nobody
