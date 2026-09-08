@@ -839,3 +839,19 @@ re-examines them:
   genuine revival, but it is also the shape of a takeover, and `smol-toml`
   (BSD-3-Clause, continuously maintained, 4,372 B gzipped) needs no such
   judgement. `@ltd/j-toml` is LGPL-3.0 and stale since 2023.
+
+**Every dependency was taken to its latest publish on 2026-09-07** — `npm
+outdated` reports nothing. That included two majors, each verified rather than
+assumed: **Vitest 5.0.0** needed no config change, and **TypeScript 7.0.2**, the
+native compiler, typechecks the project clean. "Clean" on a compiler this new is
+worth nothing unverified, so it was ablated — a `noUncheckedIndexedAccess`
+violation and a bad assignment both still fail it, TS18048 and TS2322.
+
+**Four high-severity advisories are left in place, deliberately.** All four are
+one issue: a denial of service in `image-size`'s ICNS parser, reached through
+`addons-linter` → `web-ext` → `wxt`. Three things decide it. `npm audit
+--omit=dev` reports **zero**, so none of it reaches the extension. `image-size`
+2.0.2 is the latest publish and still carries the advisory, so there is nothing
+to upgrade to. And npm's own `fixAvailable` is a **downgrade** — `web-ext` to
+5.5.0 and `wxt` to 0.20.27 — which would give up the MV3 tooling this project is
+built on. Trading that for a dev-time image-parser DoS is the wrong way round.
