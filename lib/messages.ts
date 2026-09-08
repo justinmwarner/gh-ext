@@ -18,6 +18,9 @@ import type { ParsedDiffFile } from './github/diff';
 import type { DeniedField } from './github/graphql-errors';
 import type { FallbackDiffFile } from './github/files-fallback';
 import type { PrCommit, ReviewThread } from './github/types';
+import type { OpenReason } from './review/openTarget';
+
+export type { OpenReason };
 
 /** A pull request's coordinates. The unit of work for the whole protocol. */
 export interface PrRef {
@@ -156,8 +159,19 @@ export interface PrefetchAck {
 }
 
 export interface OpenReviewAck {
-  /** The tab that was navigated to the review page. */
-  tabId: number;
+  /**
+   * The tab now showing the review, or null if the browser did not report one.
+   *
+   * Nullable because `tabs.create` and `windows.create` both describe what they
+   * made with every field optional, and a caller that cannot be told the tab id
+   * is better off knowing that than being handed a number that means nothing.
+   */
+  tabId: number | null;
+  /**
+   * True when an existing review tab was revealed or deliberately left alone,
+   * rather than a new one created.
+   */
+  reused: boolean;
 }
 
 export interface MutationResult {
@@ -187,13 +201,21 @@ export interface ProtocolMap {
   'prefetch-pr': { request: { pr: PrRef }; response: PrefetchAck };
 
   /**
-   * Content script → worker: navigate the sending tab to the review page.
+   * Content script → worker: show this pull request on the review page.
    *
-   * The worker does the navigating. A content script cannot navigate to an
-   * extension page without `review.html` being web-accessible, which would let
-   * github.com probe for the extension.
+   * The worker does the navigating, and chooses where. A content script cannot
+   * navigate to an extension page without `review.html` being web-accessible,
+   * which would let github.com probe for the extension; and the destination is
+   * a stored preference the content script has no business resolving.
+   *
+   * `reason` separates the reviewer pressing the button from the extension
+   * acting on the auto-open setting. It decides focus — see
+   * `lib/review/openTarget.ts`.
    */
-  'open-review': { request: { pr: PrRef }; response: OpenReviewAck };
+  'open-review': {
+    request: { pr: PrRef; reason: OpenReason };
+    response: OpenReviewAck;
+  };
 
   /** Review page → worker: the assembled payload, from cache where possible. */
   'get-pr': {

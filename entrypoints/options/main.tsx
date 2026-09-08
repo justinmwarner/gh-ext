@@ -24,9 +24,35 @@ import {
   isErr,
   message,
 } from '@/lib/messages';
+import {
+  DEFAULT_SETTINGS,
+  type OpenIn,
+  type Settings,
+  autoOpenAvailable,
+} from '@/lib/settings';
+import { readSettings, writeSettings } from '@/lib/settings-store';
 import { browser } from 'wxt/browser';
 
 const tokens = new ChromeTokenProvider();
+
+/** In the order they are offered, most useful first. */
+const DESTINATIONS: { value: OpenIn; label: string; hint: string }[] = [
+  {
+    value: 'new-tab',
+    label: 'A new tab',
+    hint: 'Beside the pull request it came from, which stays open behind it.',
+  },
+  {
+    value: 'new-window',
+    label: 'A new window',
+    hint: 'For a second monitor, or beside the pull request rather than over it.',
+  },
+  {
+    value: 'same-tab',
+    label: 'This tab',
+    hint: 'The review replaces the pull request page.',
+  },
+];
 
 /**
  * Send a request and get its reply.
@@ -90,6 +116,88 @@ function RateLimit({ snapshot }: { snapshot: RateLimitSnapshot | null }) {
       <dt>Resets</dt>
       <dd>{new Date(snapshot.resetAt).toLocaleString()}</dd>
     </dl>
+  );
+}
+
+/**
+ * Where a review opens, and whether it opens by itself.
+ *
+ * Saved on change rather than behind a Save button. These are preferences, not
+ * a credential: there is nothing to validate, nothing to get half-typed, and
+ * the effect of getting one wrong is one tab in the wrong place.
+ */
+function Reviewing() {
+  const [settings, setSettings] = useState<Settings | null>(null);
+
+  useEffect(() => {
+    void readSettings()
+      .then(setSettings)
+      // A settings area that cannot be read is not a reason to show nothing.
+      // The defaults are what the worker would use anyway.
+      .catch(() => setSettings({ ...DEFAULT_SETTINGS }));
+  }, []);
+
+  const update = useCallback(
+    (patch: Partial<Settings>) => {
+      if (!settings) return;
+      const next: Settings = { ...settings, ...patch };
+      // Moving to the same tab takes auto-open down with it. Leaving the stored
+      // flag set would mean switching back to a new tab silently re-enabled
+      // something the reviewer last saw greyed out.
+      if (!autoOpenAvailable(next.openIn)) next.autoOpen = false;
+
+      setSettings(next);
+      void writeSettings(next).catch((error: unknown) => {
+        console.warn('[a-better-reviewer] could not save settings', error);
+      });
+    },
+    [settings],
+  );
+
+  if (!settings) return null;
+
+  const autoAvailable = autoOpenAvailable(settings.openIn);
+
+  return (
+    <section className="settings">
+      <h2>Reviewing</h2>
+
+      <fieldset className="choices">
+        <legend>Open reviews in</legend>
+        {DESTINATIONS.map((destination) => (
+          <label key={destination.value}>
+            <input
+              type="radio"
+              name="openIn"
+              value={destination.value}
+              checked={settings.openIn === destination.value}
+              onChange={() => update({ openIn: destination.value })}
+            />
+            <span>
+              {destination.label}
+              <span className="hint">{destination.hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.autoOpen}
+          disabled={!autoAvailable}
+          onChange={(event) => update({ autoOpen: event.target.checked })}
+        />
+        <span>
+          Open a review automatically when I land on a pull request
+          <span className="hint">
+            {autoAvailable
+              ? 'Opened in the background and left there, so nothing moves while you are reading. The card is still on the page if you close it and want it back.'
+              : 'Not available when reviews open in this tab: it would replace the pull request the moment you arrived, and going back would immediately do it again.'}
+          </span>
+        </span>
+      </label>
+    </section>
   );
 }
 
@@ -221,6 +329,8 @@ function App() {
   return (
     <main>
       <h1>A Better Reviewer</h1>
+
+      <Reviewing />
 
       {/* Only while there is no token to speak of. Once one is stored this is
           six inches of instructions for something already done. */}

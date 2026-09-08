@@ -34,6 +34,24 @@ export default defineConfig({
           setupFiles: ['./ui/testSetup.ts'],
         },
       },
+      {
+        /**
+         * The card the content script puts on github.com.
+         *
+         * Its own project rather than a wider `include` on `ui` above: it needs
+         * a document, but not React, not Testing Library and not the Pierre
+         * shims that suite sets up. It is plain DOM in a shadow root, and it is
+         * tested as such.
+         */
+        resolve: {
+          alias: [{ find: /^@\/(.*)$/, replacement: `${root}$1` }],
+        },
+        test: {
+          name: 'content',
+          environment: 'jsdom',
+          include: ['entrypoints/content/**/*.test.ts'],
+        },
+      },
     ],
   },
 });

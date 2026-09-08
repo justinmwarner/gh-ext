@@ -32,7 +32,7 @@ import {
   THREADS,
 } from './fixture';
 import { expect, reviewUrl, test } from './extension';
-import type { Page } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 
 /** The scrollport `CodeView` was handed. */
 const VIEW = '.diff-view';
@@ -107,27 +107,245 @@ async function scrollTo(page: Page, top: number): Promise<void> {
   await page.waitForTimeout(120);
 }
 
-test('opens the review from the button the content script injects', async ({
+const PR_URL = 'https://github.com/acme/widgets/pull/42';
+
+/** The card's own button, wherever the card happens to be. */
+const cta = (page: Page) => page.getByRole('button', { name: 'Start a Better Review' });
+
+test('opens the review from the card the content script injects', async ({
   context,
   extensionId,
   api,
 }) => {
   void api;
-  // The whole entry path, in order: the content script finds the header on a
-  // pull request page, injects its button, and the worker navigates the tab —
-  // which it has to do itself, because a page on github.com cannot reach an
-  // extension resource that is not web-accessible, and making review.html
-  // web-accessible would let github.com fingerprint the extension.
+  // The whole entry path, in order: the content script puts its card on a pull
+  // request page, and the worker opens the review — which it has to do itself,
+  // because a page on github.com cannot reach an extension resource that is not
+  // web-accessible, and making review.html web-accessible would let github.com
+  // fingerprint the extension.
   const page = await context.newPage();
-  await page.goto('https://github.com/acme/widgets/pull/42');
+  await page.goto(PR_URL);
 
-  const button = page.locator('#a-better-reviewer-open-button');
-  await expect(button).toBeVisible();
-  await button.click();
+  await expect(cta(page)).toBeVisible();
 
+  const opened = context.waitForEvent('page');
+  await cta(page).click();
+  const review = await opened;
+
+  await review.waitForURL(new RegExp(`^chrome-extension://${extensionId}/review\.html#`));
+  expect(review.url()).toBe(reviewUrl(extensionId));
+  await expect(review.locator('.shell')).toBeVisible();
+
+  // And the pull request is still there behind it, which is the entire reason
+  // a new tab is the default rather than replacing this one.
+  expect(page.url()).toBe(PR_URL);
+  await expect(cta(page)).toBeVisible();
+});
+
+test('puts the card on a pull request reached by soft navigation', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void extensionId;
+  void api;
+  // The regression test for the bug this card was built around.
+  //
+  // Chrome decides whether to inject a content script from the URL the document
+  // was *loaded* at. While the script matched only `/*/*/pull/*`, arriving at a
+  // pull request from the pull request list — a `pushState`, not a load — meant
+  // the script was never injected and there was no entry point at all until the
+  // reviewer happened to reload. Matching all of github.com is what fixes it,
+  // and this is the only test that can tell the difference.
+  const page = await context.newPage();
+  await page.goto('https://github.com/acme/widgets/pulls');
+  await expect(cta(page)).toHaveCount(0);
+
+  await page.evaluate(() => history.pushState({}, '', '/acme/widgets/pull/42'));
+  await expect(cta(page)).toBeVisible({ timeout: 10_000 });
+});
+
+test('reveals the review already open rather than opening a second', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void extensionId;
+  void api;
+  const page = await context.newPage();
+  await page.goto(PR_URL);
+
+  const opened = context.waitForEvent('page');
+  await cta(page).click();
+  await opened;
+  const after = context.pages().length;
+
+  // The worker keeps a registry of the review tabs it opened, so a second press
+  // shows the first one. Without it, a reviewer who forgets they already have
+  // the review open collects a tab per press.
+  await cta(page).click();
+  await page.waitForTimeout(500);
+  expect(context.pages().length).toBe(after);
+});
+
+test('remembers that the card was collapsed', async ({ context, extensionId, api }) => {
+  void extensionId;
+  void api;
+  const page = await context.newPage();
+  await page.goto(PR_URL);
+  await expect(cta(page)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Collapse A Better Reviewer' }).click();
+  await expect(cta(page)).toBeHidden();
+
+  const pill = page.getByRole('button', { name: 'Expand A Better Reviewer' });
+  await expect(pill).toBeVisible();
+
+  // Collapsed is a choice about the extension, not about one page view.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Expand A Better Reviewer' })).toBeVisible();
+  await expect(cta(page)).toBeHidden();
+
+  // And it is still the way in.
+  await page.getByRole('button', { name: 'Expand A Better Reviewer' }).click();
+  await expect(cta(page)).toBeVisible();
+});
+
+/**
+ * Write the reviewer's settings the way the options page would.
+ *
+ * Through the worker so it lands in the same `storage.local` the extension
+ * reads, rather than a page's own origin storage, which is a different area.
+ */
+async function setSettings(
+  context: BrowserContext,
+  settings: { openIn: 'new-tab' | 'new-window' | 'same-tab'; autoOpen: boolean },
+): Promise<void> {
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('the extension worker never started');
+  await worker.evaluate(async (value) => {
+    const api = (globalThis as unknown as {
+      chrome: { storage: { local: { set(items: Record<string, unknown>): Promise<void> } } };
+    }).chrome;
+    await api.storage.local.set({ settings: value });
+  }, settings);
+}
+
+test('opens a review by itself when the reviewer asked it to', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  await setSettings(context, { openIn: 'new-tab', autoOpen: true });
+
+  const page = await context.newPage();
+  const opened = context.waitForEvent('page');
+  await page.goto(PR_URL);
+
+  const review = await opened;
+  await review.waitForURL(new RegExp(`^chrome-extension://${extensionId}/review\.html#`));
+  expect(review.url()).toBe(reviewUrl(extensionId));
+
+  // Opened, not thrust in front of anyone. The reviewer may be part-way
+  // through a comment on the pull request page, and an action they did not
+  // take must not move them off it.
+  expect(await page.evaluate(() => document.visibilityState)).toBe('visible');
+
+  // The card stays, so closing the review leaves a way back.
+  await expect(cta(page)).toBeVisible();
+});
+
+test('auto-open fires once per pull request, not once per tab of it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void extensionId;
+  void api;
+  await setSettings(context, { openIn: 'new-tab', autoOpen: true });
+
+  const page = await context.newPage();
+  const opened = context.waitForEvent('page');
+  await page.goto(PR_URL);
+  await opened;
+  const after = context.pages().length;
+
+  // Conversation to Files is a navigation, and it is the same pull request.
+  // Treating it as a fresh arrival would open a review per tab of every pull
+  // request the reviewer walks through.
+  await page.evaluate(() => history.pushState({}, '', '/acme/widgets/pull/42/files'));
+  await page.waitForTimeout(1_000);
+  expect(context.pages().length).toBe(after);
+});
+
+test('does not open by itself when nobody asked', async ({ context, extensionId, api }) => {
+  void extensionId;
+  void api;
+  // The default, and deliberately so: a tab appearing unasked on someone's
+  // first pull request reads as a malfunction rather than a feature.
+  const page = await context.newPage();
+  await page.goto(PR_URL);
+  await expect(cta(page)).toBeVisible();
+
+  const before = context.pages().length;
+  await page.waitForTimeout(1_000);
+  expect(context.pages().length).toBe(before);
+});
+
+test('the destination chosen on the options page is the one the card uses', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The whole settings path in one test: the options page writes the choice,
+  // the worker reads it, and the card obeys it on another site entirely.
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.getByRole('radio', { name: 'This tab' }).check();
+
+  const page = await context.newPage();
+  await page.goto(PR_URL);
+  await cta(page).click();
+
+  // Same tab, so this page becomes the review rather than a new one appearing.
   await page.waitForURL(new RegExp(`^chrome-extension://${extensionId}/review\.html#`));
   expect(page.url()).toBe(reviewUrl(extensionId));
   await expect(page.locator('.shell')).toBeVisible();
+});
+
+test('auto-open is refused for the same tab, where Back would be a trap', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void extensionId;
+  void api;
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+
+  const auto = options.getByRole('checkbox', {
+    name: /Open a review automatically/,
+  });
+  await auto.check();
+  await expect(auto).toBeChecked();
+
+  // Choosing the same tab takes auto-open down with it, rather than leaving a
+  // stored flag that silently comes back the next time the destination moves.
+  await options.getByRole('radio', { name: 'This tab' }).check();
+  await expect(auto).toBeDisabled();
+  await expect(auto).not.toBeChecked();
+
+  const page = await context.newPage();
+  const before = context.pages().length;
+  await page.goto(PR_URL);
+  await expect(cta(page)).toBeVisible();
+  await page.waitForTimeout(1_000);
+
+  // Still on the pull request, and nothing else opened.
+  expect(page.url()).toBe(PR_URL);
+  expect(context.pages().length).toBe(before);
 });
 
 test('renders the pull request and its diff', async ({ context, extensionId, api }) => {
@@ -1307,47 +1525,34 @@ test('a token can be encrypted, locked, and unlocked again', async ({
   void api;
 });
 
-test('the corner-button fallback comes back after leaving a pull request', async ({
+test('takes the card away when the tab leaves the pull request, and brings it back', async ({
   context,
   extensionId,
   api,
 }) => {
   void extensionId;
   void api;
-  // The day GitHub changes its header markup, the fallback is the whole
-  // feature. It used to mount once per tab: navigating away removed the
-  // button, and coming back found no anchor and a latch that refused to run
-  // again — so the extension had no entry point at all until a hard reload,
-  // which is not a thing anyone thinks to try.
-  await context.route('https://github.com/**', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'text/html',
-      // No `.gh-header-actions`, and nothing else the injector looks for.
-      body: '<!doctype html><html><head><title>acme/widgets</title></head><body></body></html>',
-    }),
-  );
-
+  // A card offering to review a page the reviewer is no longer on is worse than
+  // no card. Removing it used to be the easy half; putting it back was the bug,
+  // because a latch meant to log once also gated the mount, so leaving a pull
+  // request and returning left the extension with no entry point until a hard
+  // reload — which is not a thing anyone thinks to try.
   const page = await context.newPage();
-  await page.goto('https://github.com/acme/widgets/pull/42');
+  await page.goto(PR_URL);
+  await expect(cta(page)).toBeVisible();
 
-  const button = page.locator('#a-better-reviewer-open-button');
-  await expect(button).toBeVisible({ timeout: 10_000 });
+  // Soft-navigate off the pull request, the way GitHub's own router does.
+  await page.evaluate(() => history.pushState({}, '', '/acme/widgets/issues'));
+  await expect(cta(page)).toHaveCount(0);
 
-  // Soft-navigate off the pull request, the way GitHub's own router does. The
-  // DOM change is what wakes the observer that drives the resync.
-  await page.evaluate(() => {
-    history.pushState({}, '', '/acme/widgets/issues');
-    document.body.append(document.createElement('span'));
-  });
-  await expect(button).toHaveCount(0);
+  // And back, more than once, because once is what the old latch survived.
+  for (const _ of [0, 1]) {
+    await page.evaluate(() => history.pushState({}, '', '/acme/widgets/pull/42'));
+    await expect(cta(page)).toBeVisible({ timeout: 10_000 });
 
-  // And back.
-  await page.evaluate(() => {
-    history.pushState({}, '', '/acme/widgets/pull/42');
-    document.body.append(document.createElement('span'));
-  });
-  await expect(button).toBeVisible({ timeout: 10_000 });
+    await page.evaluate(() => history.pushState({}, '', '/acme/widgets/issues'));
+    await expect(cta(page)).toHaveCount(0);
+  }
 });
 
 /**

@@ -1,7 +1,7 @@
 # The Pull Request Page Entry Point — Design
 
 **Date:** 2026-09-08
-**Status:** Approved, not yet implemented
+**Status:** Implemented
 
 ## Goal
 
@@ -281,3 +281,36 @@ request, deduped.
 A toolbar icon. A keyboard shortcut. Per-pull-request dismissal of the card.
 Keeping the header button alongside the card. Registering the review page's
 current pull request with the worker.
+
+## What changed during implementation
+
+Four departures from the design above, all found by building it.
+
+**`wxt:locationchange` fires before the URL commits.** The largest one, and it
+would have made this entire change a no-op. WXT's location watcher uses the
+Navigation API where it exists, and the `navigate` event is dispatched *before*
+the navigation is applied — so `location.href`, read inside a
+`wxt:locationchange` handler, is still the page being left. `sync` originally
+read `location.href` and therefore did the exact opposite of its job on every
+soft navigation: leaving a pull request kept the card, and arriving at one never
+mounted it. It now takes an href, and the handler passes `event.newUrl.href`.
+The end to end test at "puts the card on a pull request reached by soft
+navigation" is the only thing that can tell the difference, and it caught this.
+
+**`openTarget` has a fifth action, `none`.** An automatic open that finds a
+review tab already present has nothing to do, and the four-action union had no
+way to say so.
+
+**Auto-open into the same tab is refused, in two places.** It replaces the pull
+request page the instant you arrive, and Back returns to a page that immediately
+does it again — a trap with no way out short of editing the URL. The options
+page disables the checkbox and clears the stored flag when the destination moves
+to `same-tab`; `openTarget` refuses the pairing independently, because a
+settings object written before that rule existed can still be in storage.
+
+**A `same-tab` navigation is not recorded in the registry.** The design said the
+sender tab becomes a review tab and should be remembered. It should not: the
+registry means "tabs this worker opened to show a review", and the reviewer's own
+tab is on loan. Recording it would let a later click — after the destination
+setting changed — reveal a tab that had long since navigated back to github.com,
+in the belief it was a review.

@@ -38,6 +38,8 @@ import { type BlobResult, BlobCache, fetchBlob } from '@/lib/github/blobs';
 import { AuthError, GitHubClient, RateLimitError } from '@/lib/github/client';
 import { parseUnifiedDiff } from '@/lib/github/diff';
 import { reviewHash } from '@/lib/github/pr-url';
+import { type OpenReason, openTarget } from '@/lib/review/openTarget';
+import { readSettings } from '@/lib/settings-store';
 import {
   ChromeTokenProvider,
   chromeKeyValueStore,
@@ -63,6 +65,18 @@ import {
   type TokenValidation,
   isMessage,
 } from '@/lib/messages';
+
+/**
+ * The part of `sender.tab` this worker uses.
+ *
+ * Structural rather than the browser's own `Tab`, because these two fields are
+ * the whole of what is read and both arrive without the `tabs` permission. A
+ * nominal type here would be a claim to more of the tab than is being touched.
+ */
+interface SenderTab {
+  id?: number;
+  index?: number;
+}
 
 /** The token check the options page's validate button runs. */
 const VIEWER_QUERY = 'query { viewer { login } }';
@@ -175,18 +189,158 @@ export default defineBackground({
       return assembleOnce(pr);
     }
 
-    async function openReview(pr: PrRef, tabId: number | undefined): Promise<OpenReviewAck> {
-      if (tabId === undefined) {
+    /**
+     * `storage.session` key holding the review tabs this worker opened.
+     *
+     * A registry rather than a lookup, because finding a review tab by URL
+     * means `tabs.query({ url })`, and that is the one tabs call needing the
+     * `tabs` permission this extension deliberately does not request. Creating,
+     * navigating, getting and watching tabs all work without it.
+     *
+     * `session` rather than `local`: a tab id means nothing after a browser
+     * restart, and the pull request cache lives there for the same reason.
+     */
+    const REVIEW_TABS_KEY = 'review-tabs';
+
+    async function reviewTabs(): Promise<Record<string, number>> {
+      const stored = await browser.storage.session.get(REVIEW_TABS_KEY);
+      const raw = stored[REVIEW_TABS_KEY];
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+
+      // Rebuilt field by field rather than cast: this survives a browser
+      // restart badly enough already without also trusting its shape.
+      const tabs: Record<string, number> = {};
+      for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (typeof value === 'number') tabs[key] = value;
+      }
+      return tabs;
+    }
+
+    async function rememberReviewTab(key: string, tabId: number): Promise<void> {
+      const tabs = await reviewTabs();
+      tabs[key] = tabId;
+      await browser.storage.session.set({ [REVIEW_TABS_KEY]: tabs });
+    }
+
+    /** By tab rather than by pull request — `onRemoved` only knows the tab. */
+    async function forgetReviewTab(tabId: number): Promise<void> {
+      const tabs = await reviewTabs();
+      let changed = false;
+      for (const [key, value] of Object.entries(tabs)) {
+        if (value === tabId) {
+          delete tabs[key];
+          changed = true;
+        }
+      }
+      if (changed) await browser.storage.session.set({ [REVIEW_TABS_KEY]: tabs });
+    }
+
+    /**
+     * The review tab open for this pull request, or null.
+     *
+     * `tabs.get` rejects for a tab that no longer exists, which is the only way
+     * to notice one closed while this worker was asleep and `onRemoved` had
+     * nobody to tell.
+     */
+    async function existingReviewTab(key: string): Promise<number | null> {
+      const tabs = await reviewTabs();
+      const tabId = tabs[key];
+      if (tabId === undefined) return null;
+
+      try {
+        await browser.tabs.get(tabId);
+        return tabId;
+      } catch {
+        await forgetReviewTab(tabId);
+        return null;
+      }
+    }
+
+    /**
+     * Show a pull request on the review page.
+     *
+     * The navigation happens here, not in the content script. A page on
+     * github.com cannot navigate to an extension resource unless that resource
+     * is listed in web_accessible_resources, which would also let github.com
+     * probe for it and fingerprint the extension.
+     *
+     * *Where* it opens is also decided here, and for a different reason: it is
+     * a stored preference, and resolving it in the content script would put the
+     * reviewer's settings on github.com. The choice itself is
+     * `lib/review/openTarget.ts`; this function only carries it out.
+     */
+    async function openReview(
+      pr: PrRef,
+      reason: OpenReason,
+      sender: SenderTab | undefined,
+    ): Promise<OpenReviewAck> {
+      if (sender?.id === undefined || sender.index === undefined) {
         throw new ProtocolFailure('bad-request', 'open-review must be sent from a tab');
       }
 
-      // The navigation happens here, not in the content script. A page on
-      // github.com cannot navigate to an extension resource unless that
-      // resource is listed in web_accessible_resources, which would also let
-      // github.com probe for it and fingerprint the extension.
       const url = browser.runtime.getURL(`/review.html${reviewHash(pr)}`);
-      await browser.tabs.update(tabId, { url });
-      return { tabId };
+      const key = prKey(pr);
+      const [settings, existingTabId] = await Promise.all([
+        readSettings(),
+        existingReviewTab(key),
+      ]);
+
+      const action = openTarget({
+        settings,
+        reason,
+        url,
+        existingTabId,
+        sender: { tabId: sender.id, index: sender.index },
+      });
+
+      switch (action.kind) {
+        case 'none':
+          return { tabId: action.tabId, reused: true };
+
+        case 'focus': {
+          const tab = await browser.tabs.get(action.tabId);
+          await browser.tabs.update(action.tabId, { active: true });
+          // Activating a tab inside a window that is not frontmost does not
+          // put it in front of anybody. `windowId` arrives on the `tabs.get`
+          // above and needs no permission of its own.
+          if (tab.windowId !== undefined) {
+            await browser.windows.update(tab.windowId, { focused: true });
+          }
+          return { tabId: action.tabId, reused: true };
+        }
+
+        case 'create-tab': {
+          const tab = await browser.tabs.create({
+            url: action.url,
+            active: action.active,
+            openerTabId: action.openerTabId,
+            index: action.index,
+          });
+          const tabId = tab.id ?? null;
+          if (tabId !== null) await rememberReviewTab(key, tabId);
+          return { tabId, reused: false };
+        }
+
+        case 'create-window': {
+          const created = await browser.windows.create({
+            url: action.url,
+            focused: action.focused,
+          });
+          const tabId = created?.tabs?.[0]?.id ?? null;
+          if (tabId !== null) await rememberReviewTab(key, tabId);
+          return { tabId, reused: false };
+        }
+
+        case 'update-tab': {
+          await browser.tabs.update(action.tabId, { url: action.url });
+          // Deliberately not remembered. The registry means "tabs this worker
+          // opened to show a review"; this one is the reviewer's own tab, on
+          // loan. Recording it would let a later click — after the destination
+          // setting changed — reveal a tab that has long since navigated back
+          // to github.com, in the belief that it is a review.
+          return { tabId: action.tabId, reused: false };
+        }
+      }
     }
 
     async function mutate(
@@ -391,13 +545,13 @@ export default defineBackground({
       data,
     });
 
-    async function route(message: Message, tabId: number | undefined): Promise<Response> {
+    async function route(message: Message, tab: SenderTab | undefined): Promise<Response> {
       try {
         switch (message.kind) {
           case 'prefetch-pr':
             return ok<'prefetch-pr'>(prefetch(message.pr));
           case 'open-review':
-            return ok<'open-review'>(await openReview(message.pr, tabId));
+            return ok<'open-review'>(await openReview(message.pr, message.reason, tab));
           case 'get-pr':
             return ok<'get-pr'>(await getPr(message.pr, message.refresh === true));
           case 'mutate':
@@ -426,6 +580,20 @@ export default defineBackground({
       }
     }
 
+    /**
+     * Drop a review tab from the registry when it closes.
+     *
+     * Registered at the top level of `main` so it survives the worker being
+     * killed and restarted, like every other listener here. It is not the only
+     * way an entry leaves — a tab closed while this worker was asleep is
+     * noticed later by `existingReviewTab` — but it is the cheap one.
+     */
+    browser.tabs.onRemoved.addListener((tabId) => {
+      void forgetReviewTab(tabId).catch((error: unknown) => {
+        console.warn('[a-better-reviewer] could not forget a review tab', error);
+      });
+    });
+
     browser.runtime.onMessage.addListener(
       (raw: unknown, sender, sendResponse: (response: Response) => void) => {
         if (!isMessage(raw)) {
@@ -442,7 +610,7 @@ export default defineBackground({
         }
 
         // `route` resolves rather than rejects, so this never drops a caller.
-        void route(raw, sender.tab?.id).then(sendResponse);
+        void route(raw, sender.tab).then(sendResponse);
         // Keeps the channel open for the async sendResponse above. Required.
         return true;
       },

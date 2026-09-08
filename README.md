@@ -1,9 +1,13 @@
 # A Better Reviewer
 
-A Chrome extension that puts a **Start a Better Review** button on GitHub pull request
-pages. Clicking it opens a standalone review UI built on
+A Chrome extension that puts a **Start a Better Review** card in the corner of
+every GitHub pull request page. Pressing it opens a standalone review UI built on
 [Pierre](https://pierre.computer)'s diff and file-tree components, covering the
 review actions you perform constantly and deliberately nothing else.
+
+The review opens in a new tab by default, so the pull request stays where it
+was. Options has the other two destinations — a new window, or this tab — and a
+switch to open the review automatically on landing on a pull request.
 
 Comments with reply and resolve. The pending-review flow. Status checks.
 Approve and request changes. Plus keyboard navigation, viewed state, drafts that
@@ -137,13 +141,13 @@ rejects it, which is what `npm version` is for. Full walkthrough in
 
 ```bash
 npm run dev        # bare `wxt` — NOT `wxt dev`, which parses as a root dir
-npm test           # vitest: lib (node) + ui (jsdom)
+npm test           # vitest: lib (node) + ui and content (jsdom)
 npm run typecheck
 npm run test:e2e   # builds, then Playwright against the production build
 ```
 
 Content scripts get no HMR and are absent from the dev manifest entirely — WXT
-registers them at runtime. **Verify anything touching the injected button
+registers them at runtime. **Verify anything touching the injected card
 against `npx wxt build` output**, not against the dev server.
 
 ### Layout
@@ -151,6 +155,7 @@ against `npx wxt build` output**, not against the dev server.
 ```
 entrypoints/     content script, background worker, review page, options page
 lib/             pure domain logic — no DOM, no chrome.*, no network
+                 (two adapters excepted: token-provider.ts, settings-store.ts)
 ui/              React components
 e2e/             Playwright, against the production build
 docs/reference/  verified API notes; read these before changing API code

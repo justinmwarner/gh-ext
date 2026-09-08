@@ -83,6 +83,51 @@
         vertical-align: top;
       }
       table.perms th { font-weight: 600; opacity: 0.7; }
+      /* The Reviewing section. Radios and a checkbox, each with its
+         consequence written under it — these change what happens when a button
+         is pressed on another site, which is not something to leave to a
+         three-word label. */
+      section.settings {
+        margin: 0 0 2rem;
+      }
+      fieldset.choices {
+        border: 1px solid light-dark(#d1d9e0, #3d444d);
+        border-radius: 6px;
+        margin: 0 0 0.75rem;
+        padding: 0.75rem 1rem 0.9rem;
+      }
+      fieldset.choices legend {
+        font-weight: 600;
+        padding: 0 0.35rem;
+      }
+      fieldset.choices label,
+      label.check {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.1rem 0.55rem;
+        align-items: start;
+        font-weight: 400;
+        margin: 0 0 0.5rem;
+        cursor: pointer;
+      }
+      fieldset.choices label:last-child,
+      label.check {
+        margin-bottom: 0;
+      }
+      fieldset.choices input,
+      label.check input {
+        margin: 0.2rem 0 0;
+      }
+      label.check input:disabled,
+      label.check:has(input:disabled) {
+        cursor: default;
+      }
+      label.check:has(input:disabled) > span {
+        opacity: 0.55;
+      }
+      label > span > .hint {
+        display: block;
+      }
       .hint {
         color: light-dark(#59636e, #9198a1);
         margin: 0.35rem 0 0;

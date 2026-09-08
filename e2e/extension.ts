@@ -321,15 +321,23 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
     await route.abort('failed');
   });
 
-  // github.com itself, for the content script. A minimal page carrying the
-  // header anchor the injector looks for.
+  // github.com itself, for the content script.
+  //
+  // Deliberately bare. It used to carry a `.gh-header-actions` div because the
+  // injector hunted for GitHub's header and wedged a button into it; the card
+  // that replaced it owns a fixed corner and anchors to nothing, so a page with
+  // no GitHub markup at all is now the honest fixture.
+  //
+  // Served for *every* github.com path, not only pull requests, because the
+  // content script now loads on all of them — which is the fix for a script
+  // that was never injected when a pull request was reached by soft navigation.
   await context.route('https://github.com/**', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'text/html',
       body:
         '<!doctype html><html><head><title>acme/widgets</title></head>' +
-        '<body><div class="gh-header-actions"></div></body></html>',
+        '<body><main id="page">acme/widgets</main></body></html>',
     }),
   );
 

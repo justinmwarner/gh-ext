@@ -25,7 +25,7 @@ describe('isMessage', () => {
   it('accepts every kind the protocol declares', () => {
     const all: Message[] = [
       message('prefetch-pr', { pr }),
-      message('open-review', { pr }),
+      message('open-review', { pr, reason: 'click' }),
       message('get-pr', { pr }),
       message('mutate', { document: 'mutation {}', variables: {} }),
       message('validate-token', {}),
