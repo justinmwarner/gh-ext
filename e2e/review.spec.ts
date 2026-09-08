@@ -121,7 +121,7 @@ test('opens the review from the button the content script injects', async ({
   const page = await context.newPage();
   await page.goto('https://github.com/acme/widgets/pull/42');
 
-  const button = page.locator('#fast-review-open-button');
+  const button = page.locator('#a-better-reviewer-open-button');
   await expect(button).toBeVisible();
   await button.click();
 
@@ -1228,14 +1228,16 @@ test('clearing the token stops the cache serving the pull request', async ({
 
   const before = api.urls.length;
 
-  // Signing out, written where the options page writes it.
+  // Locking the vault, which is what the options page's Lock button does. The
+  // decrypted token goes and the cache must go with it — the cache lives in
+  // the same session area, so this is the sweep that is easiest to get wrong.
   const worker = context.serviceWorkers()[0];
   if (worker === undefined) throw new Error('the extension worker never started');
   await worker.evaluate(async () => {
     const api = (globalThis as unknown as {
-      chrome: { storage: { local: { remove(keys: string): Promise<void> } } };
+      chrome: { storage: { session: { remove(keys: string): Promise<void> } } };
     }).chrome;
-    await api.storage.local.remove('github-token');
+    await api.storage.session.remove('github-token-unlocked');
   });
 
   await page.reload();
@@ -1245,6 +1247,64 @@ test('clearing the token stops the cache serving the pull request', async ({
   await expect(page.getByRole('button', { name: 'Open options' })).toBeVisible();
   await expect(page.locator('[data-file-card]')).toHaveCount(0);
   expect(api.urls.length).toBe(before);
+});
+
+test('a token can be encrypted, locked, and unlocked again', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The whole vault, driven the way a reviewer drives it. Everything below
+  // this is unit tested in isolation; what only a real browser can show is
+  // that Chrome's WebCrypto, the options page and the review page agree — and
+  // that a token sealed on one screen opens on another.
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('the extension worker never started');
+  // The fixture seeds an already-unlocked token, which is the state this test
+  // wants to reach on its own.
+  await worker.evaluate(async () => {
+    const api = (globalThis as unknown as {
+      chrome: { storage: { session: { remove(keys: string): Promise<void> } } };
+    }).chrome;
+    await api.storage.session.remove('github-token-unlocked');
+  });
+
+  const PASSPHRASE = 'correct horse battery staple';
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+
+  await options.getByLabel('GitHub fine-grained personal access token').fill('ghp_fixture_token');
+  await options.getByLabel('Passphrase', { exact: true }).fill(PASSPHRASE);
+  await options.getByLabel('Passphrase again').fill(PASSPHRASE);
+  await options.getByRole('button', { name: 'Encrypt and save' }).click();
+  await expect(options.getByText(/encrypted and unlocked/i)).toBeVisible();
+
+  // Sealed, and usable straight away.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+
+  await options.getByRole('button', { name: 'Lock now' }).click();
+  await expect(options.getByText(/^Locked\./)).toBeVisible();
+
+  // A locked vault asks for a passphrase. It must not ask for a token — the
+  // reviewer has one, and being told to make another reads as data loss.
+  await page.reload();
+  await expect(page.getByLabel('Passphrase')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open options' })).toBeVisible();
+
+  await page.getByLabel('Passphrase').fill('not the passphrase');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.getByText(/does not open this vault/i)).toBeVisible();
+  await expect(page.locator('[data-file-card]')).toHaveCount(0);
+
+  // And the right one brings the pull request back with no reload: unlocking
+  // writes the token, which is the same storage event the page already
+  // retries on.
+  await page.getByLabel('Passphrase').fill(PASSPHRASE);
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+  void api;
 });
 
 test('the corner-button fallback comes back after leaving a pull request', async ({
@@ -1271,7 +1331,7 @@ test('the corner-button fallback comes back after leaving a pull request', async
   const page = await context.newPage();
   await page.goto('https://github.com/acme/widgets/pull/42');
 
-  const button = page.locator('#fast-review-open-button');
+  const button = page.locator('#a-better-reviewer-open-button');
   await expect(button).toBeVisible({ timeout: 10_000 });
 
   // Soft-navigate off the pull request, the way GitHub's own router does. The

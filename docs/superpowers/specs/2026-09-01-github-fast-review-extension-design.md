@@ -1,4 +1,4 @@
-# Fast GitHub Review — Chrome Extension Design
+# A Better Reviewer — Chrome Extension Design
 
 **Date:** 2026-09-01
 **Status:** Approved, ready for implementation planning
@@ -13,7 +13,7 @@ hundred other things.
 
 ## 2. Goal
 
-A Chrome extension that injects a **Fast review** button on GitHub PR pages.
+A Chrome extension that injects a **Start a Better Review** button on GitHub PR pages.
 Clicking it navigates to a standalone review application built on Pierre's
 open-source rendering components, covering the review actions we use every day
 and nothing else.
@@ -66,7 +66,7 @@ service worker.**
 
 ### Content script — `github.com/*/pull/*`
 
-Injects the Fast review button into the PR header and sends a prefetch message to
+Injects the Start a Better Review button into the PR header and sends a prefetch message to
 the service worker on page load. It does not otherwise modify GitHub's DOM.
 Keeping it this thin means GitHub markup changes can break the button but can
 never break the review app.

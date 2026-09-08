@@ -28,7 +28,7 @@ export function SetupState({ pr, error }: { pr: PrRef | null; error: ProtocolErr
       }
     >
       <p>
-        Fast GitHub Review reads pull requests with a GitHub token of your own —
+        A Better Reviewer reads pull requests with a GitHub token of your own —
         nothing goes anywhere else. Paste a fine-grained personal access token on
         the options page and this pull request will load.
       </p>

@@ -15,7 +15,7 @@ export function NoRouteState() {
         one.
       </p>
       <p>
-        Open a pull request on github.com and use the <strong>Fast review</strong>{' '}
+        Open a pull request on github.com and use the <strong>Start a Better Review</strong>{' '}
         button to come back with something to read.
       </p>
     </FullPage>

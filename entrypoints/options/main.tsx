@@ -1,14 +1,20 @@
 /**
  * The options page.
  *
- * It writes the token to `storage.local` and asks the background worker to
- * check it. The page never calls GitHub itself — the worker owns the only
- * `GitHubClient`, so rate limit accounting stays in one place.
+ * It seals the token into `storage.local` under a passphrase and asks the
+ * background worker to check it. The page never calls GitHub itself — the
+ * worker owns the only `GitHubClient`, so rate limit accounting stays in one
+ * place.
+ *
+ * The vault has four states and this page is the only place all four are
+ * reachable, so it is written as one screen per state rather than one screen
+ * with things disabled on it.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ChromeTokenProvider } from '@/lib/github/token-provider';
+import { passphraseProblem } from '@/lib/crypto/vault';
+import { ChromeTokenProvider, type VaultState } from '@/lib/github/token-provider';
 import {
   type MessageKind,
   type MessageOf,
@@ -88,7 +94,10 @@ function RateLimit({ snapshot }: { snapshot: RateLimitSnapshot | null }) {
 }
 
 function App() {
+  const [vault, setVault] = useState<VaultState | null>(null);
   const [token, setToken] = useState('');
+  const [passphrase, setPassphrase] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitSnapshot | null>(null);
@@ -98,31 +107,98 @@ function App() {
     setRateLimit(response.ok ? response.data : null);
   }, []);
 
+  const refreshVault = useCallback(async () => {
+    setVault(await tokens.state());
+  }, []);
+
   useEffect(() => {
-    void tokens.getToken().then((stored) => setToken(stored ?? ''));
+    // The token is never read back into the page. It is not displayed, and an
+    // unlocked vault is described rather than shown.
+    void refreshVault();
     void refreshRateLimit();
-  }, [refreshRateLimit]);
+  }, [refreshRateLimit, refreshVault]);
+
+  /** Wipe the secrets held in component state once they have been used. */
+  const forgetInputs = useCallback(() => {
+    setToken('');
+    setPassphrase('');
+    setConfirm('');
+  }, []);
+
+  /**
+   * Run a vault operation and report it in one place.
+   *
+   * Every one of these can fail in a way the reviewer has to read — a wrong
+   * passphrase, a token with a smart quote in it — so none of them are allowed
+   * to fail silently.
+   */
+  const run = useCallback(
+    async (operation: () => Promise<void>, success: string) => {
+      setBusy(true);
+      setResult(null);
+      try {
+        await operation();
+        setResult({ tone: 'good', text: success });
+        forgetInputs();
+      } catch (error) {
+        setResult({
+          tone: 'bad',
+          text: error instanceof Error ? error.message : 'That did not work.',
+        });
+      } finally {
+        await refreshVault();
+        setBusy(false);
+      }
+    },
+    [forgetInputs, refreshVault],
+  );
+
+  /** Shared by the first save and by migrating a legacy token. */
+  const passphraseIssue = useCallback((): string | null => {
+    const problem = passphraseProblem(passphrase);
+    if (problem !== null) return problem;
+    if (passphrase !== confirm) return 'The two passphrases do not match.';
+    return null;
+  }, [passphrase, confirm]);
 
   const save = useCallback(async () => {
-    setBusy(true);
-    try {
-      await tokens.setToken(token);
-      setResult({
-        tone: 'good',
-        text: token.trim() === '' ? 'Token cleared.' : 'Token saved.',
-      });
-    } catch (error) {
-      // A token that cannot be sent is refused here, where the reviewer can
-      // still see what they pasted, rather than stored and left to fail as an
-      // unrecognizable TypeError on the first request.
-      setResult({
-        tone: 'bad',
-        text: error instanceof Error ? error.message : 'That token could not be saved.',
-      });
-    } finally {
-      setBusy(false);
+    const problem = passphraseIssue();
+    if (problem !== null) {
+      setResult({ tone: 'bad', text: problem });
+      return;
     }
-  }, [token]);
+    // A token that cannot be sent is refused inside `save`, where the reviewer
+    // can still see what they pasted, rather than sealed and left to fail as an
+    // unrecognizable TypeError on the first request.
+    await run(() => tokens.save(token, passphrase), 'Token encrypted and unlocked.');
+  }, [passphraseIssue, run, token, passphrase]);
+
+  const migrate = useCallback(async () => {
+    const problem = passphraseIssue();
+    if (problem !== null) {
+      setResult({ tone: 'bad', text: problem });
+      return;
+    }
+    await run(
+      () => tokens.migrate(passphrase),
+      'Your existing token is now encrypted. The plaintext copy has been deleted.',
+    );
+  }, [passphraseIssue, run, passphrase]);
+
+  const unlock = useCallback(
+    () => run(() => tokens.unlock(passphrase), 'Unlocked for this browser session.'),
+    [run, passphrase],
+  );
+
+  const lock = useCallback(
+    () => run(() => tokens.lock(), 'Locked. The passphrase is needed again to review.'),
+    [run],
+  );
+
+  const clear = useCallback(
+    () => run(() => tokens.clear(), 'Token deleted from this machine.'),
+    [run],
+  );
 
   const validate = useCallback(async () => {
     setBusy(true);
@@ -144,8 +220,12 @@ function App() {
 
   return (
     <main>
-      <h1>Fast GitHub Review</h1>
+      <h1>A Better Reviewer</h1>
 
+      {/* Only while there is no token to speak of. Once one is stored this is
+          six inches of instructions for something already done. */}
+      {vault === 'empty' && (
+        <>
       <ol className="setup">
         <li>
           Open{' '}
@@ -160,7 +240,7 @@ function App() {
         </li>
         <li>
           Give it a name you will recognise later, such as{' '}
-          <strong>Fast GitHub Review</strong>, and set an expiry. GitHub will not
+          <strong>A Better Reviewer</strong>, and set an expiry. GitHub will not
           show you the token again after you leave that page.
         </li>
         <li>
@@ -219,9 +299,9 @@ function App() {
           <code>github_pat_</code>.
         </li>
         <li>
-          Paste it below, press <strong>Save token</strong>, then{' '}
-          <strong>Validate saved token</strong>. A valid token answers with your
-          GitHub username.
+          Paste it below and choose a passphrase to encrypt it with, then press{' '}
+          <strong>Encrypt and save</strong>. The token is encrypted on this
+          machine and unlocked with that passphrase once per browser session.
         </li>
       </ol>
 
@@ -242,37 +322,171 @@ function App() {
         placeholder="github_pat_..."
         onChange={(event) => setToken(event.target.value)}
       />
+
+      <label htmlFor="passphrase">Passphrase</label>
+      <input
+        id="passphrase"
+        type="password"
+        value={passphrase}
+        autoComplete="new-password"
+        spellCheck={false}
+        onChange={(event) => setPassphrase(event.target.value)}
+      />
+      <label htmlFor="confirm">Passphrase again</label>
+      <input
+        id="confirm"
+        type="password"
+        value={confirm}
+        autoComplete="new-password"
+        spellCheck={false}
+        onChange={(event) => setConfirm(event.target.value)}
+      />
       <p className="hint">
-        Saving replaces whatever is stored now. Saving an empty box clears the
-        token, which is how you sign out.
+        The passphrase encrypts the token on this machine. It is never stored
+        and never sent anywhere, so it cannot be recovered — if you forget it,
+        delete the token and paste a new one. A few ordinary words work better
+        than one short cryptic one.
       </p>
 
       <div className="actions">
         <button type="button" onClick={() => void save()} disabled={busy}>
-          Save token
-        </button>
-        <button type="button" onClick={() => void validate()} disabled={busy}>
-          Validate saved token
+          Encrypt and save
         </button>
       </div>
+        </>
+      )}
+
+      {vault === 'legacy' && (
+        <>
+          <div className="warning">
+            <h2>Your token is stored unencrypted</h2>
+            <p>
+              This machine has a token saved from before this extension
+              encrypted them. It is sitting in <code>chrome.storage.local</code>{' '}
+              as plain text, readable by anything that can read this browser
+              profile's files.
+            </p>
+            <p>
+              Set a passphrase to encrypt it. The plaintext copy is deleted as
+              soon as the encrypted one is written. Reviewing is disabled until
+              then.
+            </p>
+          </div>
+
+          <label htmlFor="passphrase">Passphrase</label>
+          <input
+            id="passphrase"
+            type="password"
+            value={passphrase}
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => setPassphrase(event.target.value)}
+          />
+          <label htmlFor="confirm">Passphrase again</label>
+          <input
+            id="confirm"
+            type="password"
+            value={confirm}
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => setConfirm(event.target.value)}
+          />
+
+          <div className="actions">
+            <button type="button" onClick={() => void migrate()} disabled={busy}>
+              Encrypt my existing token
+            </button>
+            <button type="button" onClick={() => void clear()} disabled={busy}>
+              Delete it instead
+            </button>
+          </div>
+        </>
+      )}
+
+      {vault === 'locked' && (
+        <>
+          <p>
+            There is an encrypted token on this machine. Enter its passphrase to
+            unlock it for this browser session.
+          </p>
+
+          <label htmlFor="passphrase">Passphrase</label>
+          <input
+            id="passphrase"
+            type="password"
+            value={passphrase}
+            autoComplete="current-password"
+            spellCheck={false}
+            onChange={(event) => setPassphrase(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !busy) void unlock();
+            }}
+          />
+
+          <div className="actions">
+            <button type="button" onClick={() => void unlock()} disabled={busy}>
+              Unlock
+            </button>
+            <button type="button" onClick={() => void clear()} disabled={busy}>
+              Forget this token
+            </button>
+          </div>
+          <p className="hint">
+            The passphrase cannot be recovered. If it is lost, forget the token
+            and paste a new one — nothing else on this machine is affected.
+          </p>
+        </>
+      )}
+
+      {vault === 'unlocked' && (
+        <>
+          <p>
+            A token is saved and unlocked for this browser session. It is
+            encrypted on disk and decrypted only in memory.
+          </p>
+
+          <div className="actions">
+            <button type="button" onClick={() => void validate()} disabled={busy}>
+              Validate saved token
+            </button>
+            <button type="button" onClick={() => void lock()} disabled={busy}>
+              Lock now
+            </button>
+            <button type="button" onClick={() => void clear()} disabled={busy}>
+              Delete token
+            </button>
+          </div>
+          <p className="hint">
+            Locking, closing the browser, or deleting the token all stop this
+            extension reading GitHub until the passphrase is entered again. To
+            replace the token, delete this one and paste a new one.
+          </p>
+        </>
+      )}
 
       {result && <p className={`result ${result.tone}`}>{result.text}</p>}
 
       <div className="warning">
-        <h2>This token is stored unencrypted</h2>
+        <h2>What the passphrase does and does not protect</h2>
         <p>
-          The token is written verbatim to <code>chrome.storage.local</code>. It
-          is not encrypted and it is not protected by a password.
+          <strong>It protects the token on disk.</strong>{' '}
+          <code>chrome.storage.local</code> is an ordinary file. Encrypting the
+          token means another program running as you, a backup, or someone with
+          the laptop cannot read it without the passphrase.
         </p>
         <p>
-          Anything running inside this extension can read it, and so can anyone
-          who can read this browser profile's files on disk — including other
-          software running under your user account.
+          <strong>It does not protect against this extension itself.</strong>{' '}
+          While unlocked, the decrypted token is in memory and any code running
+          inside the extension can read it. That is true of every browser
+          extension that holds a credential, and no client-side design changes
+          it.
         </p>
         <p>
-          Use a fine-grained token limited to the repositories you review, give
-          it the shortest expiry you can live with, and revoke it if this machine
-          is shared or you suspect it is compromised.
+          So it is still worth using a fine-grained token limited to the
+          repositories you review, giving it the shortest expiry you can live
+          with, and revoking it if you suspect this machine is compromised.
+          <strong> This token can write to your pull requests</strong> — post
+          comments, resolve threads and submit approvals as you.
         </p>
       </div>
 

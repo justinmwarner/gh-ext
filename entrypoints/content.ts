@@ -19,7 +19,7 @@ import { defineContentScript } from 'wxt/utils/define-content-script';
 import { parsePrUrl } from '@/lib/github/pr-url';
 import { type Message, type PrRef, isErr, message } from '@/lib/messages';
 
-const BUTTON_ID = 'fast-review-open-button';
+const BUTTON_ID = 'a-better-reviewer-open-button';
 
 /**
  * Where the button goes, most specific first.
@@ -49,7 +49,7 @@ const ANCHOR_GRACE_MS = 3_000;
 /** How long to let a burst of DOM mutations settle before re-checking. */
 const RESYNC_DEBOUNCE_MS = 250;
 
-const log = (...args: unknown[]) => console.warn('[fast-review]', ...args);
+const log = (...args: unknown[]) => console.warn('[a-better-reviewer]', ...args);
 
 function guard(label: string, fn: () => void): void {
   try {
@@ -130,7 +130,7 @@ export default defineContentScript({
         if (!anchorMissLogged) {
           anchorMissLogged = true;
           log(
-            'No pull request header found, so the Fast review button was placed ' +
+            'No pull request header found, so the review button was placed ' +
               'in the corner instead. GitHub markup has probably changed. Tried:',
             ANCHOR_SELECTORS.join(', '),
           );
@@ -154,7 +154,7 @@ export default defineContentScript({
       // GitHub's own button classes, so it looks native where they still
       // exist. An unstyled button is a fine fallback where they do not.
       button.className = 'btn btn-sm';
-      button.textContent = 'Fast review';
+      button.textContent = 'Start a Better Review';
       button.style.marginRight = '8px';
 
       button.addEventListener('click', (event) => {

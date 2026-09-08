@@ -1,8 +1,8 @@
-# Fast GitHub Review Implementation Plan
+# A Better Reviewer Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A Chrome MV3 extension that injects a "Fast review" button on GitHub PR pages and opens a standalone, fast review SPA supporting comments/reply/resolve, the pending-review flow, status checks, and approve/request-changes.
+**Goal:** A Chrome MV3 extension that injects a "Start a Better Review" button on GitHub PR pages and opens a standalone, fast review SPA supporting comments/reply/resolve, the pending-review flow, status checks, and approve/request-changes.
 
 **Architecture:** Three MV3 contexts — a thin content script that injects the button, a background service worker that owns *all* network traffic plus the cache and prefetch, and a full-page React SPA at `review.html`. Domain logic lives in `lib/`, which never touches the DOM or `chrome.*` and is tested without a browser.
 
@@ -136,7 +136,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'Fast GitHub Review',
+    name: 'A Better Reviewer',
     description: 'A fast review UI for GitHub pull requests.',
     permissions: ['storage', 'tabs'],
     host_permissions: ['https://github.com/*', 'https://api.github.com/*'],

@@ -1,8 +1,8 @@
 {
-  "name": "fast-github-review",
+  "name": "a-better-reviewer",
   "description": "A fast review UI for GitHub pull requests.",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -10,12 +10,15 @@
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
+    "build:store": "wxt build --mode store",
+    "zip:store": "wxt zip --mode store",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "vitest run",
     "test:e2e": "wxt build && playwright test",
     "test:e2e:only": "playwright test",
+    "screenshots": "wxt build && playwright test --config playwright.screenshots.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -23,6 +23,16 @@ const openOptionsMock = openOptions as unknown as Mock;
 /** A request that never settles, for asserting on the in-flight state. */
 const pending = () => new Promise<never>(() => {});
 
+/**
+ * The fake `storage.local` from `testSetup`, which is where the vault state is
+ * read from. Reached through the global rather than imported so this file
+ * keeps its promise of naming no `chrome.*` API directly.
+ */
+const vaultStorage = () =>
+  (globalThis as unknown as {
+    browser: { storage: { local: { set(items: Record<string, unknown>): Promise<void>; remove(key: string): Promise<void> } } };
+  }).browser.storage.local;
+
 beforeEach(() => {
   // `vi.fn()`s created inside a `vi.mock` factory are not in the registry
   // Vitest's `restoreMocks` sweeps, so their call records survive the test that
@@ -32,8 +42,11 @@ beforeEach(() => {
   window.location.hash = '#/pr/acme/widgets/42';
 });
 
-afterEach(() => {
+afterEach(async () => {
   window.location.hash = '';
+  // The fake storage areas are module-scoped, so a vault written by one test
+  // would otherwise decide the state of every test after it.
+  await vaultStorage().remove('github-token-vault');
 });
 
 describe('App', () => {
@@ -75,6 +88,31 @@ describe('App', () => {
     expect(openOptionsMock).toHaveBeenCalled();
     // The state has to say what to do next, not only what went wrong.
     expect(container.textContent).toMatch(/options page/i);
+  });
+
+  it('asks for the passphrase, not for a token, when the vault is merely locked', async () => {
+    // The worker cannot tell these apart — a locked vault and no token at all
+    // both come back as `kind: 'auth'`. Telling a reviewer who already has a
+    // token to go and create one is the failure this guards against.
+    requestMock.mockResolvedValue({
+      ok: false,
+      error: { kind: 'auth', message: 'No GitHub token configured', resetAt: null },
+    });
+    await vaultStorage().set({
+      'github-token-vault': {
+        v: 1,
+        kdf: 'PBKDF2-SHA256',
+        iterations: 600_000,
+        salt: 'c2FsdA==',
+        iv: 'aXY=',
+        ct: 'Y3Q=',
+      },
+    });
+
+    const { container } = render(<App />);
+
+    expect(await screen.findByLabelText(/passphrase/i)).toBeDefined();
+    expect(container.textContent).not.toMatch(/personal access token/i);
   });
 
   it('renders the error state when the request fails for a non-auth reason', async () => {

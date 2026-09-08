@@ -41,7 +41,7 @@ import { reviewHash } from '@/lib/github/pr-url';
 import {
   ChromeTokenProvider,
   chromeKeyValueStore,
-  isTokenChange,
+  invalidatesCachedReads,
 } from '@/lib/github/token-provider';
 import {
   type CompareDiff,
@@ -103,7 +103,7 @@ export default defineBackground({
     /** Cache writes are best effort — a full storage area must not fail a read. */
     const cacheWrite = (write: () => Promise<void>): void => {
       void write().catch((error: unknown) => {
-        console.warn('[fast-review] cache write failed', error);
+        console.warn('[a-better-reviewer] cache write failed', error);
       });
     };
 
@@ -159,7 +159,7 @@ export default defineBackground({
       // Deliberately not awaited: the content script is only asking the worker
       // to start warming, and a failure here must not surface on the PR page.
       void assembleOnce(pr).catch((error: unknown) => {
-        console.warn('[fast-review] prefetch failed', prKey(pr), error);
+        console.warn('[a-better-reviewer] prefetch failed', prKey(pr), error);
       });
       return { started: true };
     }
@@ -294,12 +294,12 @@ export default defineBackground({
      * killed and restarted, like every other listener here.
      */
     browser.storage.onChanged.addListener((changes, areaName) => {
-      if (!isTokenChange(changes, areaName)) return;
+      if (!invalidatesCachedReads(changes, areaName)) return;
       inflight.clear();
       blobs.clear();
       imageBytes.clear();
       void forgetCachedReads(cacheStore).catch((error: unknown) => {
-        console.warn('[fast-review] could not clear the cache', error);
+        console.warn('[a-better-reviewer] could not clear the cache', error);
       });
     });
 

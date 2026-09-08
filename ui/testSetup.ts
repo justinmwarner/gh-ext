@@ -77,21 +77,55 @@ if (!('ResizeObserver' in globalThis)) {
 }
 
 /**
- * A `browser.storage.onChanged` nobody has subscribed to.
+ * The `browser` global, which jsdom has no reason to have.
  *
- * The review page listens for the token changing, so it can load the pull
- * request the moment the reviewer pastes one instead of leaving them on a
- * setup screen that promised it would. That listener is registered on mount,
- * which means every component test that renders the page reaches for
- * `browser` — a global jsdom has no reason to have.
+ * Two things need it. The review page listens for the token changing, so it
+ * can load the pull request the moment the reviewer unlocks instead of leaving
+ * them on a screen that promised it would. And it asks the vault which kind of
+ * "no token" it is looking at, to tell a missing token from a locked one.
+ * Both run on mount, so every component test that renders the page reaches for
+ * this.
  *
- * Inert, and only installed when nothing else has provided one, so a test that
- * wants to drive real change events can stub its own and keep it.
+ * `runtime.id` is what makes `@wxt-dev/browser` choose this object: it picks
+ * `globalThis.browser` only when that looks like a real extension context, and
+ * otherwise falls through to `globalThis.chrome`, which is undefined here.
+ *
+ * The storage areas are real enough to answer a read. An empty area reports
+ * the vault as `empty`, which is the setup state most of these tests want; a
+ * test that needs another state writes to the area first.
+ *
+ * Only installed when nothing else has provided one, so a test that wants to
+ * drive real change events can stub its own and keep it.
  */
 if (!('browser' in globalThis)) {
+  const area = () => {
+    const data = new Map<string, unknown>();
+    return {
+      get: (key?: string | null) =>
+        Promise.resolve(
+          key === undefined || key === null
+            ? Object.fromEntries(data)
+            : data.has(key)
+              ? { [key]: data.get(key) }
+              : {},
+        ),
+      set: (items: Record<string, unknown>) => {
+        for (const [k, v] of Object.entries(items)) data.set(k, v);
+        return Promise.resolve();
+      },
+      remove: (key: string) => {
+        data.delete(key);
+        return Promise.resolve();
+      },
+    };
+  };
+
   Object.defineProperty(globalThis, 'browser', {
     value: {
+      runtime: { id: 'a-better-reviewer-test' },
       storage: {
+        local: area(),
+        session: area(),
         onChanged: { addListener: () => {}, removeListener: () => {} },
       },
     },

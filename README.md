@@ -1,6 +1,6 @@
-# Fast GitHub Review
+# A Better Reviewer
 
-A Chrome extension that puts a **Fast review** button on GitHub pull request
+A Chrome extension that puts a **Start a Better Review** button on GitHub pull request
 pages. Clicking it opens a standalone review UI built on
 [Pierre](https://pierre.computer)'s diff and file-tree components, covering the
 review actions you perform constantly and deliberately nothing else.
@@ -16,12 +16,24 @@ escape hatch.
 
 ---
 
-## Install on a machine
+## Install
 
-Needs **Node 22 or newer**. Chrome or any Chromium browser.
+### From the Chrome Web Store
+
+<!-- Replace with the listing URL once the item is published. -->
+_Pending first publication — see [store/SUBMITTING.md](store/SUBMITTING.md)._
+
+Works in Chrome, Edge, Brave, Arc and Vivaldi: Edge and the other Chromium
+browsers can install from the Chrome Web Store, so one listing covers all of
+them. Updates arrive on their own.
+
+### From source
+
+For development, or to run a build the store has not seen yet. Needs **Node 22
+or newer**.
 
 ```bash
-git clone <this repo> gh-ext
+git clone https://github.com/justinmwarner/gh-ext.git gh-ext
 cd gh-ext
 npm ci
 npx wxt build
@@ -33,13 +45,17 @@ Then in Chrome:
 2. Turn on **Developer mode** (top right)
 3. **Load unpacked** → select `gh-ext/.output/chrome-mv3`
 
-The extension id is pinned to `kpjeagilmchpoganlnllmhloplapcnoj`, so it is the
-same on every machine.
+A source build pins the extension id to `kpjeagilmchpoganlnllmhloplapcnoj`, so
+it is the same on every machine. A store install gets its own id from Google
+instead, which is why the two cannot see each other's saved token — extension
+storage is keyed per id. Moving from one to the other means entering the token
+once more.
 
 ### Give it a token
 
-Open the extension's **Options** page and paste a
-[fine-grained personal access token](https://github.com/settings/tokens?type=beta).
+Open the extension's **Options** page, paste a
+[fine-grained personal access token](https://github.com/settings/tokens?type=beta),
+and choose a passphrase to encrypt it with.
 
 Required permissions:
 
@@ -59,21 +75,61 @@ hidden — but the checks will be incomplete or absent until it is granted.
 
 **The token is stored per machine and is not synced.** That is deliberate —
 `chrome.storage.sync` would replicate a credential across every browser signed
-into your Google account. Paste a token once per machine.
+into your Google account. Set a token once per machine.
 
-Note that `chrome.storage.local` is not encrypted, and anything running inside
-the extension can read it. Acceptable for a personal tool loaded unpacked;
-reconsider before sharing this with anyone else.
+#### How the token is stored
+
+The passphrase derives a key with PBKDF2-HMAC-SHA256 (600,000 iterations), and
+that key encrypts the token with AES-GCM. Only the ciphertext, salt and IV go
+to `chrome.storage.local`. The decrypted token lives in `chrome.storage.session`
+for the browser session, which is memory-only and never written to disk.
+
+So the vault is locked whenever the browser has just started, and the review
+page asks for the passphrase in place rather than sending you to the options
+page. Locking also sweeps the cached pull request, because that cache is
+readable without the token.
+
+**The passphrase is never stored and never leaves the machine, so it cannot be
+recovered.** If you forget it, delete the token and paste a new one.
+
+What this protects: the token on disk, against another program running as you,
+a backup, or someone holding the laptop.
+
+What it does not protect: the extension itself. While unlocked the token is in
+memory and any code running inside the extension can read it. That is true of
+every browser extension holding a credential and no client-side design changes
+it — so still scope the token to the repositories you review, give it the
+shortest expiry you can live with, and revoke it if you suspect the machine is
+compromised. **The token can write to your pull requests.**
+
+An install from before the vault keeps working until you open the Options page,
+which offers to encrypt the existing token. The plaintext copy is deleted the
+moment the encrypted one is written.
 
 ### Updating
+
+A store install updates itself. Chrome checks every few hours and there is
+nothing to do.
+
+A source install does not — Chrome never auto-updates an unpacked extension:
 
 ```bash
 git pull && npm ci && npx wxt build
 ```
 
-Then hit the reload icon on the extension card in `chrome://extensions`. Chrome
-does not auto-update unpacked extensions — that is the cost of not going through
-the Web Store.
+Then hit the reload icon on the extension card in `chrome://extensions`.
+
+### Publishing a new version
+
+```bash
+npm version patch      # or minor / major — the manifest version comes from here
+npm run zip:store      # → .output/a-better-reviewer-<version>-chrome-store.zip
+```
+
+Upload that zip to the [developer dashboard](https://chrome.google.com/webstore/devconsole).
+Every update goes through review. The version must increase or the store
+rejects it, which is what `npm version` is for. Full walkthrough in
+[store/SUBMITTING.md](store/SUBMITTING.md).
 
 ---
 

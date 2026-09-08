@@ -373,8 +373,12 @@ export const test = base.extend<Fixtures>({
     const log = await routeGitHub(context);
 
     // The worker refuses every request without a token, and the review page
-    // renders the setup state rather than a diff. Written through the worker
-    // itself so it lands in the same `storage.local` the options page uses.
+    // renders the setup state rather than a diff.
+    //
+    // Seeded into `storage.session`, which is where an *unlocked* vault keeps
+    // the decrypted token. Going through the passphrase for every test would
+    // buy nothing: what these tests exercise is the review UI, and the vault
+    // itself is covered under `lib/`.
     const worker = context.serviceWorkers()[0];
     if (worker === undefined) throw new Error('the extension worker never started');
     // Typed through the global rather than through `@types/chrome`: this runs
@@ -382,9 +386,9 @@ export const test = base.extend<Fixtures>({
     // process has no reason to take a dependency on the whole API surface.
     await worker.evaluate(async () => {
       const api = (globalThis as unknown as {
-        chrome: { storage: { local: { set(items: Record<string, string>): Promise<void> } } };
+        chrome: { storage: { session: { set(items: Record<string, string>): Promise<void> } } };
       }).chrome;
-      await api.storage.local.set({ 'github-token': 'ghp_fixture_token' });
+      await api.storage.session.set({ 'github-token-unlocked': 'ghp_fixture_token' });
     });
 
     await use(log);

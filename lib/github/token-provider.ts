@@ -11,48 +11,131 @@
 import { browser } from 'wxt/browser';
 import type { TokenProvider } from './client';
 import type { KeyValueStore } from '../review/drafts';
+import { isVaultRecord, openVault, sealToken } from '../crypto/vault';
 
 /**
- * Where the personal access token lives.
+ * The pre-encryption plaintext token.
  *
- * `local`, never `sync`. A `sync` value is replicated by Chrome to every
- * machine the profile is signed in on, which is not a decision to make on a
- * user's behalf for a credential.
+ * Only ever read now, never written. It exists so an install that predates the
+ * vault can be migrated, and is deleted the moment it has been.
  */
 export const TOKEN_KEY = 'github-token';
 
+/**
+ * The sealed token, in `storage.local`.
+ *
+ * `local`, never `sync`. A `sync` value is replicated by Chrome to every
+ * machine the profile is signed in on, which is not a decision to make on a
+ * user's behalf for a credential — even an encrypted one.
+ */
+export const VAULT_KEY = 'github-token-vault';
+
+/**
+ * The decrypted token, in `storage.session`.
+ *
+ * `session` is memory-only and is dropped when the browser closes, which is
+ * what makes the encryption worth anything: the plaintext never reaches a file.
+ */
+export const SESSION_TOKEN_KEY = 'github-token-unlocked';
+
 export type StorageAreaName = 'local' | 'session';
+
+/**
+ * - `empty` — nothing configured.
+ * - `legacy` — a plaintext token from before the vault, awaiting migration.
+ * - `locked` — a vault exists and the passphrase has not been entered.
+ * - `unlocked` — usable right now.
+ */
+export type VaultState = 'empty' | 'legacy' | 'locked' | 'unlocked';
 
 const area = (name: StorageAreaName) =>
   name === 'session' ? browser.storage.session : browser.storage.local;
 
+const readString = async (name: StorageAreaName, key: string): Promise<string | null> => {
+  const stored = await area(name).get(key);
+  const value = stored[key];
+  return typeof value === 'string' && value !== '' ? value : null;
+};
+
 /**
- * Reads the token from `storage.local` on every call.
+ * The token, behind a passphrase.
  *
- * No caching on purpose: the options page can change the token at any moment,
- * and the background worker holds a single long-lived `GitHubClient`.
+ * Reads `storage.session` on every call rather than caching: the options page
+ * can lock or replace the token at any moment, and the background worker holds
+ * a single long-lived `GitHubClient` that must not outlive a sign-out.
+ *
+ * `getToken` returning null covers three different situations — nothing
+ * configured, locked, and an unmigrated legacy token. Callers that only need a
+ * token do not care which; the UI asks {@link state} to phrase it.
  */
 export class ChromeTokenProvider implements TokenProvider {
   async getToken(): Promise<string | null> {
-    const stored = await browser.storage.local.get(TOKEN_KEY);
-    const token = stored[TOKEN_KEY];
-    return typeof token === 'string' && token !== '' ? token : null;
+    return readString('session', SESSION_TOKEN_KEY);
+  }
+
+  async state(): Promise<VaultState> {
+    if ((await readString('session', SESSION_TOKEN_KEY)) !== null) return 'unlocked';
+    const stored = await browser.storage.local.get(VAULT_KEY);
+    if (isVaultRecord(stored[VAULT_KEY])) return 'locked';
+    if ((await readString('local', TOKEN_KEY)) !== null) return 'legacy';
+    return 'empty';
   }
 
   /**
-   * Passing null or an empty string clears the token.
+   * Encrypt a token under a passphrase and leave it unlocked.
    *
-   * Throws for a token that cannot be sent, rather than storing it and letting
+   * Throws for a token that cannot be sent, rather than sealing it and letting
    * it fail opaquely on the first request. See {@link tokenProblem}.
    */
-  async setToken(token: string | null): Promise<void> {
-    if (token === null || token.trim() === '') {
-      await browser.storage.local.remove(TOKEN_KEY);
-      return;
-    }
+  async save(token: string, passphrase: string): Promise<void> {
     const problem = tokenProblem(token);
     if (problem !== null) throw new Error(problem);
-    await browser.storage.local.set({ [TOKEN_KEY]: token.trim() });
+
+    const trimmed = token.trim();
+    const record = await sealToken(trimmed, passphrase);
+    await browser.storage.local.set({ [VAULT_KEY]: record });
+    // A new token supersedes the old plaintext one. Leaving it behind would
+    // keep a working credential on disk after the reviewer believed they had
+    // encrypted it.
+    await browser.storage.local.remove(TOKEN_KEY);
+    await browser.storage.session.set({ [SESSION_TOKEN_KEY]: trimmed });
+  }
+
+  /** Throws {@link WrongPassphraseError} for a bad passphrase. */
+  async unlock(passphrase: string): Promise<void> {
+    const stored = await browser.storage.local.get(VAULT_KEY);
+    const record = stored[VAULT_KEY];
+    if (!isVaultRecord(record)) {
+      throw new Error('There is no encrypted token on this machine to unlock.');
+    }
+    const token = await openVault(record, passphrase);
+    await browser.storage.session.set({ [SESSION_TOKEN_KEY]: token });
+  }
+
+  /** Forget the decrypted copy. The vault itself is untouched. */
+  async lock(): Promise<void> {
+    await browser.storage.session.remove(SESSION_TOKEN_KEY);
+  }
+
+  /**
+   * Encrypt a pre-vault plaintext token under a passphrase.
+   *
+   * The plaintext is removed by {@link save}, so a half-finished migration
+   * cannot leave both copies on disk.
+   */
+  async migrate(passphrase: string): Promise<void> {
+    const legacy = await readString('local', TOKEN_KEY);
+    if (legacy === null) {
+      throw new Error('There is no unencrypted token on this machine to migrate.');
+    }
+    await this.save(legacy, passphrase);
+  }
+
+  /** Remove every trace of the token: vault, session copy and legacy plaintext. */
+  async clear(): Promise<void> {
+    await browser.storage.local.remove(VAULT_KEY);
+    await browser.storage.local.remove(TOKEN_KEY);
+    await browser.storage.session.remove(SESSION_TOKEN_KEY);
   }
 }
 
@@ -84,25 +167,63 @@ export function chromeKeyValueStore(name: StorageAreaName = 'local'): KeyValueSt
   };
 }
 
+type Change = { oldValue?: unknown; newValue?: unknown } | undefined;
+
+/** A write of the same value is not a change. */
+const replaced = (change: Change): boolean =>
+  change !== undefined && change.oldValue !== change.newValue;
+
 /**
- * Whether a storage change replaced the GitHub token.
+ * Whether the usable credential just changed in any way.
  *
- * Split out from the listener so the decision can be tested without a browser.
- * The area is checked because the token lives in `local` and the pull request
- * cache lives in `session`: a cache write must not be mistaken for the
- * reviewer signing out and trigger a sweep of the very thing being written.
+ * Split out from the listeners so the decision can be tested without a
+ * browser. Both areas are watched, for different reasons:
+ *
+ * - `local` holds the sealed vault. A replaced or cleared vault is a different
+ *   token, or none.
+ * - `session` holds the decrypted copy *and* the pull request cache, which is
+ *   why the key is checked and not just the area.
+ *
+ * This is what the review page listens to: unlocking has to take it off the
+ * locked screen and load the pull request it promised would appear.
  */
 export function isTokenChange(
   changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
   areaName: string,
 ): boolean {
-  if (areaName !== 'local') return false;
-  const change = changes[TOKEN_KEY];
-  if (change === undefined) return false;
-  // A write of the same value is not a change. Saving the token a second time
-  // is a normal thing to do from the options page and should not throw away a
-  // warm cache that is still valid for it.
-  return change.oldValue !== change.newValue;
+  if (areaName === 'local') {
+    // A re-seal of the same token produces a different record, so this cannot
+    // tell a re-save from a new token. Treating it as a change is the safe
+    // direction for both callers.
+    return replaced(changes[VAULT_KEY]) || replaced(changes[TOKEN_KEY]);
+  }
+  if (areaName === 'session') return replaced(changes[SESSION_TOKEN_KEY]);
+  return false;
+}
+
+/**
+ * Whether cached reads no longer belong to whoever is signed in.
+ *
+ * {@link isTokenChange} minus one case. The background worker sweeps on this
+ * rather than on every token change, because the first unlock of a browser
+ * session is not a sign-out: `session` storage holds the cache too, so if the
+ * token was absent the cache was empty. Sweeping there would be pure churn on
+ * an event that happens every single time a browser opens.
+ *
+ * Locking *is* a sweep. Leaving a warm cache would keep whole pull requests
+ * readable behind a vault the reviewer just locked.
+ */
+export function invalidatesCachedReads(
+  changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+  areaName: string,
+): boolean {
+  if (!isTokenChange(changes, areaName)) return false;
+
+  const unlocked = changes[SESSION_TOKEN_KEY];
+  if (areaName === 'session' && unlocked !== undefined && unlocked.oldValue === undefined) {
+    return false;
+  }
+  return true;
 }
 
 /**

@@ -1393,6 +1393,37 @@ button.scope-showing:hover {
   font-size: 12px;
 }
 
+/* The unlock form. Matches the options page's field treatment, because the
+   two are the same interaction reached from different places. */
+.fullpage label {
+  display: block;
+  font-weight: 600;
+  margin: 1rem 0 0.25rem;
+}
+
+.fullpage input[type="password"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: inherit;
+  background: light-dark(#ffffff, #0d1117);
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 6px;
+}
+
+.fullpage input[type="password"]:disabled {
+  opacity: 0.6;
+}
+
+/* A refused passphrase is the reviewer's next action, not a footnote, so it
+   does not get the muted treatment `.detail` gives background error text. */
+.fullpage .problem {
+  margin-top: 0.5rem;
+  color: light-dark(#cf222e, #f85149);
+}
+
 .fullpage-actions {
   display: flex;
   gap: var(--gap);
