@@ -34,7 +34,9 @@ English (United Kingdom)
 ## Detailed description
 
 ```
-A Better Reviewer puts a "Start a Better Review" button on GitHub pull request pages. Click it and the review opens in a purpose-built interface that covers the actions you perform constantly, and deliberately nothing else.
+Reviewing a pull request on GitHub means a lot of scrolling, a lot of clicking, and a lot of waiting. A Better Reviewer replaces that with an interface built for the handful of things you actually do over and over — and deliberately nothing else.
+
+Open a pull request and a small card appears with "Start a Better Review". Click it and the whole review opens in a fast, purpose-built page. Don't want the card? Collapse it to a pill and it stays out of your way.
 
 WHAT IT DOES
 
@@ -50,6 +52,10 @@ WHAT IT DOES
 • Expand unchanged context around a hunk
 • Scope the diff to one commit, a range of commits, or "changes since my last review"
 • Light and dark, following your system
+
+YOUR CHOICE OF WHERE IT OPENS
+
+Reviews open in a new tab by default, leaving the pull request where it was. You can switch that to a new window — useful on a second monitor — or to the current tab. There is also an option to open the review automatically whenever you land on a pull request, so the card becomes one less click.
 
 Anything it does not do hands off to GitHub through an "Open in GitHub" button, so you are never stuck.
 
