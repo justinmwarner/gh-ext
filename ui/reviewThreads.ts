@@ -48,7 +48,26 @@ export interface ComposerMetadata {
   kind: 'composer';
 }
 
-export type AnnotationMetadata = ThreadMetadata | ComposerMetadata;
+/**
+ * The card's own body: the comparison, its notices, and the threads the diff
+ * cannot show.
+ *
+ * An annotation rather than part of the header, and that is a measurement
+ * decision rather than a layout preference. `CodeView` sizes an item's header
+ * from one global metric and never measures it, so every pixel of variable
+ * content up there is scroll range the viewer does not know it owes — which is
+ * what made the column skip cards as it released them. A file-level annotation
+ * *is* measured, and folded into the item's height.
+ * `lib/review/columnTail.ts` has both library facts and the numbers.
+ *
+ * It carries no payload. Which file it belongs to is the item it is attached
+ * to, and `renderAnnotation` is handed that item.
+ */
+export interface BodyMetadata {
+  kind: 'body';
+}
+
+export type AnnotationMetadata = ThreadMetadata | ComposerMetadata | BodyMetadata;
 
 export type ListedReason =
   | 'outdated'
@@ -68,7 +87,7 @@ export interface ListedThread {
 export interface FileThreadLayout {
   annotations: DiffLineAnnotation<AnnotationMetadata>[];
   /** Everything Pierre cannot draw inline, and would otherwise lose. */
-  listed: ListedThread[];
+  listed: readonly ListedThread[];
 }
 
 const spanOf = (hunk: Hunk, side: AnnotationSide): LineRange =>

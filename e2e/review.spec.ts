@@ -19,6 +19,7 @@
  * from a fixture and aborts anything it does not recognize.
  */
 
+import { HEADER_BUDGET } from '@/lib/review/columnTail';
 import { REACHED } from '@/ui/currentFile';
 import {
   BASE_SHA,
@@ -35,6 +36,16 @@ import type { Page } from '@playwright/test';
 
 /** The scrollport `CodeView` was handed. */
 const VIEW = '.diff-view';
+
+/**
+ * The measured half of a card, which is a separate element from its header.
+ *
+ * `CodeView` sizes an item from one global header metric and never measures the
+ * header, so everything whose height depends on the file is an annotation
+ * instead — see `ui/FileBody.tsx` and `lib/review/columnTail.ts`.
+ */
+const fileBody = (page: Page, path: string) =>
+  page.locator(`[data-file-body="${path}"]`);
 
 /** Every view is mounted at once, so anything text-based has to be scoped. */
 const filesView = (page: Page) => page.locator('#review-view-files');
@@ -927,18 +938,19 @@ test('a file can be read without its whitespace, and says that it is', async ({
   await openReview(page, extensionId);
 
   const card = page.locator('[data-file-card="src/app.ts"]');
+  // The toggle is on the header; the notice it turns on is in the body, which
+  // is a separate element because that is the half `CodeView` measures.
+  const note = fileBody(page, 'src/app.ts').locator('[data-whitespace-note]');
   const toggle = card.getByRole('button', { name: /ignore whitespace/i });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 
   await toggle.click();
 
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(card.locator('[data-whitespace-note]')).toContainText(
-    /not the diff GitHub is showing/i,
-  );
+  await expect(note).toContainText(/not the diff GitHub is showing/i);
   // Per file. The next card is still showing GitHub's diff, unannounced.
   await expect(
-    page.locator('[data-file-card="src/beta.ts"] [data-whitespace-note]'),
+    fileBody(page, 'src/beta.ts').locator('[data-whitespace-note]'),
   ).toHaveCount(0);
 
   // The column survived being rebuilt under a new key: there is still code.
@@ -947,7 +959,7 @@ test('a file can be read without its whitespace, and says that it is', async ({
   ).toBeVisible();
 
   await toggle.click();
-  await expect(card.locator('[data-whitespace-note]')).toHaveCount(0);
+  await expect(note).toHaveCount(0);
 });
 
 test('the numbered strip scopes the diff, and keeps All within reach', async ({
@@ -1352,6 +1364,62 @@ test('the last card can still be read when the column is full of rich ones', asy
 });
 
 /**
+ * The one measurement the whole card layout rests on.
+ *
+ * `CodeView` sizes every item's header from a single global metric and never
+ * measures the element, so a header taller than that metric is scroll range the
+ * viewer does not know it owes. It cost the last file of a review its
+ * reachability, and it made the column jump past cards as it released them —
+ * measured at 147px in one frame for a rendered Markdown card.
+ *
+ * The fix was to empty the header of everything whose height depends on the
+ * file. This is what keeps it empty. It cannot be asserted anywhere but a
+ * browser: jsdom performs no layout and reports every one of these as zero.
+ */
+test('no card header is taller than the height the viewer assumes', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Every card, not just the first screen: the column virtualizes, and the
+  // tall ones are the rich comparisons at the bottom.
+  const tallest = new Map<string, number>();
+  for (const fraction of [0, 0.25, 0.5, 0.75, 0.9, 1]) {
+    await page.evaluate(
+      ([selector, value]) => {
+        const view = document.querySelector(selector as string) as HTMLElement;
+        view.scrollTop = (view.scrollHeight - view.clientHeight) * (value as number);
+      },
+      [VIEW, fraction] as const,
+    );
+    await page.waitForTimeout(400);
+    for (const [path, height] of await page.evaluate(() =>
+      [...document.querySelectorAll('[data-file-card]')].map(
+        (node) =>
+          [
+            node.getAttribute('data-file-card') ?? '',
+            Math.round(node.getBoundingClientRect().height),
+          ] as const,
+      ),
+    )) {
+      tallest.set(path, Math.max(tallest.get(path) ?? 0, height));
+    }
+  }
+
+  // Enough of them to be worth the walk, and the rich ones among them.
+  expect(tallest.size).toBeGreaterThan(FILES.length);
+  expect(tallest.has(MARKDOWN_FILE)).toBe(true);
+  expect(tallest.has(IMAGE_FILE)).toBe(true);
+
+  const over = [...tallest].filter(([, height]) => height > HEADER_BUDGET);
+  expect(over).toEqual([]);
+});
+
+/**
  * Markdown, rendered and marked, in a browser that will actually run things.
  *
  * The unit tests for this live in jsdom, and jsdom cannot answer the question
@@ -1373,7 +1441,7 @@ test('a rendered Markdown diff marks the prose and executes none of it', async (
   const row = page.locator(`[data-path="${MARKDOWN_FILE}"]`);
   await row.click();
 
-  const card = page.locator(`[data-file-card="${MARKDOWN_FILE}"]`);
+  const card = fileBody(page, MARKDOWN_FILE);
   await expect(card.locator('.markdown-rendered')).toBeVisible();
 
   // The word that changed is marked in place, which is the whole point of a

@@ -132,6 +132,24 @@ const card = (path: string): HTMLElement => {
   return found;
 };
 
+/**
+ * The measured half of a card, and it arrives a tick after the header.
+ *
+ * Everything whose height depends on the file is an annotation rather than
+ * header content, so that `CodeView` measures it — see `ui/FileBody.tsx`. The
+ * annotation host is created on the render *after* the item is laid out, so a
+ * synchronous assertion right after `mount` looks at a card that has its name
+ * and its counts and nothing else yet.
+ */
+const body = async (path: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(document.querySelector(`[data-file-body="${path}"]`)).not.toBeNull();
+  });
+  const found = document.querySelector<HTMLElement>(`[data-file-body="${path}"]`);
+  if (found == null) throw new Error(`no body rendered for ${path}`);
+  return found;
+};
+
 const section = (path: string): HTMLElement => {
   const found = document.querySelector<HTMLElement>(`[data-unanchored="${path}"]`);
   if (found == null) throw new Error(`no unanchored section rendered for ${path}`);
@@ -194,23 +212,25 @@ describe('DiffColumn', () => {
     expect(header.textContent).toContain('src/new.ts');
   });
 
-  it('says a binary file is binary rather than leaving a blank card', () => {
+  it('says a binary file is binary rather than leaving a blank card', async () => {
     // A binary with no rich comparison to offer. An image would open in its
     // own view instead, which is what the comparison-mode tests cover.
     mount([file({ path: 'build/app.wasm', isBinary: true, patch: '' })]);
 
-    expect(within(card('build/app.wasm')).getByRole('note').textContent).toMatch(
+    expect(within(await body('build/app.wasm')).getByRole('note').textContent).toMatch(
       /binary/i,
     );
   });
 
-  it('says when GitHub withheld the patch', () => {
+  it('says when GitHub withheld the patch', async () => {
     mount([file({ path: 'huge.sql', patch: '', patchOmitted: true })]);
 
-    expect(within(card('huge.sql')).getByRole('note').textContent).toMatch(/github/i);
+    expect(within(await body('huge.sql')).getByRole('note').textContent).toMatch(
+      /github/i,
+    );
   });
 
-  it('says when a rename moved a file without changing it', () => {
+  it('says when a rename moved a file without changing it', async () => {
     mount([
       file({
         path: 'src/new.ts',
@@ -220,7 +240,7 @@ describe('DiffColumn', () => {
       }),
     ]);
 
-    const note = within(card('src/new.ts')).getByRole('note');
+    const note = within(await body('src/new.ts')).getByRole('note');
     expect(note.textContent).toContain('src/old.ts');
     expect(note.textContent).toContain('src/new.ts');
   });
@@ -1033,7 +1053,7 @@ describe('DiffColumn, ignoring whitespace', () => {
       fireEvent.click(whitespaceToggle('src/app.ts'));
     });
 
-    const note = within(card('src/app.ts')).getByRole('note');
+    const note = within(await body('src/app.ts')).getByRole('note');
     expect(note.textContent).toMatch(/recomputed here/i);
     expect(note.textContent).toMatch(/not the diff GitHub/i);
   });
@@ -1054,8 +1074,11 @@ describe('DiffColumn, ignoring whitespace', () => {
     // out of the scrollport.
     expect(whitespaceToggle('a.ts').getAttribute('aria-pressed')).toBe('true');
     expect(whitespaceToggle('b.ts').getAttribute('aria-pressed')).toBe('false');
-    expect(card('a.ts').querySelector('[data-whitespace-note]')).not.toBeNull();
-    expect(card('b.ts').querySelector('[data-whitespace-note]')).toBeNull();
+    expect((await body('a.ts')).querySelector('[data-whitespace-note]')).not.toBeNull();
+    // No body at all rather than an empty one: `b.ts` has nothing to put in it,
+    // and an annotation host it never fills is a strip of empty space above
+    // every hunk in the review.
+    expect(document.querySelector('[data-file-body="b.ts"]')).toBeNull();
   });
 
   it('keeps a comment on a vanished hunk, in the list rather than nowhere', async () => {

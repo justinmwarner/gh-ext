@@ -703,7 +703,11 @@ documented:
   short. A post-hoc correction was tried — measure the card and adjust
   `scrollTop` over a few frames — and made it *worse*, 331 px to 607 px,
   because `CodeView` re-clamps and re-anchors a manual write. It was backed out
-  rather than shipped unproven. **This half is still open.**
+  rather than shipped unproven. **Closed on 2026-09-07 without being aimed at:**
+  once the card bodies were measured the modelled top stopped being wrong, and
+  the same click lands 32px down instead of 331px short. The post-hoc
+  correction was the wrong shape for it — the aim was never the defect, the
+  model underneath it was.
 
 - **A third symptom, found on 2026-09-06, and the one a reviewer notices
   first: the column skips cards.** Reported against the `test/diff-fixtures`
@@ -803,6 +807,46 @@ documented:
   same treatment or a deliberate exemption. And a collapsed rich card should
   carry no annotation, so that collapsing goes on meaning "header only".
 
+- **Done on 2026-09-07, and here is what it bought.** Everything whose height
+  depends on the file — the comparison, the notices, the threads the diff cannot
+  show — moved out of `FileCard` into `ui/FileBody.tsx`, rendered through
+  `renderAnnotation` at `lineNumber: 0`. Measured in Chrome on the same walk,
+  before and after:
+
+  | | header | lurch on release |
+  | --- | --- | --- |
+  | plain source file | 44 to 44 | 57 to 57 |
+  | a file carrying listed threads | 92 to **44** | — |
+  | rendered Markdown | 166 to **70** | 147 to **67** |
+  | an image | 126 to **70** | 107 to **67** |
+
+  Two things had to be settled on the way, both by measurement. A rich card is
+  an **expanded item with an empty diff**, not a collapsed one: a collapsed item
+  renders no annotation host at all, so the comparison would have nowhere
+  measurable to go, and a diff with no hunks draws no rows so there is nothing
+  underneath it either. A `file` item was tried first and abandoned — it is
+  wider in split view, 848px against 407px, because a diff item lays its
+  annotations out per side; but `linesFromFileContents` starts its offsets at
+  `[0]`, so *even empty contents are one line*, and every rich card grew a blank
+  row with a `1` in its gutter underneath a PNG. A constant piece of wrong
+  chrome everywhere lost to a narrower comparison in the view that is not the
+  default.
+
+  What is left is not a header. A card with a mode switcher is 70px rather than
+  44 — the switcher is a second row and stays put, because a collapsed card
+  still has to offer it. And a plain text card lurches by ~57px with a header
+  that is *exactly* the metric: that is the library's own line-height estimate,
+  it predates all of this, and `reconcileHeights` returns before measuring it
+  when `overflow` is `scroll` and there are no annotations.
+
+  `lib/review/columnTail.ts` shrank rather than went. With it removed entirely
+  the last card now settles 311px down a 628px scrollport — readable, which it
+  was not before at 627px, but not reachable — and `RICH_CARD_EXCESS` is
+  re-derived from that at 100. A new browser test pins the thing that could
+  quietly undo all of it: `HEADER_BUDGET`, 72px, asserted against every mounted
+  card header. Ablated by putting the thread list back in the header: 66 headers
+  over budget.
+
 ---
 
 ---
@@ -847,14 +891,18 @@ order of value per byte:
    **+25,860 B gzipped** rather than the 27,341 B estimated — `htmldiff-js` was
    vendored rather than depended on, which is where most of the difference
    went. §3.7 records it.
-5. **Decision 13 (rich cards mis-measure).** The reachability half was fixed
-   on 2026-09-05 — see the section above — and `docs/readme.md` is back in the
-   browser fixture with the sanitiser test jsdom could not make. **Two halves
-   are still open**, both reported or measured on 2026-09-06: where
-   `scrollTo({type: 'item'})` lands, and the column skipping cards as it
-   releases them. They are the same missing number, and no fix for either sits
-   inside the library's options — it takes moving a rich comparison out of the
-   card header, which is where the next design call is.
+5. **Decision 13 (rich cards mis-measure).** Largely done. The reachability
+   half was fixed on 2026-09-05; the skipping was fixed on 2026-09-07 by moving
+   every variable-height part of a card out of the header and into a measured
+   annotation, which took a rich card's release lurch from 147px to 67px and its
+   header from 166px to 70px. Two terms are left and neither is what this
+   started as. The mode switcher is a second header row, 26px, and stays there
+   because a collapsed card still has to offer it. And a plain text card lurches
+   ~57px with a header that is exactly the metric — the library's own
+   line-height estimate, which predates all of this and which
+   `reconcileHeights` returns before measuring. The aim closed with it: clicking
+   the last file in the tree lands 32px down where it was 331px short, without
+   anything being done to `scrollTo` at all.
 6. Everything else — decisions 4, 5, 6, 7, 9, 10 — is reasonable to leave.
 
 Two libraries examined on 2026-09-05 and rejected outright, recorded so nobody

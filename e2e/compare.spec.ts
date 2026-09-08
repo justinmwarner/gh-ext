@@ -29,6 +29,18 @@ import type { Locator, Page } from '@playwright/test';
 const card = (page: Page, path: string): Locator =>
   page.locator(`[data-file-card="${path}"]`);
 
+/**
+ * The measured half of a card: the comparison itself and everything under it.
+ *
+ * A separate element from the header, and separated deliberately. `CodeView`
+ * sizes an item from one global header metric and never measures the header, so
+ * a comparison rendered up there is scroll range the viewer does not know it
+ * owes — see `ui/FileBody.tsx` and `lib/review/columnTail.ts`. It is an
+ * annotation instead, which the viewer does measure.
+ */
+const body = (page: Page, path: string): Locator =>
+  page.locator(`[data-file-body="${path}"]`);
+
 const modeButton = (page: Page, path: string, label: string): Locator =>
   card(page, path).getByRole('button', { name: label, exact: true });
 
@@ -65,7 +77,7 @@ test('an image is compared as pixels, from bytes that never touched the page', a
   await openReview(page, extensionId);
   await reach(page, IMAGE_FILE);
 
-  const images = card(page, IMAGE_FILE).locator('img');
+  const images = body(page, IMAGE_FILE).locator('img');
   await expect(images).toHaveCount(2);
 
   // Every one of these came through the worker. A remote URL here would be a
@@ -129,7 +141,7 @@ test('the difference blend is applied, and is contained by its own stage', async
 
   await modeButton(page, IMAGE_FILE, 'Difference').click();
 
-  const stage = card(page, IMAGE_FILE).locator('.image-stage');
+  const stage = body(page, IMAGE_FILE).locator('.image-stage');
   await expect(stage).toBeVisible();
 
   const computed = await stage.evaluate((node) => {
@@ -172,9 +184,9 @@ test('the difference comes out in one colour, whichever channel moved', async ({
   await reach(page, IMAGE_FILE);
 
   await modeButton(page, IMAGE_FILE, 'Difference').click();
-  await expect(card(page, IMAGE_FILE).locator('.image-canvas')).toBeVisible();
+  await expect(body(page, IMAGE_FILE).locator('.image-canvas')).toBeVisible();
 
-  const painted = await card(page, IMAGE_FILE)
+  const painted = await body(page, IMAGE_FILE)
     .locator('.image-canvas')
     .evaluate((node) => {
       const reference = /url\("?#([^")]+)"?\)/.exec(getComputedStyle(node).filter);
@@ -234,7 +246,7 @@ test('the overlay modes put both images in one coordinate space', async ({
 
   await modeButton(page, IMAGE_FILE, 'Onion skin').click();
 
-  const boxes = await card(page, IMAGE_FILE)
+  const boxes = await body(page, IMAGE_FILE)
     .locator('.image-layer')
     .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect()));
 
@@ -296,16 +308,16 @@ test('the swipe slider moves the seam with the keyboard', async ({
 
   await modeButton(page, IMAGE_FILE, 'Swipe').click();
 
-  const slider = card(page, IMAGE_FILE).getByRole('slider');
+  const slider = body(page, IMAGE_FILE).getByRole('slider');
   await slider.focus();
-  const before = await card(page, IMAGE_FILE)
+  const before = await body(page, IMAGE_FILE)
     .locator('.image-layer-top')
     .evaluate((node) => getComputedStyle(node).clipPath);
 
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
 
-  const after = await card(page, IMAGE_FILE)
+  const after = await body(page, IMAGE_FILE)
     .locator('.image-layer-top')
     .evaluate((node) => getComputedStyle(node).clipPath);
 
@@ -323,12 +335,12 @@ test('a table is drawn as a grid with the one changed cell marked', async ({
   await openReview(page, extensionId);
   await reach(page, TABLE_FILE);
 
-  const grid = card(page, TABLE_FILE).locator('.grid');
+  const grid = body(page, TABLE_FILE).locator('.grid');
   await expect(grid).toBeVisible();
 
   // One cell moved: `bolt`'s quantity. The text diff has this as a whole line
   // removed and a whole line added.
-  const changed = card(page, TABLE_FILE).locator('.grid-cell-changed');
+  const changed = body(page, TABLE_FILE).locator('.grid-cell-changed');
   await expect(changed).toHaveCount(1);
   await expect(changed).toContainText('5');
 
@@ -347,22 +359,31 @@ test('raw puts the ordinary diff back, in the same card', async ({
   await openReview(page, extensionId);
   await reach(page, TABLE_FILE);
 
-  await expect(card(page, TABLE_FILE).locator('.grid')).toBeVisible();
+  await expect(body(page, TABLE_FILE).locator('.grid')).toBeVisible();
 
   await modeButton(page, TABLE_FILE, 'Raw').click();
 
-  await expect(card(page, TABLE_FILE).locator('.grid')).toHaveCount(0);
+  await expect(body(page, TABLE_FILE).locator('.grid')).toHaveCount(0);
   // Pierre's own rows, inside the shadow root the card's item owns.
-  await expect
-    .poll(async () =>
-      page.evaluate((path) => {
-        const container = document
-          .querySelector(`[data-file-card="${path}"]`)
-          ?.closest('diffs-container');
-        return container?.shadowRoot?.querySelector('[data-column-number]') != null;
-      }, TABLE_FILE),
-    )
-    .toBe(true);
+  const hasRows = () =>
+    page.evaluate((path) => {
+      const container = document
+        .querySelector(`[data-file-card="${path}"]`)
+        ?.closest('diffs-container');
+      return container?.shadowRoot?.querySelector('[data-column-number]') != null;
+    }, TABLE_FILE);
+
+  await expect.poll(hasRows).toBe(true);
+
+  // And back the other way. The comparison must not arrive on top of the diff
+  // it replaced: the card would carry both, one of them the view the reviewer
+  // just chose against. Only a browser can answer it — jsdom performs no
+  // layout, so the viewer's window never moves and a released row can sit on in
+  // a recycled element with nothing to make it repaint.
+  await modeButton(page, TABLE_FILE, 'Grid').click();
+
+  await expect(body(page, TABLE_FILE).locator('.grid')).toBeVisible();
+  await expect.poll(hasRows).toBe(false);
 });
 
 test('the last card in the column can still be scrolled to the top', async ({
@@ -415,5 +436,5 @@ test('the switcher is reachable and operable from the keyboard', async ({
   await page.keyboard.press('Enter');
 
   await expect(raw).toHaveAttribute('aria-pressed', 'true');
-  await expect(card(page, IMAGE_FILE).getByRole('note')).toContainText(/binary/i);
+  await expect(body(page, IMAGE_FILE).getByRole('note')).toContainText(/binary/i);
 });

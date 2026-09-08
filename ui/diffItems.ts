@@ -13,16 +13,25 @@
  * - a rename that moved a file without changing a line of it
  * - a mode change, which is a patch with a header and no hunks
  *
- * Each becomes a collapsed item carrying its own sentence. A blank card is
- * indistinguishable from a card that failed to load, and the difference matters
- * to a reviewer deciding whether they have seen everything.
+ * Each becomes a `file` item with no contents, carrying its own sentence in a
+ * measured annotation. A blank card is indistinguishable from a card that
+ * failed to load, and the difference matters to a reviewer deciding whether
+ * they have seen everything.
+ *
+ * The split between the two item shapes is a measurement decision, not a
+ * rendering one. `CodeView` sizes an item's header from one global metric and
+ * never measures it, so anything variable up there is scroll range it does not
+ * know it owes; it *does* measure a file-level annotation, and only on an
+ * expanded item. So every card that is not a plain text diff is an expanded
+ * item with nothing to draw and its whole body in an annotation.
+ * `lib/review/columnTail.ts` has the library facts and the measurements.
  */
 
 import { parsePatchFiles } from '@pierre/diffs';
 import type { CodeViewItem, DiffLineAnnotation, FileDiffMetadata } from '@pierre/diffs';
 import { MODE_SLOTS, RAW, changeSides, modeIndex } from '@/lib/compare/modes';
 import type { ReviewFile } from './reviewFiles';
-import type { AnnotationMetadata } from './reviewThreads';
+import type { AnnotationMetadata, BodyMetadata } from './reviewThreads';
 
 export type FileBodyKind = 'diff' | 'binary' | 'omitted' | 'renamed-only' | 'no-content';
 
@@ -95,7 +104,9 @@ export function fileBody(file: ReviewFile): FileBody {
  * Built by hand rather than parsed. `parsePatchFiles` returns nothing at all
  * for the empty patch a withheld file carries, and synthesizing a patch header
  * to feed it would mean escaping paths for a parser whose quoting rules we do
- * not own. These items are always collapsed, so no hunk is ever walked.
+ * not own. Nothing renders from it — a file with no hunks is a `file` item —
+ * but the thread layout, the hunk stops and the composer all ask every file for
+ * its metadata, and they need an answer rather than an exception.
  */
 function placeholderFileDiff(file: ReviewFile): FileDiffMetadata {
   return {
@@ -335,12 +346,16 @@ const revisionOf = (
  * file type at a time, and nothing in the diff to suggest the cause.
  */
 const versionOf = (
-  fileDiff: object,
+  subject: object,
   collapsed: boolean,
   annotations: readonly unknown[] | undefined,
   mode: string,
+  body: boolean,
 ): number =>
-  (revisionOf(fileDiff, annotations) * MODE_SLOTS + modeIndex(mode)) * 2 + (collapsed ? 1 : 0);
+  ((revisionOf(subject, annotations) * MODE_SLOTS + modeIndex(mode)) * 2 +
+    (collapsed ? 1 : 0)) *
+    2 +
+  (body ? 1 : 0);
 
 /**
  * Does this card show Pierre's own diff in its body?
@@ -355,22 +370,84 @@ export function showsTextDiff(file: ReviewFile, mode: string): boolean {
   return mode === RAW.id && fileBody(file).kind === 'diff';
 }
 
+/**
+ * The metadata a card uses when its body is a comparison rather than a diff.
+ *
+ * A diff with no hunks, so the renderer draws no rows at all and the card is
+ * its header and its annotation — which is what it looked like when these were
+ * collapsed items, and the appearance is not meant to change.
+ *
+ * **Why not a `file` item.** One was tried, and it is better in one way and
+ * worse in another. A `diff` item lays its annotations out per side, so in
+ * split view the comparison renders in one column: measured at 407px of an
+ * 880px card, against 848px for a `file` item, which has no sides. But a file's
+ * line count comes from `linesFromFileContents`, whose offsets start at `[0]`,
+ * so *even empty contents are one line* — every rich card grew a blank row with
+ * a `1` in its gutter, in both views, under a PNG. A constant piece of wrong
+ * chrome on every rich card lost to a narrower comparison in the view that is
+ * not the default.
+ *
+ * Cached on the `ReviewFile` for the same reason the parsed diffs are: a fresh
+ * object every render reads to `CodeView` as a different file to render.
+ */
+const emptyByFile = new WeakMap<ReviewFile, FileDiffMetadata>();
+
+function emptyDiffFor(file: ReviewFile): FileDiffMetadata {
+  const held = emptyByFile.get(file);
+  if (held !== undefined) return held;
+
+  const made = placeholderFileDiff(file);
+  emptyByFile.set(file, made);
+  return made;
+}
+
+/**
+ * The one annotation that says "the card's body goes here".
+ *
+ * A single frozen object rather than one per file. It carries no payload —
+ * which file it belongs to is the item it hangs off, and `renderAnnotation` is
+ * handed that item — and sharing it keeps two cards' annotation arrays from
+ * differing in a way nothing downstream cares about.
+ */
+const BODY: BodyMetadata = Object.freeze({ kind: 'body' });
+
 export function codeViewItems(
   files: readonly ReviewFile[],
   collapsedPaths: ReadonlySet<string>,
   annotationsByPath: ReadonlyMap<string, DiffLineAnnotation<AnnotationMetadata>[]> = new Map(),
   modes: ReadonlyMap<string, string> = new Map(),
+  /**
+   * Paths whose card has something to put in a body beyond its comparison —
+   * threads the diff cannot show, or a notice about how it was rewritten.
+   *
+   * Passed in rather than derived because both live in the column's state. A
+   * file not named here and not in a rich mode gets no annotation at all, which
+   * is the common card by a wide margin: an unfilled annotation host is a strip
+   * of empty space between every header and its first hunk.
+   */
+  withBody: ReadonlySet<string> = new Set(),
 ): CodeViewItem<AnnotationMetadata>[] {
   return files.map((file) => {
     const mode = modes.get(file.path) ?? RAW.id;
-    // A file with no diff to draw is collapsed whatever the reviewer chose:
-    // expanding it would reveal an empty rectangle where its message used to
-    // be. A file in a rich mode is collapsed for the same reason — its body is
-    // the comparison in the header, and the text diff underneath would be the
-    // thing the reviewer just chose not to look at.
-    const collapsed = !showsTextDiff(file, mode) || collapsedPaths.has(file.path);
-    const annotations = annotationsByPath.get(file.path);
-    const fileDiff = fileDiffFor(file);
+    const rich = !showsTextDiff(file, mode);
+    const collapsed = rich ? false : collapsedPaths.has(file.path);
+    const threads = annotationsByPath.get(file.path);
+    // Nowhere to put it: a collapsed item is sized at its header region and
+    // renders no annotation host at all. Collapsed goes on meaning header only.
+    const body = !collapsed && (rich || withBody.has(file.path));
+
+    // The empty one for a comparison, so no rows are drawn under it. The real
+    // parse is still what every other reader of this file gets: the thread
+    // layout, the hunk stops and the composer all ask for it by path.
+    const fileDiff = rich ? emptyDiffFor(file) : fileDiffFor(file);
+    // The array the column memoized, untouched, whenever there is nothing to
+    // add to it — an item whose annotations are a fresh array every render is
+    // an item that re-renders every render. `lineNumber: 0` is the file level,
+    // which Pierre draws above the first hunk, so the body sits between the
+    // header and the diff wherever the threads happen to be anchored.
+    const annotations = !body
+      ? threads
+      : [...(threads ?? []), { side: 'additions' as const, lineNumber: 0, metadata: BODY }];
 
     return {
       id: file.path,
@@ -378,7 +455,7 @@ export function codeViewItems(
       fileDiff,
       collapsed,
       ...(annotations !== undefined ? { annotations } : {}),
-      version: versionOf(fileDiff, collapsed, annotations, mode),
+      version: versionOf(fileDiff, collapsed, threads, mode, body),
     };
   });
 }

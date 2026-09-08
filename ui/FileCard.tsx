@@ -7,21 +7,26 @@
  * the page.
  *
  * It carries the four things §5 asks for: the path, the added and removed
- * counts, the viewed checkbox, and the collapse toggle — plus, for a file with
- * no diff behind it, the sentence explaining why.
+ * counts, the viewed checkbox, and the collapse toggle, plus the controls that
+ * change what the card shows.
+ *
+ * **Everything here is fixed height, and that is a hard constraint rather than
+ * a style.** `CodeView` sizes an item from one global header metric and never
+ * measures this element, so a card that renders taller than the metric is
+ * scroll range the viewer does not know about — and it lurches by that
+ * difference each time it releases the card while scrolling. Anything whose
+ * height depends on the file belongs in `FileBody`, which is rendered as an
+ * annotation and therefore measured. `lib/review/columnTail.ts` has the
+ * numbers.
  */
 
 import { RAW, modesForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
-import { type WhitespaceDiff, whitespaceNotice } from '@/lib/review/whitespace';
-import type { BlobRefs } from './blobLoader';
+import type { WhitespaceDiff } from '@/lib/review/whitespace';
 import { ModeSwitcher } from './ModeSwitcher';
-import { RichCompare } from './RichCompare';
-import { UnanchoredThreads } from './UnanchoredThreads';
 import { fileBody } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession, viewedKey } from './reviewSession';
-import type { ListedThread } from './reviewThreads';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
 const MINUS = '−';
@@ -92,12 +97,6 @@ export interface FileCardProps {
   onToggleCollapsed: (path: string) => void;
   /** Called with the header element so the column can tell where it sits. */
   onHeaderRef: (path: string, node: HTMLElement | null) => void;
-  /**
-   * Threads on this file that the diff cannot draw. They live in the header
-   * rather than the body because the body is exactly what cannot hold them —
-   * and because the header is rendered even when the card is collapsed.
-   */
-  unanchored: readonly ListedThread[];
   /** How this file is being compared. Already resolved against what it offers. */
   mode: string;
   onChangeMode: (path: string, mode: string) => void;
@@ -110,8 +109,6 @@ export interface FileCardProps {
    */
   whitespace: WhitespaceDiff | null;
   onToggleWhitespace: (path: string) => void;
-  /** The two commits a rich comparison reads whole files from. */
-  blobs: BlobRefs | null;
 }
 
 export function FileCard({
@@ -119,12 +116,10 @@ export function FileCard({
   collapsed,
   onToggleCollapsed,
   onHeaderRef,
-  unanchored,
   mode,
   onChangeMode,
   whitespace,
   onToggleWhitespace,
-  blobs,
 }: FileCardProps) {
   const body = fileBody(file);
   const raw = mode === RAW.id;
@@ -218,28 +213,6 @@ export function FileCard({
         onChange={onChangeMode}
       />
 
-      {/* Not `role="status"`. This does not announce an event, it labels what
-          is underneath it for as long as it is underneath it — and it is the
-          only thing on the page that says the body is not GitHub's diff. */}
-      {whitespace !== null && (
-        <p className="file-note" data-whitespace-note role="note">
-          {whitespaceNotice(whitespace)}
-        </p>
-      )}
-
-      {/* The sentence explaining an absent diff belongs to the raw view alone.
-          Left on, a PNG in its side-by-side comparison would carry "Binary
-          file changed. There is no text diff to show" directly above the two
-          images that are showing it. */}
-      {raw && body.message !== null && (
-        <p className="file-note" role="note">
-          {body.message}
-        </p>
-      )}
-
-      <RichCompare file={file} mode={mode} refs={blobs} />
-
-      <UnanchoredThreads path={file.path} threads={unanchored} />
     </div>
   );
 }

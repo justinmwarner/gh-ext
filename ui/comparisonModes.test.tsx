@@ -28,6 +28,7 @@ import { request } from './background';
 import { NO_FILE } from './currentFile';
 import { clearSideCache } from './fileSides';
 import { memoryStore } from './memoryStore.fixture';
+import { codeViewItems } from './diffItems';
 import { diffHasRendered } from './pierreDom.fixture';
 import { pullRequestNode } from './prPayload.fixture';
 import type { ReviewFile } from './reviewFiles';
@@ -111,6 +112,19 @@ const card = (path: string): HTMLElement => {
   return found;
 };
 
+/**
+ * The measured half of a card: the comparison, its notices, its listed threads.
+ *
+ * A separate element from the header because `CodeView` measures an annotation
+ * and does not measure a header — see `ui/FileBody.tsx`. Synchronous, because
+ * every caller here is either inside a `waitFor` or after one.
+ */
+const body = (path: string): HTMLElement => {
+  const found = document.querySelector<HTMLElement>(`[data-file-body="${path}"]`);
+  if (found == null) throw new Error(`no body rendered for ${path}`);
+  return found;
+};
+
 const switcher = (path: string): HTMLElement =>
   within(card(path)).getByRole('group', { name: new RegExp(`Compare ${path} as`) });
 
@@ -166,9 +180,9 @@ describe('raw as the escape hatch', () => {
     mount([file({ path: 'assets/logo.png', isBinary: true, patch: '' })]);
 
     await waitFor(() => {
-      expect(card('assets/logo.png').querySelector('.image-compare')).not.toBeNull();
+      expect(body('assets/logo.png').querySelector('.image-compare')).not.toBeNull();
     });
-    expect(within(card('assets/logo.png')).queryByRole('note')).toBeNull();
+    expect(within(body('assets/logo.png')).queryByRole('note')).toBeNull();
   });
 
   it('puts the binary sentence back when the reviewer asks for raw', async () => {
@@ -177,10 +191,10 @@ describe('raw as the escape hatch', () => {
 
     await user.click(modeButton('assets/logo.png', 'Raw'));
 
-    expect(within(card('assets/logo.png')).getByRole('note').textContent).toMatch(
+    expect(within(body('assets/logo.png')).getByRole('note').textContent).toMatch(
       /binary/i,
     );
-    expect(card('assets/logo.png').querySelector('.image-compare')).toBeNull();
+    expect(body('assets/logo.png').querySelector('.image-compare')).toBeNull();
   });
 
   it('reads no blobs at all while a file is showing raw', async () => {
@@ -233,10 +247,10 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'data/rows.csv' })]);
 
     await waitFor(() => {
-      expect(card('data/rows.csv').querySelector('.grid')).not.toBeNull();
+      expect(body('data/rows.csv').querySelector('.grid')).not.toBeNull();
     });
 
-    const changed = card('data/rows.csv').querySelectorAll('.grid-cell-changed');
+    const changed = body('data/rows.csv').querySelectorAll('.grid-cell-changed');
     expect(changed).toHaveLength(1);
     expect(changed[0]?.textContent).toContain('5');
   });
@@ -249,14 +263,14 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'data/rows.csv' })]);
 
     await waitFor(() => {
-      expect(card('data/rows.csv').querySelector('.grid')).not.toBeNull();
+      expect(body('data/rows.csv').querySelector('.grid')).not.toBeNull();
     });
-    expect(card('data/rows.csv').querySelectorAll('.grid-row')).toHaveLength(2);
+    expect(body('data/rows.csv').querySelectorAll('.grid-row')).toHaveLength(2);
 
     await user.click(modeButton('data/rows.csv', 'Changed rows'));
 
     await waitFor(() => {
-      expect(card('data/rows.csv').querySelectorAll('.grid-row')).toHaveLength(1);
+      expect(body('data/rows.csv').querySelectorAll('.grid-row')).toHaveLength(1);
     });
   });
 
@@ -267,10 +281,10 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'config.json' })]);
 
     await waitFor(() => {
-      expect(card('config.json').querySelector('.key-paths')).not.toBeNull();
+      expect(body('config.json').querySelector('.key-paths')).not.toBeNull();
     });
 
-    const paths = [...card('config.json').querySelectorAll('.key-path')].map(
+    const paths = [...body('config.json').querySelectorAll('.key-path')].map(
       (node) => node.textContent,
     );
     expect(paths).toEqual(['server.port']);
@@ -281,7 +295,7 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'config.json' })]);
 
     await waitFor(() => {
-      expect(within(card('config.json')).getByRole('note').textContent).toMatch(
+      expect(within(body('config.json')).getByRole('note').textContent).toMatch(
         /no values changed/i,
       );
     });
@@ -299,10 +313,10 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'k8s/deploy.yaml' })]);
 
     await waitFor(() => {
-      expect(card('k8s/deploy.yaml').querySelector('.key-paths')).not.toBeNull();
+      expect(body('k8s/deploy.yaml').querySelector('.key-paths')).not.toBeNull();
     });
 
-    const paths = [...card('k8s/deploy.yaml').querySelectorAll('.key-path')].map(
+    const paths = [...body('k8s/deploy.yaml').querySelectorAll('.key-path')].map(
       (node) => node.textContent,
     );
     expect(paths).toEqual(['server.port']);
@@ -319,10 +333,10 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'Cargo.toml' })]);
 
     await waitFor(() => {
-      expect(card('Cargo.toml').querySelector('.key-paths')).not.toBeNull();
+      expect(body('Cargo.toml').querySelector('.key-paths')).not.toBeNull();
     });
 
-    const paths = [...card('Cargo.toml').querySelectorAll('.key-path')].map(
+    const paths = [...body('Cargo.toml').querySelectorAll('.key-path')].map(
       (node) => node.textContent,
     );
     expect(paths).toEqual(['deps.serde']);
@@ -340,10 +354,10 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'tsconfig.json' })]);
 
     await waitFor(() => {
-      expect(card('tsconfig.json').querySelector('.key-paths')).not.toBeNull();
+      expect(body('tsconfig.json').querySelector('.key-paths')).not.toBeNull();
     });
 
-    const paths = [...card('tsconfig.json').querySelectorAll('.key-path')].map(
+    const paths = [...body('tsconfig.json').querySelectorAll('.key-path')].map(
       (node) => node.textContent,
     );
     expect(paths).toEqual(['target']);
@@ -389,11 +403,11 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'analysis.ipynb' })]);
 
     await waitFor(() => {
-      expect(card('analysis.ipynb').querySelector('.cells')).not.toBeNull();
+      expect(body('analysis.ipynb').querySelector('.cells')).not.toBeNull();
     });
 
-    expect(card('analysis.ipynb').querySelectorAll('.cell-changed')).toHaveLength(1);
-    const unchanged = card('analysis.ipynb').querySelector('.cell-equal');
+    expect(body('analysis.ipynb').querySelectorAll('.cell-changed')).toHaveLength(1);
+    const unchanged = body('analysis.ipynb').querySelector('.cell-equal');
     expect(unchanged?.textContent).toMatch(/new output/i);
   });
 
@@ -413,14 +427,14 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'analysis.ipynb' })]);
 
     await waitFor(() => {
-      expect(card('analysis.ipynb').querySelector('.cells')).not.toBeNull();
+      expect(body('analysis.ipynb').querySelector('.cells')).not.toBeNull();
     });
-    expect(card('analysis.ipynb').textContent).not.toContain('RESULT-TEXT');
+    expect(body('analysis.ipynb').textContent).not.toContain('RESULT-TEXT');
 
     await user.click(modeButton('analysis.ipynb', 'Cells and outputs'));
 
     await waitFor(() => {
-      expect(card('analysis.ipynb').textContent).toContain('RESULT-TEXT');
+      expect(body('analysis.ipynb').textContent).toContain('RESULT-TEXT');
     });
   });
 
@@ -433,7 +447,7 @@ describe('the comparisons themselves', () => {
     mount([file({ path: 'data/rows.csv' })]);
 
     await waitFor(() => {
-      expect(within(card('data/rows.csv')).getByRole('alert').textContent).toMatch(
+      expect(within(body('data/rows.csv')).getByRole('alert').textContent).toMatch(
         /too large/i,
       );
     });
@@ -452,12 +466,18 @@ describe('the file the reviewer is on', () => {
     expect(button.getAttribute('tabindex')).toBeNull();
   });
 
-  it('takes the text diff away when a comparison replaces it, and back', async () => {
-    // The item is collapsed for exactly this reason. Left expanded, a CSV in
-    // its grid would carry Pierre's line-by-line diff of the same file below
-    // it — the view the reviewer just chose not to look at, at the cost of
-    // rendering it anyway. Driven raw-first so the diff is known to have
-    // rendered before its absence is asserted.
+  it('gives a comparison nothing of the text diff to sit on top of', async () => {
+    // A CSV in its grid must not also carry Pierre's line-by-line diff of the
+    // same file, which is the view the reviewer just chose not to look at.
+    // Collapsing the item used to be what prevented it; the comparison is now
+    // an annotation and only an expanded item has one, so the emptiness comes
+    // from the item's contents instead. Driven raw-first, so the diff is known
+    // to have rendered before the switch.
+    //
+    // That the rows actually leave the screen is a browser claim, and it is
+    // made there: jsdom performs no layout, so the viewer's window never moves
+    // and a released row can sit on in a recycled element with nothing to make
+    // it repaint. `e2e/compare.spec.ts` asserts the visible transition.
     const user = userEvent.setup();
     answerWith(() => 'a,b\n1,2\n');
     mount([file({ path: 'data/rows.csv' })]);
@@ -468,9 +488,18 @@ describe('the file the reviewer is on', () => {
     });
 
     await user.click(modeButton('data/rows.csv', 'Grid'));
+
     await waitFor(() => {
-      expect(diffHasRendered('data/rows.csv')).toBe(false);
+      expect(body('data/rows.csv').querySelector('.grid')).not.toBeNull();
     });
+    const item = codeViewItems(
+      [file({ path: 'data/rows.csv' })],
+      new Set(),
+      new Map(),
+      new Map([['data/rows.csv', 'table:grid']]),
+    )[0];
+    if (item?.type !== 'diff') throw new Error('expected a diff item');
+    expect(item.fileDiff.hunks).toHaveLength(0);
   });
 
   it('does not offer to collapse a card whose body is a comparison', () => {
@@ -505,7 +534,9 @@ describe('screen reader wiring', () => {
 
 describe('the rendered Markdown diff', () => {
   const rendered = (path: string): HTMLElement | null =>
-    card(path).querySelector<HTMLElement>('.markdown-rendered');
+    document.querySelector<HTMLElement>(
+      `[data-file-body="${path}"] .markdown-rendered`,
+    );
 
   it('shows the new document formatted, with the changed words marked in it', async () => {
     answerWith((ref) =>
@@ -588,9 +619,9 @@ describe('a Markdown file written by an attacker', () => {
     mount([file({ path: 'README.md' })]);
 
     await waitFor(() =>
-      expect(card('README.md').querySelector('.markdown-rendered')).not.toBeNull(),
+      expect(body('README.md').querySelector('.markdown-rendered')).not.toBeNull(),
     );
-    const view = card('README.md').querySelector<HTMLElement>('.markdown-rendered');
+    const view = body('README.md').querySelector<HTMLElement>('.markdown-rendered');
     if (view === null) throw new Error('no rendered markdown');
 
     for (const tag of ['script', 'img', 'iframe', 'svg', 'style', 'form', 'input']) {
@@ -639,7 +670,7 @@ describe('a Markdown file written by an attacker', () => {
     mount([file({ path: 'README.md' })]);
 
     await waitFor(() =>
-      expect(card('README.md').querySelector('.markdown-rendered')).not.toBeNull(),
+      expect(body('README.md').querySelector('.markdown-rendered')).not.toBeNull(),
     );
 
     expect(document.querySelectorAll('[data-reply-for]')).toHaveLength(0);

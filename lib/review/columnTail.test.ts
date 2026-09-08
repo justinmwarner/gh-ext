@@ -35,11 +35,17 @@ describe('tailDeficit', () => {
     expect(tailDeficit(-3)).toBe(0);
   });
 
-  it('over-estimates rather than under-estimates a single card', () => {
-    // Measured in Chrome on the browser fixture: a rendered Markdown card's
-    // header is 153px, an image 126px, a table 179px, against the 44px the
-    // metric assumes — so the real excess runs 82-135. Slack costs a little
-    // empty space at the bottom; a shortfall costs the last file.
-    expect(RICH_CARD_EXCESS).toBeGreaterThanOrEqual(135);
+  it('covers the whole column’s shortfall, not just one card’s header', () => {
+    // Measured in Chrome on the browser fixture after the card bodies moved
+    // into annotations: with this removed entirely the last card settles 311px
+    // down a 628px scrollport, over four rich cards — so anything under about
+    // 78 leaves it unreachable. A card's own header accounts for only 26 of
+    // that (70px against the 44px metric, the mode switcher's row); the rest is
+    // the library's line-height estimate on the text cards above it, which this
+    // has always been absorbing.
+    expect(RICH_CARD_EXCESS * 4).toBeGreaterThanOrEqual(311);
+    // And not so far over that the column becomes mostly nothing. Four rich
+    // cards should not buy a whole extra screen of empty space.
+    expect(RICH_CARD_EXCESS * 4).toBeLessThan(628);
   });
 });

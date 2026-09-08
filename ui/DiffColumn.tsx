@@ -46,7 +46,13 @@ import {
 } from 'react';
 import { CodeView } from '@pierre/diffs/react';
 import type { CodeViewHandle, CodeViewReactOptions } from '@pierre/diffs/react';
-import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from '@pierre/diffs';
+import type {
+  CodeViewItem,
+  DiffLineAnnotation,
+  FileDiffMetadata,
+  LineAnnotation,
+  SelectedLineRange,
+} from '@pierre/diffs';
 import { RAW, resolveModeForFile } from '@/lib/compare/modes';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnchorableSides } from '@/lib/review/diffScope';
@@ -54,6 +60,7 @@ import type { AnnotationSide } from '@/lib/review/threads';
 import { tailDeficit } from '@/lib/review/columnTail';
 import { type WhitespaceDiff, withoutWhitespaceChanges } from '@/lib/review/whitespace';
 import { Composer } from './Composer';
+import { FileBody, hasBodyContent } from './FileBody';
 import { FileCard } from './FileCard';
 import { ThreadCard } from './ThreadCard';
 import { type ComposerTarget, composerFor } from './composerAnchor';
@@ -73,6 +80,7 @@ import {
   type AnnotationMetadata,
   type ComposerMetadata,
   type FileThreadLayout,
+  type ListedThread,
   type ThreadMetadata,
   isRenderedLine,
   layoutThreads,
@@ -223,7 +231,9 @@ const renderTail = () => <div className="column-tail" aria-hidden="true" />;
 
 
 const NO_ANNOTATIONS: DiffLineAnnotation<AnnotationMetadata>[] = [];
-const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: [] };
+/** One empty list, so a card with no listed threads never gets a new array. */
+const NO_LISTED: readonly ListedThread[] = [];
+const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: NO_LISTED };
 
 /**
  * The two questions only the renderer can answer about a hydrated diff.
@@ -529,9 +539,27 @@ export function DiffColumn({
     });
   }, []);
 
+  /**
+   * Which cards have something to put in a body besides a comparison.
+   *
+   * Kept out of `codeViewItems` because both halves of the answer live in this
+   * component's state, and handed in as a set so that module stays a pure
+   * function of its arguments. A file that is not in here and not in a rich
+   * mode gets no annotation at all — an unfilled annotation host is a strip of
+   * empty space between the header and the first hunk, on every file.
+   */
+  const withBody = useMemo(() => {
+    const built = new Set<string>();
+    for (const file of drawnFiles) {
+      const listed = layouts.get(file.path)?.listed ?? NO_LISTED;
+      if (hasBodyContent(recomputed.get(file.path) ?? null, listed)) built.add(file.path);
+    }
+    return built;
+  }, [drawnFiles, layouts, recomputed]);
+
   const items = useMemo(
-    () => codeViewItems(drawnFiles, collapsed, annotationsByPath, modes),
-    [drawnFiles, collapsed, annotationsByPath, modes],
+    () => codeViewItems(drawnFiles, collapsed, annotationsByPath, modes, withBody),
+    [drawnFiles, collapsed, annotationsByPath, modes, withBody],
   );
 
   /**
@@ -829,9 +857,29 @@ export function DiffColumn({
   }, [composer, byPath]);
 
   const renderAnnotation = useCallback(
-    (annotation: DiffLineAnnotation<AnnotationMetadata>) => {
+    (
+      annotation:
+        | LineAnnotation<AnnotationMetadata>
+        | DiffLineAnnotation<AnnotationMetadata>,
+      item: CodeViewItem<AnnotationMetadata>,
+    ) => {
       const meta = annotation.metadata;
       if (meta.kind === 'thread') return <ThreadCard threadId={meta.threadId} />;
+      // Which file this is comes from the item rather than from the metadata,
+      // so one frozen `{ kind: 'body' }` can be shared by every card.
+      if (meta.kind === 'body') {
+        const file = byPath.get(item.id);
+        if (file === undefined) return null;
+        return (
+          <FileBody
+            file={file}
+            mode={modes.get(file.path) ?? RAW.id}
+            whitespace={recomputed.get(file.path) ?? null}
+            unanchored={layouts.get(file.path)?.listed ?? NO_LISTED}
+            blobs={blobs}
+          />
+        );
+      }
       if (composer === null) return null;
       return (
         <Composer
@@ -843,7 +891,7 @@ export function DiffColumn({
         />
       );
     },
-    [composer, composerLines, closeComposer],
+    [composer, composerLines, closeComposer, byPath, modes, recomputed, layouts, blobs],
   );
 
   /**
@@ -1002,12 +1050,10 @@ export function DiffColumn({
                 collapsed={collapsed.has(file.path)}
                 onToggleCollapsed={toggleCollapsed}
                 onHeaderRef={registerHeader}
-                unanchored={layouts.get(file.path)?.listed ?? []}
                 mode={modes.get(file.path) ?? RAW.id}
                 onChangeMode={changeMode}
                 whitespace={recomputed.get(file.path) ?? null}
                 onToggleWhitespace={toggleWhitespace}
-                blobs={blobs}
               />
             );
           }}

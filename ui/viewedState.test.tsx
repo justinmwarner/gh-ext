@@ -52,12 +52,10 @@ function mount(viewedState: FileViewedState) {
         collapsed={false}
         onToggleCollapsed={() => {}}
         onHeaderRef={() => {}}
-        unanchored={[]}
         mode={RAW.id}
         onChangeMode={() => {}}
         whitespace={null}
         onToggleWhitespace={() => {}}
-        blobs={null}
       />
     </ReviewSessionProvider>,
   );
