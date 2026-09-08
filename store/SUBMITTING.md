@@ -1,9 +1,33 @@
-# Submitting to the Chrome Web Store
+# Submitting to the extension stores
 
 Start to finish, for a first publication. Copy for every field is in
 [LISTING.md](LISTING.md); the policy to publish is [PRIVACY.md](PRIVACY.md).
 
 Budget: about 30 minutes of work, then days to weeks of waiting for review.
+
+## Which stores, and which package
+
+| Store | Package | Fee | Reaches |
+|---|---|---|---|
+| **Chrome Web Store** | `…-chrome-store.zip` | $5 once | Chrome, Edge, Brave, Arc, Vivaldi |
+| Firefox Add-ons (AMO) | `…-firefox.zip` + `…-sources.zip` | free | Firefox |
+| Edge Add-ons | `…-chrome-store.zip` | free | Edge only |
+
+Build all of them with:
+
+```bash
+npm run zip:store      # Chrome and Edge — MV3, no manifest key
+npm run zip:firefox    # Firefox — MV2, gecko id, plus a sources zip for review
+```
+
+**Edge is optional and mostly redundant.** Edge can install from the Chrome Web
+Store, and Chrome cannot install from Edge Add-ons — the compatibility runs one
+way. Publishing to Edge only avoids the user having to flip Edge's "Allow
+extensions from other stores" toggle. It is a second listing to keep in sync
+for that one benefit.
+
+The rest of this document is the Chrome walkthrough. Firefox and Edge are at
+the bottom.
 
 ---
 
@@ -198,3 +222,86 @@ of approval.
 - **The listing is public.** The name uses "GitHub" descriptively rather than as
   a claim of affiliation; if the store or GitHub objects, the fallback is to
   rename the listing and describe the integration in the summary instead.
+
+---
+
+# Firefox Add-ons (AMO)
+
+Free, no registration fee. Mozilla signs the package; you choose whether they
+also host it.
+
+## Before anything else: Firefox is unverified
+
+The package builds and passes Mozilla's linter with **zero errors**. Nobody has
+run it in Firefox. There is no Firefox e2e suite — `npm run test:e2e` drives
+Chromium only — so "it builds" is the whole of the evidence.
+
+Load `.output/firefox-mv2` via `about:debugging` → **This Firefox** → **Load
+Temporary Add-on** and actually use it before submitting. The things most
+likely to break are the MV2 background page (Chrome gets an MV3 service worker,
+Firefox does not) and `storage.session`, which the vault depends on and which
+only exists from Firefox 115.
+
+## Listed or self-hosted
+
+- **Listed** — Mozilla hosts it on addons.mozilla.org, public and searchable.
+  Least work, and updates are automatic.
+- **Unlisted / self-distributed** — Mozilla only signs it; you host the `.xpi`
+  and a JSON update manifest yourself, and Firefox auto-updates from your
+  `update_url`. No public listing.
+
+Both give real auto-updates. Listed is simpler; pick it unless you specifically
+want the add-on unlisted.
+
+## Submitting
+
+1. <https://addons.mozilla.org/developers/> → **Submit a New Add-on**
+2. Choose listed or unlisted
+3. Upload `.output/a-better-reviewer-1.0.0-firefox.zip`
+4. When asked for source code, upload `.output/a-better-reviewer-1.0.0-sources.zip`
+
+Step 4 is **required**, not optional: the submission is bundled and minified, so
+a reviewer cannot read it. WXT generates the sources zip during `zip:firefox`
+for exactly this reason. Skipping it gets the review rejected.
+
+Reuse the same listing copy and privacy policy from [LISTING.md](LISTING.md).
+
+## Expected lint warnings
+
+`npx web-ext lint --source-dir .output/firefox-mv2` reports 0 errors and ~25
+warnings. All of them are expected:
+
+- **23 × `UNSAFE_VAR_ASSIGNMENT`** — `innerHTML` and `insertAdjacentHTML` inside
+  the bundled `@pierre/diffs` viewer. Vendor code, which is what the sources zip
+  lets a reviewer confirm. The extension's own Markdown path sanitises through
+  DOMPurify.
+- **2 × `KEY_FIREFOX_*_UNSUPPORTED_BY_MIN_VERSION`** — `data_collection_permissions`
+  needs Firefox 140 and the manifest declares a floor of 115. Deliberate; see
+  the comment in `wxt.config.ts`.
+
+## The add-on id is permanent
+
+`browser_specific_settings.gecko.id` is `a-better-reviewer@justinmwarner.github.io`.
+That string is the add-on's identity forever. Changing it after publishing makes
+every existing install a different add-on that stops receiving updates. If it
+should live under a PoodlePop domain instead, change it **before** the first
+signing, not after.
+
+---
+
+# Edge Add-ons
+
+Free. Uses the same Chromium package as Chrome.
+
+1. <https://partner.microsoft.com/dashboard/microsoftedge/> — register with a
+   Microsoft or GitHub account, no fee
+2. **Create new extension** → upload `…-chrome-store.zip`
+3. Reuse the listing copy, screenshots and privacy policy from
+   [LISTING.md](LISTING.md)
+
+Edge asks for the same permission justifications Chrome does, so the same text
+applies. Review is usually faster than Chrome's.
+
+Worth repeating: this listing only reaches people who would not simply install
+the Chrome Web Store version in Edge. Publish it if you want Edge users to find
+the extension by searching Edge Add-ons; skip it otherwise.
