@@ -18,6 +18,7 @@
     "test": "vitest run",
     "test:e2e": "wxt build && playwright test",
     "test:e2e:only": "playwright test",
+    "icons": "node scripts/make-icons.mjs",
     "screenshots": "wxt build && playwright test --config playwright.screenshots.config.ts",
     "typecheck": "tsc --noEmit"
   },

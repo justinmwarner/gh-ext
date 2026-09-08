@@ -1,0 +1,14 @@
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    A diff, reduced until it still survives 16px: an added line, a removed
+    line, and an unchanged one. Chosen over a checkmark because a check says
+    "some tool approved something" and this says what the extension is.
+
+    The bar lengths are deliberately unequal — equal bars read as a hamburger
+    menu at small sizes, which is the one thing this must not look like.
+  -->
+  <rect width="128" height="128" rx="28" fill="#0d1117"/>
+  <rect x="24" y="34" width="80" height="14" rx="7" fill="#3fb950"/>
+  <rect x="24" y="58" width="52" height="14" rx="7" fill="#f85149"/>
+  <rect x="24" y="82" width="66" height="14" rx="7" fill="#8b949e"/>
+</svg>
