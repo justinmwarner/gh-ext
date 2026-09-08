@@ -772,6 +772,37 @@ documented:
     click that fast, and enough to detach an element a browser test had already
     resolved.
 
+- **The route out of this is proven, on 2026-09-07, and it is the annotation
+  API.** `reconcileHeights` *measures* a file-level annotation and folds it into
+  the item through `setFileAnnotationHeight` → `measuredHeightDeltaTotal`, which
+  the non-collapsed path of `computeApproximateSize` adds to the height. That is
+  the per-item number the options do not have, reached through a public API this
+  page already uses for comment threads.
+
+  Two things were checked rather than assumed. In jsdom, an item with
+  `hunks: []` and `collapsed: false` **does** get a `data-line-annotation` host,
+  and the React content is projected into it through the light DOM; collapsed
+  gets no host at all, so the item has to be expanded. Then in Chrome, against
+  the browser fixture, one image card was temporarily given an empty diff,
+  `collapsed: false` and a `lineNumber: 0` annotation 200px tall:
+  `scrollHeight` went **5,018 → 5,218 at the moment the card mounted**, exactly
+  the annotation's height, and stayed there after the card was released again.
+  The library measured it and kept it.
+
+  The same spike also showed what the fix has to include. Widening it to every
+  rich card did **not** remove the lurching, because it only *added* a measured
+  annotation and left the comparison in the custom header, which is still sized
+  at the 44px metric. So attaching an annotation is not enough: the comparison
+  has to **move out of the header and into it**. The header keeps the fixed row
+  it is modelled as — name, counts, viewed, mode buttons, collapse — and the
+  variable-height body becomes the measured annotation.
+
+  Two design questions to settle before starting. The per-file list of threads
+  the diff cannot show is also variable-height and also in the header
+  (`src/beta.ts` measures 92px against the same 44px metric), so it needs the
+  same treatment or a deliberate exemption. And a collapsed rich card should
+  carry no annotation, so that collapsing goes on meaning "header only".
+
 ---
 
 ---
