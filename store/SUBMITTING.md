@@ -47,7 +47,65 @@ If the card is declined, the usual cause is a mismatch between the card's
 billing country and the Google Payments profile country. Fix it in
 <https://payments.google.com>.
 
+## 2b. Account settings: trader status and publisher name
+
+### Trader / non-trader
+
+**Declare: trader.**
+
+The item is published under **PoodlePop LLC**. The test the EEA rules apply is
+whether the publisher acts "for purposes relating to its trade, business, craft
+or profession" — a company publishing software does, and the fact that the
+extension is free does not change it. Non-trader is for individuals publishing
+outside any business capacity, which is not the case once an LLC is the
+publisher.
+
+**What declaring trader publishes.** The EU Digital Services Act requires the
+marketplace to show trader contact details to consumers, so Google publishes
+the following at the **bottom of the public listing**:
+
+- the legal entity name
+- a physical address
+- a contact telephone number
+
+Use PoodlePop LLC's registered business address and a business phone number.
+If the LLC is registered at a home address, set up a registered-agent or
+virtual business address before declaring, because this cannot be kept private
+afterwards. Google may also ask for documentation to verify the entity.
+
+Declaring non-trader avoids publishing those details but would be an inaccurate
+declaration here, and it tells EEA users that consumer protection rights do not
+apply to their contract with the publisher.
+
+### Publisher display name
+
+Set it to the name that should appear as "Offered by" on the listing. Keeping
+it consistent with the legal entity — **PoodlePop LLC** — avoids a mismatch
+between the "Offered by" line and the trader details published directly beneath
+it, which reads as a red flag to both reviewers and users.
+
+Change it under **Account** → **Account settings** → *Publisher display name*.
+It can be edited later, but every change to a published listing goes back
+through review.
+
 ## 3. Build the package
+
+> **Build from a clean tree.** `wxt build` packages whatever is on disk, not
+> whatever is committed. A dirty working tree — a half-finished feature, a
+> debugging edit — ships to the store and cannot be unshipped without another
+> review cycle. Check `git status` first, and if it is not clean, build from a
+> throwaway worktree at the commit you actually mean to release:
+>
+> ```bash
+> git worktree add ../abr-release <commit-or-tag>
+> cd ../abr-release
+> npm ci && npm test && npm run zip:store
+> ```
+>
+> This leaves the main checkout untouched, which matters if someone else is
+> working in it.
+
+From a clean tree:
 
 ```bash
 npm ci
@@ -55,11 +113,23 @@ npm test && npm run test:e2e     # don't ship a red build
 npm run zip:store
 ```
 
-This produces `.output/a-better-reviewer-1.0.0-chrome-store.zip` (~2.3 MB).
+This produces `.output/a-better-reviewer-<version>-chrome-store.zip` (~2.3 MB).
 
 **Use `zip:store`, not `zip`.** The store build omits the manifest `key` field,
 which the store rejects on a first upload. `npm run zip` keeps the key for
 local unpacked installs.
+
+**Check the manifest matches what the listing claims**, because the permission
+justifications describe it:
+
+```bash
+node -e "const m=require('./.output/chrome-mv3-store/manifest.json');console.log(JSON.stringify({v:m.version,perms:m.permissions,host:m.host_permissions,cs:m.content_scripts.map(c=>c.matches)},null,1))"
+```
+
+In particular, the content script's `matches` decides which of the two
+`https://github.com/*` justifications in [LISTING.md](LISTING.md) is the
+truthful one. Sending the wrong one is the kind of mismatch that gets an item
+rejected.
 
 ## 4. Create the item
 

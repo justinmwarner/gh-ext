@@ -104,6 +104,18 @@ This is GitHub's API, and it is the sole data source for the extension. It is us
 
 **Host permission — `https://github.com/*`**
 
+> ⚠️ **This justification describes a content script matched to the whole of
+> github.com.** It is only truthful for a build whose manifest says
+> `"matches": ["https://github.com/*"]`. A build that still matches
+> `https://github.com/*/*/pull/*` needs the narrower wording instead — say the
+> script runs on pull request pages and drop the single-page-app paragraph.
+>
+> Check before pasting, using the manifest command in step 3 of
+> [SUBMITTING.md](SUBMITTING.md). A justification broader than the manifest
+> invites questions that are not there to answer; one narrower than the
+> manifest is a misrepresentation, and that is the kind of mismatch items get
+> rejected for.
+
 ```
 Two uses. First, a content script runs on github.com to add the card that opens the review interface. It is registered for the whole site rather than only /*/*/pull/* because GitHub is a single-page app: a script matched to pull request URLs alone is never injected when the user reaches a pull request by navigating within the site, so the card would be missing until they reloaded. The script reads only the page's URL, adds nothing on any page that is not a pull request, and never reads page content. Second, some file contents and diffs are fetched from github.com directly, because GitHub's API does not expose them in a usable form for large or binary files. Requests are authenticated with the user's own personal access token.
 ```

@@ -1,6 +1,7 @@
 # Privacy Policy — A Better Reviewer
 
 **Last updated: 8 September 2026**
+**Published by: PoodlePop LLC**
 
 A Better Reviewer is a browser extension that shows a faster review interface
 for GitHub pull requests. This policy describes exactly what it does with your
@@ -9,7 +10,7 @@ data.
 ## The short version
 
 The extension has no server. Nothing you do in it is sent anywhere except to
-GitHub, using a token you supply yourself. The developer cannot see your
+GitHub, using a token you supply yourself. PoodlePop LLC cannot see your
 repositories, your reviews, your token, or the fact that you installed it.
 
 ## What is stored, and where
@@ -64,8 +65,8 @@ crash reporting, no advertising, and no third-party service of any kind.
 
 ## What is not collected
 
-The developer of this extension receives **no data whatsoever**. Specifically,
-the extension does not collect, transmit, sell, or share:
+PoodlePop LLC receives **no data whatsoever** from this extension.
+Specifically, the extension does not collect, transmit, sell, or share:
 
 - Personally identifiable information
 - Health, financial, or payment information
@@ -88,8 +89,15 @@ creditworthiness or for lending purposes.
   requests and post the review actions you take. These are the only hosts the
   extension can reach.
 
-The extension requests no other permissions. It cannot read tabs other than the
-GitHub pull request pages it runs on, and it cannot see your browsing history.
+The extension requests no other permissions and cannot see your browsing
+history.
+
+Its content script is registered for github.com as a whole rather than for pull
+request URLs alone, because GitHub is a single-page app and a script matched to
+pull request URLs is never injected when you reach a pull request by clicking a
+link within the site. On any page that is not a pull request it reads the URL,
+finds nothing to do, and adds nothing. It never reads the content of any page,
+and it cannot reach any site other than github.com.
 
 ## Remote code
 
@@ -111,7 +119,20 @@ to end the extension's access to your GitHub account.
 The extension is open source. The claims above can be checked against the code
 at <https://github.com/justinmwarner/gh-ext>.
 
+## Who is responsible for this extension
+
+A Better Reviewer is published by **PoodlePop LLC**, which is the data
+controller for the purposes of the GDPR — although, as set out above, the
+extension transmits no personal data to PoodlePop LLC at all.
+
+Because PoodlePop LLC is a trader for the purposes of EU consumer protection
+law, its legal name, registered address and contact telephone number are shown
+publicly on the extension's Chrome Web Store listing.
+
 ## Contact
 
+<!-- TODO: replace with the business contact address used on the store listing,
+     so the two match. -->
 Questions about this policy: open an issue at
-<https://github.com/justinmwarner/gh-ext/issues>.
+<https://github.com/justinmwarner/gh-ext/issues>, or contact PoodlePop LLC at
+the address shown on the extension's Chrome Web Store listing.
