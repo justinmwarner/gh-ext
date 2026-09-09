@@ -49,6 +49,13 @@ Then in Chrome:
 2. Turn on **Developer mode** (top right)
 3. **Load unpacked** → select `gh-ext/.output/chrome-mv3`
 
+Load `.output/chrome-mv3` — **never `.output/store/`**. The store build omits
+the manifest `key` on purpose, so Chrome gives it a random id: it gets its own
+empty token vault, it is indistinguishable from the real one in the extensions
+list, and it lives in a directory the release scripts delete and recreate. When
+that happens the extension stays registered with its files gone and every page
+it opens fails with `ERR_FILE_NOT_FOUND`. Remove it and load `.output/chrome-mv3`.
+
 A source build pins the extension id to `kpjeagilmchpoganlnllmhloplapcnoj`, so
 it is the same on every machine. A store install gets its own id from Google
 instead, which is why the two cannot see each other's saved token — extension

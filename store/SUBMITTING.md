@@ -145,6 +145,14 @@ the unpacked build that `test:e2e` loads.
 which the store rejects on a first upload. `npm run zip` keeps the key for
 local unpacked installs.
 
+> **Never load `.output/store/` as an unpacked extension.** Without the `key`
+> Chrome assigns it a random id, so it gets its own empty token vault and looks
+> identical to the real install in the extensions list. Worse, the release
+> scripts delete and recreate that directory: the extension stays registered
+> with its files gone, the content script keeps running from memory, and every
+> page it opens fails with `ERR_FILE_NOT_FOUND` — which looks like a bug in the
+> extension rather than a stale install. Load `.output/chrome-mv3`.
+
 **Check the manifest matches what the listing claims**, because the permission
 justifications describe it:
 
