@@ -22,6 +22,7 @@
     "test:e2e:only": "playwright test",
     "icons": "node scripts/make-icons.mjs",
     "screenshots": "wxt build && playwright test --config playwright.screenshots.config.ts",
+    "shots:card": "wxt build && playwright test --config playwright.screenshots.config.ts card.shot",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

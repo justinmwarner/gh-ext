@@ -44,6 +44,68 @@ const NAME = 'A Better Reviewer';
 const CTA = 'Start a Better Review';
 
 /**
+ * The extension's icon, inline.
+ *
+ * The same geometry as `store/icon.svg` and therefore the same thing the
+ * reviewer sees in their toolbar and on the store listing. Drawn rather than
+ * loaded from `web_accessible_resources`, because making an extension file
+ * fetchable by the page would let github.com probe for it and fingerprint the
+ * install — the same reason the review page is not web-accessible.
+ *
+ * Colours are fixed rather than themed. It is a logo: it does not change
+ * because the page did, any more than the toolbar icon does.
+ */
+/** The bars, as [x, y, width, fill] in the icon's 128-unit grid. */
+const MARK_BARS: [number, number, number, string][] = [
+  [24, 34, 80, '#3fb950'],
+  [24, 58, 52, '#f85149'],
+  [24, 82, 66, '#8b949e'],
+];
+
+/**
+ * The extension's icon, drawn as DOM.
+ *
+ * The same geometry as `store/icon.svg`, so the card carries the mark the
+ * reviewer already knows from their toolbar and the store listing.
+ *
+ * Drawn rather than loaded from a file, because making an extension resource
+ * fetchable by the page would let github.com probe for it and fingerprint the
+ * install — the same reason the review page is not web-accessible. Built node
+ * by node rather than assigned as `innerHTML`, because a review linter flags
+ * every `innerHTML` and this one would buy nothing.
+ *
+ * The colours do not follow the page theme. It is a logo: it no more changes
+ * with GitHub's theme than the toolbar icon does.
+ */
+function createMark(doc: Document): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = doc.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'mark');
+  svg.setAttribute('viewBox', '0 0 128 128');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  const tile = doc.createElementNS(NS, 'rect');
+  tile.setAttribute('width', '128');
+  tile.setAttribute('height', '128');
+  tile.setAttribute('rx', '28');
+  tile.setAttribute('fill', '#0d1117');
+  svg.append(tile);
+
+  for (const [x, y, width, fill] of MARK_BARS) {
+    const bar = doc.createElementNS(NS, 'rect');
+    bar.setAttribute('x', String(x));
+    bar.setAttribute('y', String(y));
+    bar.setAttribute('width', String(width));
+    bar.setAttribute('height', '14');
+    bar.setAttribute('rx', '7');
+    bar.setAttribute('fill', fill);
+    svg.append(bar);
+  }
+  return svg;
+}
+
+/**
  * Primer's palette, hard-coded.
  *
  * Reading GitHub's CSS custom properties would track their themes exactly, but
@@ -85,12 +147,35 @@ const STYLES = `
     justify-content: space-between;
     gap: 12px;
   }
+  /* The icon, at the size it stays legible. Its own rounding is part of the
+     artwork, so it is not clipped or re-rounded here. */
+  .mark {
+    display: block;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    /* 28/128 of the artwork's own corner radius, at 22px. Matched so the ring
+       below sits on the tile's edge rather than outside it. */
+    border-radius: 5px;
+    /* The tile is near-black, and so is the card in dark mode: without this
+       the tile vanishes and the mark reads as three bars floating in space.
+       A hairline boundary rather than a lighter tile, so the logo itself is
+       the same artwork on both themes. */
+    box-shadow: 0 0 0 1px light-dark(transparent, rgba(240, 246, 252, 0.14));
+  }
+  /* Sentence case, and quieter than the button. This is a label saying whose
+     card this is, not the thing the reviewer came for. It used to be uppercase
+     and letter-spaced, which made the least important element the loudest. */
   .name {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+    font-size: 13px;
+    font-weight: 500;
     color: light-dark(#59636e, #9198a1);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
   button {
     font: inherit;
@@ -121,6 +206,7 @@ const STYLES = `
   .cta {
     padding: 9px 16px;
     font-weight: 600;
+    transition: background 120ms ease-out;
     color: #ffffff;
     background: light-dark(#1f883d, #238636);
     border-color: light-dark(rgba(31, 35, 40, 0.15), rgba(240, 246, 252, 0.1));
@@ -137,10 +223,11 @@ const STYLES = `
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
-    font-size: 12px;
-    font-weight: 600;
+    padding: 7px 14px 7px 8px;
+    font-size: 13px;
+    font-weight: 500;
     border-radius: 999px;
+    transition: color 120ms ease-out, box-shadow 120ms ease-out;
     border-color: light-dark(#d1d9e0, #3d444d);
     background: light-dark(#ffffff, #151b23);
     color: light-dark(#59636e, #9198a1);
@@ -149,11 +236,29 @@ const STYLES = `
   .pill:hover {
     color: light-dark(#1f2328, #e6edf3);
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: light-dark(#1f883d, #238636);
+  /* Entrance. The default state is the visible one and the animation only
+     plays from hidden to it, so a browser that never runs it — a headless
+     render, an extension that blocks animation — still shows the card. */
+  .card,
+  .pill {
+    animation: rise 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card,
+    .pill {
+      animation: none;
+    }
+    .cta,
+    .collapse,
+    .pill {
+      transition: none;
+    }
   }
 `;
 
@@ -208,9 +313,12 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
   const head = doc.createElement('div');
   head.className = 'head';
 
+  const brand = doc.createElement('div');
+  brand.className = 'brand';
   const name = doc.createElement('span');
   name.className = 'name';
   name.textContent = NAME;
+  brand.append(createMark(doc), name);
 
   const collapse = doc.createElement('button');
   collapse.className = 'collapse';
@@ -232,13 +340,11 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
   pill.className = 'pill';
   pill.type = 'button';
   pill.setAttribute('aria-label', `Expand ${NAME}`);
-  const dot = doc.createElement('span');
-  dot.className = 'dot';
   const pillText = doc.createElement('span');
   pillText.textContent = NAME;
-  pill.append(dot, pillText);
+  pill.append(createMark(doc), pillText);
 
-  head.append(name, collapse);
+  head.append(brand, collapse);
   card.append(head, cta, status);
   layer.append(card, pill);
   root.append(layer);
