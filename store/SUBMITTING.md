@@ -9,9 +9,9 @@ Budget: about 30 minutes of work, then days to weeks of waiting for review.
 
 | Store | Package | Fee | Reaches |
 |---|---|---|---|
-| **Chrome Web Store** | `…-chrome-store.zip` | $5 once | Chrome, Edge, Brave, Arc, Vivaldi |
+| **Chrome Web Store** | `…-chrome.zip` | $5 once | Chrome, Edge, Brave, Arc, Vivaldi |
 | Firefox Add-ons (AMO) | `…-firefox.zip` + `…-sources.zip` | free | Firefox |
-| Edge Add-ons | `…-chrome-store.zip` | free | Edge only |
+| Edge Add-ons | `…-chrome.zip` | free | Edge only |
 
 Build all of them with:
 
@@ -137,7 +137,9 @@ npm test && npm run test:e2e     # don't ship a red build
 npm run zip:store
 ```
 
-This produces `.output/a-better-reviewer-<version>-chrome-store.zip` (~2.3 MB).
+This produces `.output/store/a-better-reviewer-<version>-chrome.zip` (~2.3 MB).
+The store build has its own output directory so it can never be mistaken for
+the unpacked build that `test:e2e` loads.
 
 **Use `zip:store`, not `zip`.** The store build omits the manifest `key` field,
 which the store rejects on a first upload. `npm run zip` keeps the key for
@@ -147,7 +149,7 @@ local unpacked installs.
 justifications describe it:
 
 ```bash
-node -e "const m=require('./.output/chrome-mv3-store/manifest.json');console.log(JSON.stringify({v:m.version,perms:m.permissions,host:m.host_permissions,cs:m.content_scripts.map(c=>c.matches)},null,1))"
+node -e "const m=require('./.output/store/chrome-mv3/manifest.json');console.log(JSON.stringify({v:m.version,perms:m.permissions,host:m.host_permissions,cs:m.content_scripts.map(c=>c.matches)},null,1))"
 ```
 
 In particular, the content script's `matches` decides which of the two
@@ -295,7 +297,7 @@ Free. Uses the same Chromium package as Chrome.
 
 1. <https://partner.microsoft.com/dashboard/microsoftedge/> — register with a
    Microsoft or GitHub account, no fee
-2. **Create new extension** → upload `…-chrome-store.zip`
+2. **Create new extension** → upload `…-chrome.zip`
 3. Reuse the listing copy, screenshots and privacy policy from
    [LISTING.md](LISTING.md)
 
@@ -305,3 +307,100 @@ applies. Review is usually faster than Chrome's.
 Worth repeating: this listing only reaches people who would not simply install
 the Chrome Web Store version in Edge. Publish it if you want Edge users to find
 the extension by searching Edge Add-ons; skip it otherwise.
+
+---
+
+# Automating releases
+
+`.github/workflows/release.yml` builds, verifies and submits to every store
+whose credentials are configured. Push a version tag and it does the rest.
+
+```bash
+npm version patch      # bumps package.json and creates the tag
+git push --follow-tags
+```
+
+The workflow typechecks, runs the unit suite, runs the e2e suite against a real
+Chromium, builds both packages, and submits. It refuses to release if the tag
+does not match `package.json` — a mismatch would ship a package whose manifest
+disagrees with the release it came from.
+
+## A store is opted in by its secrets
+
+`scripts/submit.mjs` decides which stores are in play by looking at which
+secrets are set. Adding a store to your releases means adding its secrets and
+nothing else; there is no workflow to edit and no flag to remember.
+
+This is deliberate for Firefox in particular. Nothing has run this extension in
+Firefox yet, so releases should not start submitting there until somebody has
+decided it is ready.
+
+Repository → Settings → Secrets and variables → Actions.
+
+### Chrome Web Store
+
+| Secret | Where it comes from |
+|---|---|
+| `CHROME_EXTENSION_ID` | The item's ID, from the developer dashboard URL |
+| `CHROME_PUBLISHER_ID` | Account → publisher ID on the dashboard |
+| `CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL` | A Google Cloud service account |
+| `CHROME_SERVICE_ACCOUNT_PRIVATE_KEY` | That service account's JSON key, `private_key` field |
+
+Create a Google Cloud project, enable the **Chrome Web Store API**, create a
+service account, and download its JSON key. Then invite the service account's
+email address as a user on the Chrome Web Store publisher account — the API
+call is made *as* that account, so without the invitation it authenticates
+fine and then cannot see your item.
+
+Paste the private key including the `-----BEGIN PRIVATE KEY-----` lines and the
+newlines. GitHub secrets handle multi-line values; this is why it is passed
+through the environment rather than as a command-line flag.
+
+The workflow pins `CHROME_API_VERSION: v2`. The older v1.1 credentials
+(`CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN`) still work
+but Google has deprecated them.
+
+### Firefox Add-ons
+
+| Secret | Where it comes from |
+|---|---|
+| `FIREFOX_EXTENSION_ID` | `a-better-reviewer@justinmwarner.github.io` |
+| `FIREFOX_JWT_ISSUER` | AMO → Developer Hub → Manage API Keys |
+| `FIREFOX_JWT_SECRET` | Same page |
+
+The sources zip is attached automatically. It is required, not optional — the
+submission is minified and AMO cannot review it otherwise.
+
+### Edge Add-ons
+
+| Secret | Where it comes from |
+|---|---|
+| `EDGE_PRODUCT_ID` | Partner Center, the extension's product ID |
+| `EDGE_CLIENT_ID` | Partner Center → Publish API |
+| `EDGE_API_KEY` | Same page |
+
+Edge is submitted the Chrome package unchanged.
+
+## Check the credentials without uploading
+
+Actions → Release → **Run workflow**, leaving *dry run* ticked. It authenticates
+against every configured store and uploads nothing. Do this once after adding
+secrets — a credential problem discovered during a real release leaves you
+guessing whether the upload half-happened.
+
+Locally:
+
+```bash
+npm run submit:dry
+```
+
+## What it does not do
+
+- **It does not create the listing.** The first submission of a new item is
+  manual: the description, screenshots, privacy policy and permission
+  justifications all have to exist before the API will accept an upload. This
+  automates updates, not the initial publication.
+- **It does not edit listing copy.** Changing the description or screenshots
+  stays a dashboard job.
+- **It does not bypass review.** Every submitted update is queued like any
+  other.

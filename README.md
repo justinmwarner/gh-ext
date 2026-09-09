@@ -127,7 +127,7 @@ Then hit the reload icon on the extension card in `chrome://extensions`.
 
 ```bash
 npm version patch      # or minor / major — the manifest version comes from here
-npm run zip:store      # → .output/a-better-reviewer-<version>-chrome-store.zip
+npm run zip:store      # → .output/store/a-better-reviewer-<version>-chrome.zip
 ```
 
 Upload that zip to the [developer dashboard](https://chrome.google.com/webstore/devconsole).

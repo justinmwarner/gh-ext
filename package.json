@@ -12,6 +12,8 @@
     "zip": "wxt zip",
     "build:store": "node scripts/store-build.mjs build",
     "zip:store": "node scripts/store-build.mjs zip",
+    "submit": "node scripts/submit.mjs",
+    "submit:dry": "node scripts/submit.mjs --dry",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
