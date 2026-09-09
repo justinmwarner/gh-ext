@@ -63,7 +63,7 @@ BRING YOUR OWN TOKEN
 
 The extension has no server and no account. It talks to GitHub using a fine-grained personal access token that you create and control, scoped to only the repositories you choose. The Options page walks you through creating one with exactly the right permissions.
 
-Your token is encrypted on your own machine with a passphrase you choose — PBKDF2 key derivation and AES-GCM, with only the ciphertext written to disk. The decrypted token is held in memory for the browser session and never written to a file. The passphrase is never stored and never transmitted.
+If you want it, the token can be encrypted on your own machine with a passphrase you choose — PBKDF2 key derivation and AES-GCM, with only the ciphertext written to disk, and the decrypted token held in memory for the browser session. This is optional and off by default; you can turn it on when you save the token or long afterwards, and turn it off again. The passphrase is never stored and never transmitted, so it also cannot be recovered.
 
 To be plain about the limit of that: encryption protects the token against anything reading your browser profile off disk. It cannot protect against code running inside the extension itself while it is unlocked. That is true of every browser extension that holds a credential.
 
@@ -99,7 +99,7 @@ A Better Reviewer provides an alternative interface for reviewing GitHub pull re
 **`storage`**
 
 ```
-Stores the user's GitHub personal access token, encrypted with a passphrase they choose, so they do not have to re-enter it. Also stores unsent comment drafts so a failed network request does not lose the user's typing, and which files the user has marked as viewed so they can track progress through a large diff. All of this is local to the user's browser; none of it is transmitted anywhere.
+Stores the user's GitHub personal access token so they do not have to re-enter it. The user may optionally protect it with a passphrase, in which case only the encrypted form is stored. Also stores unsent comment drafts so a failed network request does not lose the user's typing, and which files the user has marked as viewed so they can track progress through a large diff. All of this is local to the user's browser; none of it is transmitted anywhere.
 ```
 
 **Host permission — `https://api.github.com/*`**

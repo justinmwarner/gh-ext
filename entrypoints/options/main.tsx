@@ -1,8 +1,8 @@
 /**
  * The options page.
  *
- * It seals the token into `storage.local` under a passphrase and asks the
- * background worker to check it. The page never calls GitHub itself — the
+ * It stores the token — encrypted under a passphrase if the reviewer asked for
+ * that, plainly if they did not — and asks the background worker to check it. The page never calls GitHub itself — the
  * worker owns the only `GitHubClient`, so rate limit accounting stays in one
  * place.
  *
@@ -225,6 +225,9 @@ function App() {
   const [token, setToken] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [confirm, setConfirm] = useState('');
+  // Unchecked by default. Encryption is worth offering and not worth forcing:
+  // a setup step nobody asked for is where people give up.
+  const [usePassphrase, setUsePassphrase] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitSnapshot | null>(null);
@@ -251,6 +254,7 @@ function App() {
     setToken('');
     setPassphrase('');
     setConfirm('');
+    setUsePassphrase(false);
   }, []);
 
   /**
@@ -290,28 +294,41 @@ function App() {
   }, [passphrase, confirm]);
 
   const save = useCallback(async () => {
+    if (!usePassphrase) {
+      await run(() => tokens.save(token), 'Token saved.');
+      return;
+    }
     const problem = passphraseIssue();
     if (problem !== null) {
       setResult({ tone: 'bad', text: problem });
       return;
     }
     // A token that cannot be sent is refused inside `save`, where the reviewer
-    // can still see what they pasted, rather than sealed and left to fail as an
+    // can still see what they pasted, rather than stored and left to fail as an
     // unrecognizable TypeError on the first request.
-    await run(() => tokens.save(token, passphrase), 'Token encrypted and unlocked.');
-  }, [passphraseIssue, run, token, passphrase]);
+    await run(() => tokens.save(token, passphrase), 'Token encrypted and saved.');
+  }, [usePassphrase, passphraseIssue, run, token, passphrase]);
 
-  const migrate = useCallback(async () => {
+  const encrypt = useCallback(async () => {
     const problem = passphraseIssue();
     if (problem !== null) {
       setResult({ tone: 'bad', text: problem });
       return;
     }
     await run(
-      () => tokens.migrate(passphrase),
-      'Your existing token is now encrypted. The plaintext copy has been deleted.',
+      () => tokens.encrypt(passphrase),
+      'Token encrypted. The unencrypted copy has been deleted.',
     );
   }, [passphraseIssue, run, passphrase]);
+
+  const decrypt = useCallback(
+    () =>
+      run(
+        () => tokens.decrypt(),
+        'Passphrase removed. The token is stored unencrypted from now on.',
+      ),
+    [run],
+  );
 
   const unlock = useCallback(
     () => run(() => tokens.unlock(passphrase), 'Unlocked for this browser session.'),
@@ -429,9 +446,9 @@ function App() {
           <code>github_pat_</code>.
         </li>
         <li>
-          Paste it below and choose a passphrase to encrypt it with, then press{' '}
-          <strong>Encrypt and save</strong>. The token is encrypted on this
-          machine and unlocked with that passphrase once per browser session.
+          Paste it below and press <strong>Save token</strong>. That is the
+          whole setup — a passphrase is offered on the same screen and is
+          entirely optional.
         </li>
       </ol>
 
@@ -453,55 +470,81 @@ function App() {
         onChange={(event) => setToken(event.target.value)}
       />
 
-      <label htmlFor="passphrase">Passphrase</label>
-      <input
-        id="passphrase"
-        type="password"
-        value={passphrase}
-        autoComplete="new-password"
-        spellCheck={false}
-        onChange={(event) => setPassphrase(event.target.value)}
-      />
-      <label htmlFor="confirm">Passphrase again</label>
-      <input
-        id="confirm"
-        type="password"
-        value={confirm}
-        autoComplete="new-password"
-        spellCheck={false}
-        onChange={(event) => setConfirm(event.target.value)}
-      />
-      <p className="hint">
-        The passphrase encrypts the token on this machine. It is never stored
-        and never sent anywhere, so it cannot be recovered — if you forget it,
-        delete the token and paste a new one. A few ordinary words work better
-        than one short cryptic one.
-      </p>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={usePassphrase}
+          onChange={(event) => setUsePassphrase(event.target.checked)}
+        />
+        <span>
+          Protect it with a passphrase
+          <span className="hint">
+            Optional. Without one the token is stored as it stands, which is
+            what browser extensions normally do. With one it is encrypted on
+            this machine, and you enter the passphrase once per browser
+            session.
+          </span>
+        </span>
+      </label>
+
+      {usePassphrase && (
+        <>
+          <label htmlFor="passphrase">Passphrase</label>
+          <input
+            id="passphrase"
+            type="password"
+            value={passphrase}
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => setPassphrase(event.target.value)}
+          />
+          <label htmlFor="confirm">Passphrase again</label>
+          <input
+            id="confirm"
+            type="password"
+            value={confirm}
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => setConfirm(event.target.value)}
+          />
+          <p className="hint">
+            Never stored and never sent anywhere, so it cannot be recovered — if
+            you forget it, delete the token and paste a new one. A few ordinary
+            words beat one short cryptic one.
+          </p>
+        </>
+      )}
 
       <div className="actions">
         <button type="button" onClick={() => void save()} disabled={busy}>
-          Encrypt and save
+          Save token
         </button>
       </div>
         </>
       )}
 
-      {vault === 'legacy' && (
+      {vault === 'plain' && (
         <>
-          <div className="warning">
-            <h2>Your token is stored unencrypted</h2>
-            <p>
-              This machine has a token saved from before this extension
-              encrypted them. It is sitting in <code>chrome.storage.local</code>{' '}
-              as plain text, readable by anything that can read this browser
-              profile's files.
-            </p>
-            <p>
-              Set a passphrase to encrypt it. The plaintext copy is deleted as
-              soon as the encrypted one is written. Reviewing is disabled until
-              then.
-            </p>
+          <p>
+            A token is saved on this machine. It is not encrypted, which is the
+            default and is how browser extensions normally hold a credential.
+          </p>
+
+          <div className="actions">
+            <button type="button" onClick={() => void validate()} disabled={busy}>
+              Validate saved token
+            </button>
+            <button type="button" onClick={() => void clear()} disabled={busy}>
+              Delete token
+            </button>
           </div>
+
+          <h2>Add a passphrase</h2>
+          <p className="hint">
+            Encrypts the token on this machine so it cannot be read off disk.
+            You will not need to re-enter the token, and you can remove the
+            passphrase again later.
+          </p>
 
           <label htmlFor="passphrase">Passphrase</label>
           <input
@@ -523,11 +566,8 @@ function App() {
           />
 
           <div className="actions">
-            <button type="button" onClick={() => void migrate()} disabled={busy}>
-              Encrypt my existing token
-            </button>
-            <button type="button" onClick={() => void clear()} disabled={busy}>
-              Delete it instead
+            <button type="button" onClick={() => void encrypt()} disabled={busy}>
+              Encrypt this token
             </button>
           </div>
         </>
@@ -581,6 +621,9 @@ function App() {
             </button>
             <button type="button" onClick={() => void lock()} disabled={busy}>
               Lock now
+            </button>
+            <button type="button" onClick={() => void decrypt()} disabled={busy}>
+              Remove passphrase
             </button>
             <button type="button" onClick={() => void clear()} disabled={busy}>
               Delete token

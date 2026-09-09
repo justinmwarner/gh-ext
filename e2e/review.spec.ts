@@ -1467,6 +1467,48 @@ test('clearing the token stops the cache serving the pull request', async ({
   expect(api.urls.length).toBe(before);
 });
 
+test('a token works with no passphrase at all, and can be encrypted later', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The default path. Encryption is opt-in, so the setup a new install
+  // actually walks through is: paste a token, press save, review.
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('the extension worker never started');
+  await worker.evaluate(async () => {
+    const chromeApi = (globalThis as unknown as {
+      chrome: { storage: { session: { remove(keys: string): Promise<void> } } };
+    }).chrome;
+    await chromeApi.storage.session.remove('github-token-unlocked');
+  });
+
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.getByLabel('GitHub fine-grained personal access token').fill('ghp_fixture_token');
+  await options.getByRole('button', { name: 'Save token' }).click();
+  await expect(options.getByText(/^Token saved\./)).toBeVisible();
+
+  // Usable straight away, and with no passphrase to enter.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+
+  // And it survives what would lock an encrypted one, because there is
+  // nothing to lock.
+  await page.reload();
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+
+  // Encryption can be added afterwards without re-entering the token.
+  await options.reload();
+  await options.getByLabel('Passphrase', { exact: true }).fill('correct horse battery staple');
+  await options.getByLabel('Passphrase again').fill('correct horse battery staple');
+  await options.getByRole('button', { name: 'Encrypt this token' }).click();
+  await expect(options.getByText(/unencrypted copy has been deleted/i)).toBeVisible();
+  await expect(options.getByRole('button', { name: 'Remove passphrase' })).toBeVisible();
+  void api;
+});
+
 test('a token can be encrypted, locked, and unlocked again', async ({
   context,
   extensionId,
@@ -1492,10 +1534,13 @@ test('a token can be encrypted, locked, and unlocked again', async ({
   await options.goto(`chrome-extension://${extensionId}/options.html`);
 
   await options.getByLabel('GitHub fine-grained personal access token').fill('ghp_fixture_token');
+  // The passphrase fields only exist once encryption is asked for, which is
+  // the point of this change: the default path never sees them.
+  await options.getByLabel(/protect it with a passphrase/i).check();
   await options.getByLabel('Passphrase', { exact: true }).fill(PASSPHRASE);
   await options.getByLabel('Passphrase again').fill(PASSPHRASE);
-  await options.getByRole('button', { name: 'Encrypt and save' }).click();
-  await expect(options.getByText(/encrypted and unlocked/i)).toBeVisible();
+  await options.getByRole('button', { name: 'Save token' }).click();
+  await expect(options.getByText(/encrypted and saved/i)).toBeVisible();
 
   // Sealed, and usable straight away.
   const page = await context.newPage();

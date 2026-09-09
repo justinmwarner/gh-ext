@@ -64,9 +64,10 @@ once more.
 
 ### Give it a token
 
-Open the extension's **Options** page, paste a
-[fine-grained personal access token](https://github.com/settings/tokens?type=beta),
-and choose a passphrase to encrypt it with.
+Open the extension's **Options** page and paste a
+[fine-grained personal access token](https://github.com/settings/tokens?type=beta).
+That is the whole setup. Encrypting it behind a passphrase is offered on the
+same screen and is entirely optional.
 
 Required permissions:
 
@@ -89,6 +90,16 @@ hidden — but the checks will be incomplete or absent until it is granted.
 into your Google account. Set a token once per machine.
 
 #### How the token is stored
+
+**By default, unencrypted**, in `chrome.storage.local` — the same thing every
+browser extension does with a credential it has to keep. There is no passphrase
+to set, nothing to unlock, and nothing to forget.
+
+Ticking **Protect it with a passphrase** changes that, and you can tick it when
+you first save the token or at any point later without re-entering it. The
+Options page will also take the passphrase back off again.
+
+The rest of this section is about what happens when you have set one.
 
 The passphrase derives a key with PBKDF2-HMAC-SHA256 (600,000 iterations), and
 that key encrypts the token with AES-GCM. Only the ciphertext, salt and IV go
@@ -113,9 +124,9 @@ it — so still scope the token to the repositories you review, give it the
 shortest expiry you can live with, and revoke it if you suspect the machine is
 compromised. **The token can write to your pull requests.**
 
-An install from before the vault keeps working until you open the Options page,
-which offers to encrypt the existing token. The plaintext copy is deleted the
-moment the encrypted one is written.
+Only one of the two forms exists at a time. Encrypting deletes the unencrypted
+copy, and removing the passphrase deletes the vault, so there is never a second
+credential on disk that nothing reads and nobody remembers is there.
 
 ### Updating
 

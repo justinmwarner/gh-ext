@@ -14,10 +14,12 @@ import type { KeyValueStore } from '../review/drafts';
 import { isVaultRecord, openVault, sealToken } from '../crypto/vault';
 
 /**
- * The pre-encryption plaintext token.
+ * The token, unencrypted, in `storage.local`.
  *
- * Only ever read now, never written. It exists so an install that predates the
- * vault can be migrated, and is deleted the moment it has been.
+ * A supported way to store it, not a legacy one. Encryption is opt-in: most
+ * people will never set a passphrase, and refusing to work until they do would
+ * be trading their willingness to use the extension for a protection they did
+ * not ask for.
  */
 export const TOKEN_KEY = 'github-token';
 
@@ -42,11 +44,15 @@ export type StorageAreaName = 'local' | 'session';
 
 /**
  * - `empty` — nothing configured.
- * - `legacy` — a plaintext token from before the vault, awaiting migration.
- * - `locked` — a vault exists and the passphrase has not been entered.
- * - `unlocked` — usable right now.
+ * - `plain` — a token stored without a passphrase. Usable, always.
+ * - `locked` — an encrypted token, and the passphrase has not been entered.
+ * - `unlocked` — an encrypted token, in use for this browser session.
+ *
+ * Only one of `plain` and the encrypted pair can exist at a time: every write
+ * clears the other representation, so there is never a stale copy of the token
+ * sitting behind the one in use.
  */
-export type VaultState = 'empty' | 'legacy' | 'locked' | 'unlocked';
+export type VaultState = 'empty' | 'plain' | 'locked' | 'unlocked';
 
 const area = (name: StorageAreaName) =>
   name === 'session' ? browser.storage.session : browser.storage.local;
@@ -64,39 +70,61 @@ const readString = async (name: StorageAreaName, key: string): Promise<string | 
  * can lock or replace the token at any moment, and the background worker holds
  * a single long-lived `GitHubClient` that must not outlive a sign-out.
  *
- * `getToken` returning null covers three different situations — nothing
- * configured, locked, and an unmigrated legacy token. Callers that only need a
- * token do not care which; the UI asks {@link state} to phrase it.
+ * `getToken` returning null means either nothing is configured or an encrypted
+ * token is locked. Callers that only need a token do not care which; the UI
+ * asks {@link state}, because "set one up" and "enter your passphrase" are very
+ * different things to be told.
  */
 export class ChromeTokenProvider implements TokenProvider {
+  /**
+   * The unlocked copy if there is one, otherwise the unencrypted token.
+   *
+   * Session first, so that an encrypted token in use wins over a plaintext one
+   * that a half-finished write left behind.
+   */
   async getToken(): Promise<string | null> {
-    return readString('session', SESSION_TOKEN_KEY);
+    const unlocked = await readString('session', SESSION_TOKEN_KEY);
+    if (unlocked !== null) return unlocked;
+    return readString('local', TOKEN_KEY);
   }
 
   async state(): Promise<VaultState> {
     if ((await readString('session', SESSION_TOKEN_KEY)) !== null) return 'unlocked';
     const stored = await browser.storage.local.get(VAULT_KEY);
     if (isVaultRecord(stored[VAULT_KEY])) return 'locked';
-    if ((await readString('local', TOKEN_KEY)) !== null) return 'legacy';
+    if ((await readString('local', TOKEN_KEY)) !== null) return 'plain';
     return 'empty';
   }
 
   /**
-   * Encrypt a token under a passphrase and leave it unlocked.
+   * Store a token, encrypted if a passphrase is given.
    *
-   * Throws for a token that cannot be sent, rather than sealing it and letting
+   * Omitting the passphrase is a supported choice, not a lesser one: the token
+   * goes to `storage.local` as it stands, which is what every browser
+   * extension holding a credential does by default.
+   *
+   * Throws for a token that cannot be sent, rather than storing it and letting
    * it fail opaquely on the first request. See {@link tokenProblem}.
    */
-  async save(token: string, passphrase: string): Promise<void> {
+  async save(token: string, passphrase?: string): Promise<void> {
     const problem = tokenProblem(token);
     if (problem !== null) throw new Error(problem);
 
     const trimmed = token.trim();
+
+    if (passphrase === undefined || passphrase === '') {
+      await browser.storage.local.set({ [TOKEN_KEY]: trimmed });
+      // Whatever was encrypted is gone: leaving the vault would mean a second
+      // credential on disk that nothing reads and nobody remembers is there.
+      await browser.storage.local.remove(VAULT_KEY);
+      await browser.storage.session.remove(SESSION_TOKEN_KEY);
+      return;
+    }
+
     const record = await sealToken(trimmed, passphrase);
     await browser.storage.local.set({ [VAULT_KEY]: record });
-    // A new token supersedes the old plaintext one. Leaving it behind would
-    // keep a working credential on disk after the reviewer believed they had
-    // encrypted it.
+    // The plaintext copy goes, or encrypting would leave the very thing it was
+    // meant to protect sitting beside it in the same storage area.
     await browser.storage.local.remove(TOKEN_KEY);
     await browser.storage.session.set({ [SESSION_TOKEN_KEY]: trimmed });
   }
@@ -118,17 +146,32 @@ export class ChromeTokenProvider implements TokenProvider {
   }
 
   /**
-   * Encrypt a pre-vault plaintext token under a passphrase.
+   * Add a passphrase to a token that was stored without one.
    *
-   * The plaintext is removed by {@link save}, so a half-finished migration
-   * cannot leave both copies on disk.
+   * Saves re-entering the token to encrypt it, which is the difference between
+   * a decision someone makes later and one they never get round to.
    */
-  async migrate(passphrase: string): Promise<void> {
-    const legacy = await readString('local', TOKEN_KEY);
-    if (legacy === null) {
-      throw new Error('There is no unencrypted token on this machine to migrate.');
+  async encrypt(passphrase: string): Promise<void> {
+    const plain = await readString('local', TOKEN_KEY);
+    if (plain === null) {
+      throw new Error('There is no unencrypted token on this machine to encrypt.');
     }
-    await this.save(legacy, passphrase);
+    await this.save(plain, passphrase);
+  }
+
+  /**
+   * Drop the passphrase and keep the token.
+   *
+   * Only possible while unlocked, because the token has to be readable to be
+   * written back — a locked vault has to be unlocked first, which is the same
+   * proof of the passphrase that removing it should require anyway.
+   */
+  async decrypt(): Promise<void> {
+    const token = await readString('session', SESSION_TOKEN_KEY);
+    if (token === null) {
+      throw new Error('Unlock the token before removing its passphrase.');
+    }
+    await this.save(token);
   }
 
   /** Remove every trace of the token: vault, session copy and legacy plaintext. */

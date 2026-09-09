@@ -81,10 +81,19 @@ describe('vault state', () => {
     await expect(provider.getToken()).resolves.toBeNull();
   });
 
-  test('reports a legacy plaintext token as needing migration', async () => {
+  test('reports a token saved without a passphrase as plain, not as a problem', async () => {
     local.raw.set(TOKEN_KEY, TOKEN);
 
-    await expect(new ChromeTokenProvider().state()).resolves.toBe('legacy');
+    await expect(new ChromeTokenProvider().state()).resolves.toBe('plain');
+  });
+
+  test('saving without a passphrase stores the token and leaves it usable', async () => {
+    const provider = new ChromeTokenProvider();
+
+    await provider.save(TOKEN);
+
+    await expect(provider.state()).resolves.toBe('plain');
+    await expect(provider.getToken()).resolves.toBe(TOKEN);
   });
 });
 
@@ -140,25 +149,72 @@ describe('unlocking', () => {
   });
 });
 
-describe('migrating a legacy plaintext token', () => {
-  test('a legacy token is not handed out before it has been encrypted', async () => {
+describe('an unencrypted token', () => {
+  test('is handed out, because the reviewer chose not to encrypt it', async () => {
+    // The whole point of making encryption optional. Refusing here would be
+    // the old behaviour: a token that exists, works, and is not returned.
     local.raw.set(TOKEN_KEY, TOKEN);
 
-    // Refusing here is what forces the migration. Returning it would keep the
-    // extension working and leave the plaintext on disk indefinitely.
-    await expect(new ChromeTokenProvider().getToken()).resolves.toBeNull();
+    await expect(new ChromeTokenProvider().getToken()).resolves.toBe(TOKEN);
   });
 
-  test('migrating seals the existing token and removes the plaintext', async () => {
-    local.raw.set(TOKEN_KEY, TOKEN);
+  test('can be encrypted later without re-entering it', async () => {
     const provider = new ChromeTokenProvider();
+    await provider.save(TOKEN);
 
-    await provider.migrate(PASSPHRASE);
+    await provider.encrypt(PASSPHRASE);
 
     expect(local.raw.has(TOKEN_KEY)).toBe(false);
     expect(JSON.stringify([...local.raw])).not.toContain(TOKEN);
     await expect(provider.state()).resolves.toBe('unlocked');
     await expect(provider.getToken()).resolves.toBe(TOKEN);
+  });
+
+  test('encrypting when there is nothing to encrypt fails rather than pretending', async () => {
+    await expect(new ChromeTokenProvider().encrypt(PASSPHRASE)).rejects.toThrow();
+  });
+});
+
+describe('turning encryption back off', () => {
+  test('decrypting keeps the token and removes the vault', async () => {
+    const provider = new ChromeTokenProvider();
+    await provider.save(TOKEN, PASSPHRASE);
+
+    await provider.decrypt();
+
+    await expect(provider.state()).resolves.toBe('plain');
+    await expect(provider.getToken()).resolves.toBe(TOKEN);
+    expect(local.raw.has(VAULT_KEY)).toBe(false);
+  });
+
+  test('decrypting a locked vault fails, because the token cannot be read', async () => {
+    const provider = new ChromeTokenProvider();
+    await provider.save(TOKEN, PASSPHRASE);
+    session.raw.clear();
+
+    await expect(provider.decrypt()).rejects.toThrow();
+  });
+});
+
+describe('switching between the two', () => {
+  test('saving with a passphrase leaves no plaintext behind', async () => {
+    const provider = new ChromeTokenProvider();
+    await provider.save(TOKEN);
+
+    await provider.save(TOKEN, PASSPHRASE);
+
+    expect(local.raw.has(TOKEN_KEY)).toBe(false);
+    expect(JSON.stringify([...local.raw])).not.toContain(TOKEN);
+  });
+
+  test('saving without a passphrase over an encrypted token removes the vault', async () => {
+    const provider = new ChromeTokenProvider();
+    await provider.save(TOKEN, PASSPHRASE);
+
+    await provider.save(TOKEN);
+
+    expect(local.raw.has(VAULT_KEY)).toBe(false);
+    await expect(provider.state()).resolves.toBe('plain');
   });
 });
 

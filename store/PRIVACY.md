@@ -20,7 +20,7 @@ account and nothing leaves your machine except requests to GitHub.
 
 | What | Where | Notes |
 |---|---|---|
-| Your GitHub personal access token | `chrome.storage.local` | Encrypted with a passphrase you choose |
+| Your GitHub personal access token | `chrome.storage.local` | Encrypted with a passphrase, if you chose one |
 | The decrypted token, while unlocked | `chrome.storage.session` | Memory only; discarded when the browser closes |
 | Cached pull request data | `chrome.storage.session` | Memory only; discarded when the browser closes, and cleared when you lock or sign out |
 | Unsent comment drafts | `chrome.storage.local` | So a failed post does not lose what you typed |
@@ -30,6 +30,14 @@ account and nothing leaves your machine except requests to GitHub.
 credentials to every browser signed into your Google account.
 
 ### How the token is protected
+
+**Encryption is optional.** By default the token is stored as it stands in
+`chrome.storage.local`, which is what browser extensions normally do with a
+credential. If you would rather it were encrypted, set a passphrase on the
+Options page — you can do that when you first save the token or at any point
+afterwards, and you can remove it again.
+
+The rest of this section describes what happens when you have set one.
 
 The passphrase you choose derives a key using PBKDF2-HMAC-SHA256 with 600,000
 iterations. That key encrypts the token with AES-GCM. Only the ciphertext, a
@@ -43,6 +51,8 @@ which is memory-only.
 
 **What this protects against:** someone reading your browser profile off disk —
 another program running under your user account, a backup, or a lost laptop.
+Without a passphrase you do not have this protection, which is the trade
+being offered rather than hidden.
 
 **What this does not protect against:** code running inside the extension
 itself. While unlocked, the token is in memory. This is true of every browser
@@ -83,8 +93,9 @@ creditworthiness or for lending purposes.
 
 ## Permissions, and why each is needed
 
-- **`storage`** — to save the encrypted token, your comment drafts, and which
-  files you have marked as viewed. All of it local.
+- **`storage`** — to save the token, encrypted if you set a passphrase, plus
+  your comment drafts and which files you have marked as viewed. All of it
+  local.
 - **`https://github.com/*` and `https://api.github.com/*`** — to read pull
   requests and post the review actions you take. These are the only hosts the
   extension can reach.
