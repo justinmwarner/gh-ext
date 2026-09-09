@@ -1525,6 +1525,43 @@ test('a token can be encrypted, locked, and unlocked again', async ({
   void api;
 });
 
+test('says nothing to the console unless the reviewer asked it to', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The console belongs to whoever opened it, and this extension runs a
+  // content script on every github.com page. Logging uninvited puts noise in
+  // the middle of someone else's debugging, permanently.
+  //
+  // Asserted in a real browser rather than by unit test because the gate has
+  // to hold in three separate module registries — the worker, the content
+  // script and the page — each with its own copy of the flag.
+  const noise: string[] = [];
+  const watch = (target: Page) => {
+    target.on('console', (msg) => {
+      if (msg.text().includes('a-better-reviewer')) noise.push(msg.text());
+    });
+  };
+
+  const pr = await context.newPage();
+  watch(pr);
+  await pr.goto('https://github.com/acme/widgets/pull/42');
+  await expect(cta(pr)).toBeVisible({ timeout: 10_000 });
+
+  const review = await context.newPage();
+  watch(review);
+  await openReview(review, extensionId);
+
+  const options = await context.newPage();
+  watch(options);
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await expect(options.getByLabel(/write diagnostics/i)).toBeVisible();
+
+  expect(noise).toEqual([]);
+  void api;
+});
+
 test('takes the card away when the tab leaves the pull request, and brings it back', async ({
   context,
   extensionId,

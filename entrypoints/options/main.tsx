@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { passphraseProblem } from '@/lib/crypto/vault';
+import { logWarn } from '@/lib/log';
 import { ChromeTokenProvider, type VaultState } from '@/lib/github/token-provider';
 import {
   type MessageKind,
@@ -30,7 +31,7 @@ import {
   type Settings,
   autoOpenAvailable,
 } from '@/lib/settings';
-import { readSettings, writeSettings } from '@/lib/settings-store';
+import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
 import { browser } from 'wxt/browser';
 
 const tokens = new ChromeTokenProvider();
@@ -148,7 +149,7 @@ function Reviewing() {
 
       setSettings(next);
       void writeSettings(next).catch((error: unknown) => {
-        console.warn('[a-better-reviewer] could not save settings', error);
+        logWarn('could not save settings', error);
       });
     },
     [settings],
@@ -197,6 +198,24 @@ function Reviewing() {
           </span>
         </span>
       </label>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.debugLogging}
+          onChange={(event) => update({ debugLogging: event.target.checked })}
+        />
+        <span>
+          Write diagnostics to the browser console
+          <span className="hint">
+            Off by default, and off is the right setting unless you are
+            investigating something. This extension runs on every github.com
+            page, so anything it logs lands in a console you are probably using
+            for your own work. Turn it on before reporting a bug, then turn it
+            back off.
+          </span>
+        </span>
+      </label>
     </section>
   );
 }
@@ -224,6 +243,7 @@ function App() {
     // unlocked vault is described rather than shown.
     void refreshVault();
     void refreshRateLimit();
+    void followLoggingSetting();
   }, [refreshRateLimit, refreshVault]);
 
   /** Wipe the secrets held in component state once they have been used. */

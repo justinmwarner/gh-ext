@@ -7,8 +7,13 @@
  */
 
 import { createRoot } from 'react-dom/client';
+import { followLoggingSetting } from '@/lib/settings-store';
 import { App } from '@/ui/App';
 import './style.css';
+
+// Not awaited: the page has nothing to say until something fails, and making
+// the first paint wait on a storage read would be a poor trade.
+void followLoggingSetting();
 
 const container = document.getElementById('root');
 if (container) createRoot(container).render(<App />);

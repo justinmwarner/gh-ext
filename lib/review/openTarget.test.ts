@@ -13,7 +13,12 @@ import { type OpenReason, openTarget } from './openTarget';
 
 const URL = 'chrome-extension://abc/review.html#/pr/acme/widgets/7';
 
-const settings = (openIn: OpenIn, autoOpen = true): Settings => ({ openIn, autoOpen });
+const settings = (openIn: OpenIn, autoOpen = true): Settings => ({
+  openIn,
+  autoOpen,
+  // Irrelevant to where a review opens; present because Settings requires it.
+  debugLogging: false,
+});
 
 const ask = (
   openIn: OpenIn,

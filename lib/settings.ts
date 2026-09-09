@@ -15,6 +15,14 @@ export interface Settings {
   openIn: OpenIn;
   /** Open a review by itself on landing on a pull request. */
   autoOpen: boolean;
+  /**
+   * Write diagnostics to the console.
+   *
+   * Off by default. This extension runs a content script on every github.com
+   * page, so anything it logs uninvited lands in a console the reviewer is
+   * probably using for their own work.
+   */
+  debugLogging: boolean;
 }
 
 /** `storage.local` key holding the whole {@link Settings} object. */
@@ -40,6 +48,7 @@ export const CARD_COLLAPSED_KEY = 'card-collapsed';
 export const DEFAULT_SETTINGS: Settings = {
   openIn: 'new-tab',
   autoOpen: false,
+  debugLogging: false,
 };
 
 /**
@@ -79,6 +88,12 @@ export function parseSettings(raw: unknown): Settings {
     openIn: isOpenIn(stored.openIn) ? stored.openIn : DEFAULT_SETTINGS.openIn,
     autoOpen:
       typeof stored.autoOpen === 'boolean' ? stored.autoOpen : DEFAULT_SETTINGS.autoOpen,
+    // Strictly a boolean: the string 'false' is truthy, so a loose check would
+    // turn logging on for someone whose stored value was trying to turn it off.
+    debugLogging:
+      typeof stored.debugLogging === 'boolean'
+        ? stored.debugLogging
+        : DEFAULT_SETTINGS.debugLogging,
   };
 }
 

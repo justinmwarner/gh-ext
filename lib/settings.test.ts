@@ -35,6 +35,7 @@ describe('parseSettings', () => {
     expect(parseSettings({ openIn: 'new-window', autoOpen: true })).toEqual({
       openIn: 'new-window',
       autoOpen: true,
+      debugLogging: false,
     });
   });
 
@@ -42,6 +43,7 @@ describe('parseSettings', () => {
     expect(parseSettings({ autoOpen: true })).toEqual({
       openIn: DEFAULT_SETTINGS.openIn,
       autoOpen: true,
+      debugLogging: false,
     });
   });
 
@@ -51,6 +53,7 @@ describe('parseSettings', () => {
     expect(parseSettings({ openIn: 'floating-panel', autoOpen: true })).toEqual({
       openIn: DEFAULT_SETTINGS.openIn,
       autoOpen: true,
+      debugLogging: false,
     });
   });
 
@@ -60,6 +63,7 @@ describe('parseSettings', () => {
     expect(parseSettings({ openIn: 'same-tab', autoOpen: 'false' })).toEqual({
       openIn: 'same-tab',
       autoOpen: false,
+      debugLogging: false,
     });
   });
 
@@ -111,5 +115,31 @@ describe('autoOpenAvailable', () => {
     // Auto-opening over the pull request page replaces it on arrival, and Back
     // returns to a page that immediately does it again.
     expect(autoOpenAvailable('same-tab')).toBe(false);
+  });
+});
+
+describe('debugLogging', () => {
+  it('is off by default, because the console belongs to the reviewer', () => {
+    // The default that matters most here. Almost every install never opens the
+    // options page, so this is what almost every user gets.
+    expect(DEFAULT_SETTINGS.debugLogging).toBe(false);
+  });
+
+  it('is read back when it was stored', () => {
+    expect(parseSettings({ debugLogging: true }).debugLogging).toBe(true);
+  });
+
+  it('falls back to off for a non-boolean, rather than being truthy', () => {
+    // A stored string is the realistic corruption — 'true' from a hand-edited
+    // storage entry — and `'false'` is truthy, so a loose check would turn
+    // logging on for someone trying to turn it off.
+    expect(parseSettings({ debugLogging: 'false' }).debugLogging).toBe(false);
+    expect(parseSettings({ debugLogging: 'true' }).debugLogging).toBe(false);
+  });
+
+  it('survives alongside the other settings', () => {
+    expect(parseSettings({ openIn: 'new-window', autoOpen: true, debugLogging: true })).toEqual(
+      { openIn: 'new-window', autoOpen: true, debugLogging: true },
+    );
   });
 });

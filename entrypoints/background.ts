@@ -16,6 +16,8 @@
  */
 
 import { browser } from 'wxt/browser';
+import { logWarn } from '@/lib/log';
+import { followLoggingSetting } from '@/lib/settings-store';
 import { defineBackground } from 'wxt/utils/define-background';
 import {
   PrCache,
@@ -84,6 +86,11 @@ const VIEWER_QUERY = 'query { viewer { login } }';
 export default defineBackground({
   type: 'module',
   main() {
+    // Before anything that might warn. Registered at the top of `main` so it
+    // survives the worker being killed and restarted, like every other
+    // listener here.
+    void followLoggingSetting();
+
     const tokens = new ChromeTokenProvider();
     const client = new GitHubClient(tokens);
 
@@ -117,7 +124,7 @@ export default defineBackground({
     /** Cache writes are best effort — a full storage area must not fail a read. */
     const cacheWrite = (write: () => Promise<void>): void => {
       void write().catch((error: unknown) => {
-        console.warn('[a-better-reviewer] cache write failed', error);
+        logWarn('cache write failed', error);
       });
     };
 
@@ -173,7 +180,7 @@ export default defineBackground({
       // Deliberately not awaited: the content script is only asking the worker
       // to start warming, and a failure here must not surface on the PR page.
       void assembleOnce(pr).catch((error: unknown) => {
-        console.warn('[a-better-reviewer] prefetch failed', prKey(pr), error);
+        logWarn('prefetch failed', prKey(pr), error);
       });
       return { started: true };
     }
@@ -453,7 +460,7 @@ export default defineBackground({
       blobs.clear();
       imageBytes.clear();
       void forgetCachedReads(cacheStore).catch((error: unknown) => {
-        console.warn('[a-better-reviewer] could not clear the cache', error);
+        logWarn('could not clear the cache', error);
       });
     });
 
@@ -590,7 +597,7 @@ export default defineBackground({
      */
     browser.tabs.onRemoved.addListener((tabId) => {
       void forgetReviewTab(tabId).catch((error: unknown) => {
-        console.warn('[a-better-reviewer] could not forget a review tab', error);
+        logWarn('could not forget a review tab', error);
       });
     });
 

@@ -27,16 +27,26 @@ const UNPACKED_KEY =
  */
 const GECKO_ID = 'a-better-reviewer@justinmwarner.github.io';
 
+/**
+ * Set by `scripts/store-build.mjs`, never by hand.
+ *
+ * An environment variable rather than `--mode store`, because Vite derives
+ * `isProduction` from `mode === 'production'` and a custom mode therefore
+ * builds React's development runtime into the package. See that script.
+ */
+const forStore = process.env.CWS_BUILD === '1';
+
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
-  // `--mode store` rather than an env var, so the store build works the same
-  // from PowerShell, cmd and a POSIX shell without a cross-env dependency.
-  manifest: ({ mode, browser: target }) => ({
+  // A separate directory, so a store build never silently becomes the thing
+  // `test:e2e` loads or the thing someone has loaded unpacked.
+  outDir: forStore ? '.output/store' : '.output',
+  manifest: ({ browser: target }) => ({
     name: 'A Better Reviewer',
     description: 'A fast review UI for GitHub pull requests.',
     // Chromium only. `key` is not a Firefox manifest property, and AMO's
     // linter reports unknown properties on submission.
-    ...(mode === 'store' || target === 'firefox' ? {} : { key: UNPACKED_KEY }),
+    ...(forStore || target === 'firefox' ? {} : { key: UNPACKED_KEY }),
     // 115 is where `storage.session` landed, and the vault keeps the decrypted
     // token there. An older Firefox would fail to unlock rather than degrade.
     //

@@ -12,6 +12,7 @@
  */
 
 import { browser } from 'wxt/browser';
+import { setLoggingEnabled } from './log';
 import {
   CARD_COLLAPSED_KEY,
   SETTINGS_KEY,
@@ -45,4 +46,28 @@ export async function readCardCollapsed(): Promise<boolean> {
 
 export async function writeCardCollapsed(collapsed: boolean): Promise<void> {
   await browser.storage.local.set({ [CARD_COLLAPSED_KEY]: collapsed });
+}
+
+/**
+ * Point the logger at the reviewer's preference, and keep it there.
+ *
+ * Called once per extension context — the worker, the content script, each
+ * page — because each has its own module registry and therefore its own copy
+ * of the flag in `lib/log.ts`.
+ *
+ * The listener matters as much as the initial read. Without it, turning
+ * logging on would do nothing until the worker restarted, and the reviewer
+ * would conclude the setting was broken.
+ */
+export async function followLoggingSetting(): Promise<void> {
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    const change = changes[SETTINGS_KEY];
+    if (change === undefined) return;
+    setLoggingEnabled(parseSettings(change.newValue).debugLogging);
+  });
+
+  // After the listener, not before: a settings write landing between the two
+  // would otherwise be missed and the flag left stale.
+  setLoggingEnabled((await readSettings()).debugLogging);
 }

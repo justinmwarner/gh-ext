@@ -35,12 +35,18 @@ import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { parsePrUrl } from '@/lib/github/pr-url';
+import { logWarn } from '@/lib/log';
 import { type Message, type PrRef, type Response, isErr, message } from '@/lib/messages';
 import { CARD_COLLAPSED_KEY, autoOpenAvailable } from '@/lib/settings';
-import { readCardCollapsed, readSettings, writeCardCollapsed } from '@/lib/settings-store';
+import {
+  followLoggingSetting,
+  readCardCollapsed,
+  readSettings,
+  writeCardCollapsed,
+} from '@/lib/settings-store';
 import { type CardHandle, CARD_HOST_ID, githubColorScheme, mountCard } from './card';
 
-const log = (...args: unknown[]) => console.warn('[a-better-reviewer]', ...args);
+const log = logWarn;
 
 /** Shown on the card itself, so a click that did nothing is never silent. */
 const OPEN_FAILED = 'Could not open the review. See the extension console.';
@@ -60,6 +66,11 @@ export default defineContentScript({
   runAt: 'document_idle',
 
   async main(ctx: ContentScriptContext) {
+    // First, so nothing below can warn before the reviewer's preference is
+    // known. This script runs on every github.com page, which is exactly why
+    // it must not write to the console uninvited.
+    await followLoggingSetting();
+
     /** The pull request we have already asked the worker to prefetch. */
     let prefetchedKey: string | null = null;
     /**
