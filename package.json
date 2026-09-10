@@ -23,6 +23,8 @@
     "icons": "node scripts/make-icons.mjs",
     "screenshots": "wxt build && playwright test --config playwright.screenshots.config.ts",
     "shots:card": "wxt build && playwright test --config playwright.screenshots.config.ts card.shot",
+    "promo": "playwright test --config playwright.screenshots.config.ts promo.shot",
+    "tour": "node scripts/tour.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -477,6 +477,18 @@ export const test = base.extend<Fixtures>({
         `--disable-extensions-except=${EXTENSION_PATH}`,
         `--load-extension=${EXTENSION_PATH}`,
       ],
+      // Off unless something asked for it. Recording every page of a
+      // sixty-test run costs real time and writes a directory of `.webm` files
+      // nobody looks at; the listing walkthrough in `tour.shot.ts` is the only
+      // thing that wants one, and it sets this.
+      ...(process.env.TOUR_VIDEO === undefined
+        ? {}
+        : {
+            recordVideo: {
+              dir: process.env.TOUR_VIDEO,
+              size: { width: 1280, height: 800 },
+            },
+          }),
     });
     await use(context);
     await context.close();

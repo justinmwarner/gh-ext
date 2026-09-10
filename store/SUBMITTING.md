@@ -180,6 +180,14 @@ From [LISTING.md](LISTING.md):
 - **Store listing** tab — item name, summary, detailed description, category
   (Developer Tools), language
 - **Screenshots** — upload from `store/screenshots/`, `01-review.png` first
+- **Promotional tiles** — from `store/promo/`. The small tile (440×280) is
+  required for the store to feature the listing at all; the marquee (1400×560)
+  is only used if it picks the listing for a marquee. Regenerate with
+  `npm run promo`.
+- **Video** — the field takes a **YouTube URL**, not a file. `npm run tour`
+  records `store/video/tour-1280x800.webm` against the real extension; upload
+  that to YouTube and paste the link. The file is gitignored because it is a
+  megabyte that changes wholesale on every run.
 - **Privacy** tab — single purpose, a justification per permission, the privacy
   policy URL from step 1, and the data-usage declarations
 
