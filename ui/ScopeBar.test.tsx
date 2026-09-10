@@ -57,8 +57,6 @@ function mount(overrides: Partial<ScopeBarProps> = {}) {
     onOpenPicker: vi.fn(),
     onSinceReview: vi.fn(),
     onShowAll: vi.fn(),
-    splitView: false,
-    onToggleSplitView: vi.fn(),
     ...overrides,
   };
   return { ...render(<ScopeBar {...props} />), props };
@@ -75,7 +73,7 @@ const status = (): string => document.querySelector('.scope-status')?.textConten
 /** Open the kebab and hand back the item, which is where the controls live. */
 const menuItem = async (name: RegExp): Promise<HTMLElement> => {
   const user = userEvent.setup();
-  const kebab = screen.getByRole('button', { name: /diff options/i });
+  const kebab = screen.getByRole('button', { name: /commit options/i });
   if (kebab.getAttribute('aria-expanded') !== 'true') await user.click(kebab);
   const found = [
     ...screen.getByRole('menu').querySelectorAll<HTMLElement>('.menu-item'),
@@ -164,7 +162,7 @@ describe('the controls', () => {
     // strip's own edge.
     mount();
 
-    expect(screen.getByRole('button', { name: /diff options/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /commit options/i })).toBeDefined();
     expect(screen.queryByRole('button', { name: /choose commits/i })).toBeNull();
   });
 
@@ -217,39 +215,13 @@ describe('the controls', () => {
 });
 
 describe('the diff layout', () => {
-  // In the kebab rather than on the row. The row is deliberately three things —
-  // sentence, tabs, kebab — and a fourth control beside the tabs would be the
-  // shape of the three-row bar this one replaced.
+  it('is not offered here at all', async () => {
+    // It used to be the last item in this menu. It is a setting now — how a
+    // diff is drawn is a fact about the reviewer rather than about this pull
+    // request — and the menu is named for what is left in it. See `Settings`.
+    mount();
 
-  it('offers the split layout, ticked while it is on', async () => {
-    mount({ splitView: true });
-
-    const item = await menuItem(/split view/i);
-    expect(item.getAttribute('role')).toBe('menuitemcheckbox');
-    expect(item.getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('is not ticked while the column is unified', async () => {
-    mount({ splitView: false });
-
-    expect((await menuItem(/split view/i)).getAttribute('aria-checked')).toBe('false');
-  });
-
-  it('asks for the layout to change rather than changing it', async () => {
-    const { props } = mount();
-
-    await userEvent.click(await menuItem(/split view/i));
-
-    expect(props.onToggleSplitView).toHaveBeenCalled();
-  });
-
-  it('offers the layout even when there are no commits to scope by', async () => {
-    // The two things in this menu fail independently. A pull request whose
-    // commit list could not be read still has a diff on screen, and how that
-    // diff is drawn is still worth changing.
-    mount({ commitCount: 0, commits: [] });
-
-    expect(await menuItem(/split view/i)).toBeDefined();
+    await expect(menuItem(/split view/i)).rejects.toThrow();
   });
 });
 

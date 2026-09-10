@@ -20,6 +20,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
+import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
 import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
 import { request } from './background';
@@ -1015,26 +1016,44 @@ const REINDENTED = (path: string): string =>
     ' twentytwo',
   ].join('\n');
 
-const whitespaceToggle = (path: string): HTMLElement =>
-  within(card(path)).getByRole('button', { name: /ignore whitespace/i });
+const IGNORING = { ignoreWhitespace: true };
+
+/** Every change in it is whitespace, so the rewrite leaves no hunks at all. */
+const ALL_WHITESPACE = [
+  'diff --git a/src/app.ts b/src/app.ts',
+  '--- a/src/app.ts',
+  '+++ b/src/app.ts',
+  '@@ -1,3 +1,3 @@',
+  ' one',
+  '-  spaced',
+  '+    spaced',
+  ' three',
+].join('\n');
+
+/** Nothing in it is whitespace-only, so the rewrite has nothing to take out. */
+const NO_WHITESPACE = [
+  'diff --git a/plain.ts b/plain.ts',
+  '--- a/plain.ts',
+  '+++ b/plain.ts',
+  '@@ -1,3 +1,3 @@',
+  ' one',
+  '-two',
+  '+TWO',
+  ' three',
+].join('\n');
 
 describe('DiffColumn, ignoring whitespace', () => {
-  it('shows GitHub’s diff until it is asked not to', async () => {
+  it('shows GitHub’s diff while the setting is off', async () => {
     mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
     await untilDrawn('src/app.ts');
 
-    expect(whitespaceToggle('src/app.ts').getAttribute('aria-pressed')).toBe('false');
     // The reindented line is still a change, as GitHub says it is.
     expect(gutterCell('src/app.ts', 2, 'additions')).toBeDefined();
+    expect(document.querySelector('[data-whitespace-note]')).toBeNull();
   });
 
   it('takes away a hunk in which nothing but whitespace moved', async () => {
-    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
-    await untilDrawn('src/app.ts');
-
-    await act(async () => {
-      fireEvent.click(whitespaceToggle('src/app.ts'));
-    });
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], IGNORING);
     await untilDrawn('src/app.ts');
 
     // The first hunk is gone; the second is untouched and still numbered 20–22.
@@ -1042,43 +1061,89 @@ describe('DiffColumn, ignoring whitespace', () => {
     expect(gutterCell('src/app.ts', 21, 'additions')).toBeDefined();
   });
 
-  it('says on the card that this is not the diff GitHub is showing', async () => {
-    // The requirement that makes the mode honest. Everyone else on this pull
-    // request is looking at something else, and the reviewer has to be able to
-    // tell that from the card rather than from memory.
-    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
+  it('says on the file’s own row that this is not the diff GitHub is showing', async () => {
+    // The requirement that makes the setting honest, and the one that carries
+    // the whole signal now that the per-file button is gone. Everyone else on
+    // this pull request is looking at something else, and the reviewer has to
+    // be able to tell that from the card rather than from having remembered
+    // what they ticked on the options page.
+    //
+    // On the header rather than in the body, where it was four lines of prose
+    // above the first hunk of every file in the review. The words survive in
+    // full as the accessible description; what is on screen is two of them.
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], IGNORING);
     await untilDrawn('src/app.ts');
 
-    await act(async () => {
-      fireEvent.click(whitespaceToggle('src/app.ts'));
+    const flag = within(card('src/app.ts')).getByRole('button', {
+      name: /whitespace hidden/i,
     });
-
-    const note = within(await body('src/app.ts')).getByRole('note');
-    expect(note.textContent).toMatch(/recomputed here/i);
-    expect(note.textContent).toMatch(/not the diff GitHub/i);
+    // Named by the two words, described by the sentence they stand for.
+    const described = document.getElementById(
+      flag.getAttribute('aria-describedby') ?? '',
+    );
+    expect(described?.textContent).toMatch(/recomputed here/i);
+    expect(described?.textContent).toMatch(/not the diff GitHub/i);
+    // And for the pointer, which is what a flag this short is for.
+    expect(flag.getAttribute('title')).toMatch(/not the diff GitHub/i);
   });
 
-  it('is per file, so one card’s choice is not every card’s', async () => {
+  it('names the emptiness on a file that was nothing but whitespace', async () => {
+    // Such a card has no body at all, so a header saying only "whitespace
+    // hidden" would be describing a diff that is not underneath it.
+    mount([file({ path: 'src/app.ts', patch: ALL_WHITESPACE })], IGNORING);
+
+    // Not `untilDrawn`: there is nothing left to draw, which is the whole
+    // point of this case. The header is what arrives.
+    await waitFor(() => {
+      expect(
+        within(card('src/app.ts')).getByRole('button', { name: /only whitespace/i }),
+      ).toBeDefined();
+    });
+  });
+
+  it('flags every file it shortened, and no others', async () => {
+    // It used to be per file, on the argument that one file being a reformat
+    // says nothing about the next. It is one setting now, so the guarantee that
+    // replaced it is this: no file is quietly shortened. The other half is that
+    // a file it did not touch says nothing — with the setting on for the whole
+    // pull request, a caveat on all nineteen is one nobody reads on the one
+    // that needed it.
+    mount(
+      [
+        file({ path: 'a.ts', patch: REINDENTED('a.ts') }),
+        file({ path: 'plain.ts', patch: NO_WHITESPACE }),
+      ],
+      IGNORING,
+    );
+    await untilDrawn('a.ts');
+
+    expect(within(card('a.ts')).queryByRole('button', { name: /whitespace/i })).not.toBeNull();
+    expect(within(card('plain.ts')).queryByRole('button', { name: /whitespace/i })).toBeNull();
+  });
+
+  it('leaves the cards alone when the setting is off', async () => {
     mount([
       file({ path: 'a.ts', patch: REINDENTED('a.ts') }),
       file({ path: 'b.ts', patch: REINDENTED('b.ts') }),
     ]);
     await untilDrawn('a.ts');
 
-    await act(async () => {
-      fireEvent.click(whitespaceToggle('a.ts'));
-    });
-
-    // Asserted on the cards rather than on the rows: both headers are always
-    // in the light DOM, where the second file's diff may still be virtualized
-    // out of the scrollport.
-    expect(whitespaceToggle('a.ts').getAttribute('aria-pressed')).toBe('true');
-    expect(whitespaceToggle('b.ts').getAttribute('aria-pressed')).toBe('false');
-    expect((await body('a.ts')).querySelector('[data-whitespace-note]')).not.toBeNull();
-    // No body at all rather than an empty one: `b.ts` has nothing to put in it,
-    // and an annotation host it never fills is a strip of empty space above
-    // every hunk in the review.
+    expect(within(card('a.ts')).queryByRole('button', { name: /whitespace/i })).toBeNull();
+    // No body at all rather than an empty one: neither file has anything to
+    // put in one, and an annotation host that is never filled is a strip of
+    // empty space above every hunk in the review.
+    expect(document.querySelector('[data-file-body="a.ts"]')).toBeNull();
     expect(document.querySelector('[data-file-body="b.ts"]')).toBeNull();
+  });
+
+  it('asks for no body of its own, now that the caveat is on the header', async () => {
+    // The saving that came with the move. The note was the only reason an
+    // ordinary source file needed an annotation, and with the setting on for
+    // the whole pull request that meant one on every text file in it.
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], IGNORING);
+    await untilDrawn('src/app.ts');
+
+    expect(document.querySelector('[data-file-body="src/app.ts"]')).toBeNull();
   });
 
   it('keeps a comment on a vanished hunk, in the list rather than nowhere', async () => {
@@ -1091,12 +1156,12 @@ describe('DiffColumn, ignoring whitespace', () => {
       line: 2,
       diffSide: 'RIGHT',
     });
-    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], {}, [thread]);
+    mount(
+      [file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })],
+      IGNORING,
+      [thread],
+    );
     await untilDrawn('src/app.ts');
-
-    await act(async () => {
-      fireEvent.click(whitespaceToggle('src/app.ts'));
-    });
 
     await waitFor(() => {
       expect(section('src/app.ts').textContent).toMatch(/nothing but whitespace/i);
@@ -1111,12 +1176,11 @@ describe('DiffColumn, ignoring whitespace', () => {
       line: 21,
       diffSide: 'RIGHT',
     });
-    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], {}, [thread]);
-    await untilDrawn('src/app.ts');
-
-    await act(async () => {
-      fireEvent.click(whitespaceToggle('src/app.ts'));
-    });
+    mount(
+      [file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })],
+      IGNORING,
+      [thread],
+    );
     await untilDrawn('src/app.ts');
 
     await waitFor(() => {
@@ -1129,12 +1193,7 @@ describe('DiffColumn, ignoring whitespace', () => {
     // taken off the screen, so line 21 is now the *second* addition row in the
     // file rather than the fifth. If anything downstream were counting rows
     // instead of reading GitHub's numbers, this is where it would show.
-    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })]);
-    await untilDrawn('src/app.ts');
-
-    await act(async () => {
-      fireEvent.click(whitespaceToggle('src/app.ts'));
-    });
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], IGNORING);
     await untilDrawn('src/app.ts');
 
     await act(async () => {
@@ -1147,12 +1206,66 @@ describe('DiffColumn, ignoring whitespace', () => {
     });
   });
 
-  it('offers nothing to press on a file with no text diff', async () => {
-    mount([file({ path: 'logo.png', isBinary: true, patch: '' })]);
+  it('folds a file that was nothing but whitespace down to its header', async () => {
+    // The height complaint. Such a card has no diff left in it, so drawing an
+    // empty body plus an expander under a header is chrome standing in for
+    // content that is not there.
+    mount([file({ path: 'src/app.ts', patch: ALL_WHITESPACE })], IGNORING);
 
-    expect(
-      within(card('logo.png')).queryByRole('button', { name: /ignore whitespace/i }),
-    ).toBeNull();
+    await waitFor(() => {
+      expect(within(card('src/app.ts')).getByRole('button', { name: /only whitespace/i }))
+        .toBeDefined();
+    });
+    // Folded: no rows at all, so the card costs a header's height and nothing
+    // more. It used to draw an empty body with an expander under it.
+    expect(diffHasRendered('src/app.ts')).toBe(false);
+  });
+
+  it('gives the file back when the reviewer asks for it', async () => {
+    // The escape hatch, and it has to put *GitHub's* patch back rather than
+    // unfold a card around a patch that has already lost its lines.
+    mount([file({ path: 'src/app.ts', patch: ALL_WHITESPACE })], IGNORING);
+    await waitFor(() => {
+      expect(within(card('src/app.ts')).getByRole('button', { name: /only whitespace/i }))
+        .toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(
+        within(card('src/app.ts')).getByRole('button', { name: /only whitespace/i }),
+      );
+    });
+    await untilDrawn('src/app.ts');
+
+    // The line the rewrite had merged into context is a change again.
+    expect(gutterCell('src/app.ts', 2, 'additions')).toBeDefined();
+  });
+
+  it('keeps the way back on a file it is showing in full', async () => {
+    mount([file({ path: 'src/app.ts', patch: REINDENTED('src/app.ts') })], IGNORING);
+    await untilDrawn('src/app.ts');
+
+    const flag = () =>
+      within(card('src/app.ts')).getByRole('button', { name: /whitespace/i });
+    expect(flag().getAttribute('aria-pressed')).toBe('false');
+
+    await act(async () => {
+      fireEvent.click(flag());
+    });
+
+    // Still there, still pressable, and no longer claiming to be hiding
+    // anything — the card is showing every line GitHub sent.
+    expect(flag().getAttribute('aria-pressed')).toBe('true');
+    expect(flag().textContent).toMatch(/whitespace shown/i);
+  });
+
+  it('leaves a file with no text diff untouched', async () => {
+    // Nothing to take the whitespace out of, so the rewrite must not invent a
+    // flag for it: a binary wearing "only whitespace" is a card claiming its
+    // contents were shortened.
+    mount([file({ path: 'logo.png', isBinary: true, patch: '' })], IGNORING);
+
+    expect(document.querySelector('.whitespace-flag')).toBeNull();
   });
 });
 
@@ -1220,5 +1333,138 @@ describe('DiffColumn, unified against split', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/both sides/i);
     expect(requestMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Folding away what nobody wrote.
+ *
+ * The same shape as the whitespace rule and deliberately so: one word on the
+ * head row saying why the body is not drawn, and that word is also how the
+ * reviewer gets it. What is different is that nothing is *rewritten* here —
+ * the file's name, counts and change type are GitHub's throughout, and the
+ * only thing folded is the reading of it.
+ */
+describe('DiffColumn, folding generated files', () => {
+  const HIDING = { hideGenerated: true };
+
+  /**
+   * `dist/bundle.js` rather than `package-lock.json`, and the difference is not
+   * cosmetic: a `.json` file opens on the structural JSON comparison rather
+   * than on a text diff, so it would have no rows to be folded away in the
+   * first place. The rule under test is about the text diff.
+   */
+  const BUNDLE = 'dist/bundle.js';
+  const bundle = () => file({ path: BUNDLE, patch: REINDENTED(BUNDLE) });
+
+  it('draws a lockfile like anything else until the setting is on', async () => {
+    mount([bundle()]);
+    await untilDrawn(BUNDLE);
+
+    expect(
+      within(card(BUNDLE)).queryByRole('button', { name: /generated/i }),
+    ).toBeNull();
+  });
+
+  it('folds it to its header, and says why on the row', async () => {
+    mount([bundle()], HIDING);
+
+    await waitFor(() => {
+      expect(
+        within(card(BUNDLE)).getByRole('button', { name: /generated/i }),
+      ).toBeDefined();
+    });
+    expect(diffHasRendered(BUNDLE)).toBe(false);
+  });
+
+  it('keeps the counts GitHub sent, because nothing was rewritten', async () => {
+    // The distinction from ignoring whitespace, and it is the whole reason this
+    // one is safe to fold by default once asked for: no line has been taken out
+    // of anything, so the header is still describing GitHub's diff exactly.
+    mount([file({ path: 'package-lock.json', additions: 402, deletions: 118 })], HIDING);
+
+    await waitFor(() => {
+      expect(card('package-lock.json').textContent).toContain('+402');
+    });
+    expect(card('package-lock.json').textContent).toContain('118');
+  });
+
+  it('opens it when the reviewer presses the word', async () => {
+    mount([bundle()], HIDING);
+    await waitFor(() => {
+      expect(
+        within(card(BUNDLE)).getByRole('button', { name: /generated/i }),
+      ).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(
+        within(card(BUNDLE)).getByRole('button', { name: /generated/i }),
+      );
+    });
+
+    await untilDrawn(BUNDLE);
+    expect(
+      within(card(BUNDLE))
+        .getByRole('button', { name: /generated/i })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('leaves the files somebody wrote alone', async () => {
+    mount([bundle(), file({ path: 'src/app.ts' })], HIDING);
+    await untilDrawn('src/app.ts');
+
+    expect(
+      within(card('src/app.ts')).queryByRole('button', { name: /generated/i }),
+    ).toBeNull();
+    expect(diffHasRendered('src/app.ts')).toBe(true);
+  });
+
+  it('obeys a repository that exempts one of its own files', async () => {
+    // The direction that matters most: somebody went out of their way to say
+    // this lockfile is worth reading, and folding it anyway would be overruling
+    // the repository with a guess.
+    mount([bundle()], {
+      ...HIDING,
+      gitAttributes: parseGitAttributes(`${BUNDLE} -linguist-generated`),
+    });
+    await untilDrawn(BUNDLE);
+
+    expect(
+      within(card(BUNDLE)).queryByRole('button', { name: /generated/i }),
+    ).toBeNull();
+  });
+
+  it('obeys a repository that declares a file no pattern would catch', async () => {
+    mount([file({ path: 'src/schema.ts' })], {
+      ...HIDING,
+      gitAttributes: parseGitAttributes('src/schema.ts linguist-generated'),
+    });
+
+    await waitFor(() => {
+      expect(
+        within(card('src/schema.ts')).getByRole('button', { name: /generated/i }),
+      ).toBeDefined();
+    });
+  });
+
+  it('says generated rather than whitespace on a file that is both', async () => {
+    // "Nobody wrote this" explains the folding on its own. "Every change in it
+    // was whitespace" invites the reviewer to wonder what a lockfile is doing
+    // reindenting itself.
+    mount([file({ path: BUNDLE, patch: ALL_WHITESPACE })], {
+      ...HIDING,
+      ignoreWhitespace: true,
+    });
+
+    await waitFor(() => {
+      expect(
+        within(card(BUNDLE)).getByRole('button', { name: /generated/i }),
+      ).toBeDefined();
+    });
+    expect(
+      within(card(BUNDLE)).queryByRole('button', { name: /whitespace/i }),
+    ).toBeNull();
   });
 });

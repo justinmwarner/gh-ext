@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   WHITESPACE_BUDGET,
+  whitespaceLabel,
   whitespaceNotice,
   withoutWhitespaceChanges,
 } from './whitespace';
@@ -267,7 +268,7 @@ describe('withoutWhitespaceChanges', () => {
 });
 
 describe('whitespaceNotice', () => {
-  const clean = { patch: '', hunks: 3, dropped: 0, partial: false };
+  const clean = { patch: '', hunks: 3, dropped: 0, partial: false, changed: true };
 
   it('always says the diff is ours and the line numbers are GitHub’s', () => {
     // Both halves are load-bearing and neither is optional. Without the first
@@ -300,5 +301,77 @@ describe('whitespaceNotice', () => {
     expect(whitespaceNotice({ ...clean, partial: true })).toMatch(
       /still shown as GitHub sent it/i,
     );
+  });
+});
+
+/**
+ * Whether the rewrite is worth mentioning at all.
+ *
+ * The setting is on for every file in the pull request, so this is what stops
+ * eighteen untouched files wearing the same caveat as the one reindented one.
+ */
+describe('what the rewrite changed', () => {
+  it('reports no change when there was nothing to take out', () => {
+    const patch = [
+      'diff --git a/a.ts b/a.ts',
+      '@@ -1,3 +1,3 @@',
+      ' one',
+      '-two',
+      '+TWO',
+      ' three',
+    ].join('\n');
+
+    const result = withoutWhitespaceChanges(patch);
+
+    expect(result.changed).toBe(false);
+    expect(result.patch).toBe(patch);
+  });
+
+  it('reports a change when a line merged away inside a surviving hunk', () => {
+    // The case the counters cannot see, and the one this whole feature exists
+    // for: the hunk is still here, so `dropped` is 0, but it is two rows
+    // shorter than GitHub's.
+    const patch = [
+      'diff --git a/a.ts b/a.ts',
+      '@@ -1,4 +1,4 @@',
+      ' one',
+      '-  spaced',
+      '+    spaced',
+      '-two',
+      '+TWO',
+      ' three',
+    ].join('\n');
+
+    const result = withoutWhitespaceChanges(patch);
+
+    expect(result.changed).toBe(true);
+    expect(result.dropped).toBe(0);
+    expect(result.patch).not.toBe(patch);
+  });
+
+  it('reports no change for a patch with no hunks in it at all', () => {
+    expect(withoutWhitespaceChanges('').changed).toBe(false);
+  });
+});
+
+describe('whitespaceLabel', () => {
+  const clean = { patch: '', hunks: 3, dropped: 1, partial: false, changed: true };
+
+  it('says what was hidden while there is still a diff to read', () => {
+    expect(whitespaceLabel(clean)).toBe('Whitespace hidden');
+  });
+
+  it('says the file was nothing else, when the card is left empty', () => {
+    // The header is all there is on such a card, so it has to account for the
+    // emptiness rather than describe a diff that is not below it.
+    expect(whitespaceLabel({ ...clean, hunks: 0 })).toBe('Only whitespace');
+  });
+
+  it('stays short enough for the row it sits on', () => {
+    // It shares the head row with the path, the counts and the viewed
+    // checkbox, and that row is not allowed to wrap or grow.
+    for (const hunks of [0, 3]) {
+      expect(whitespaceLabel({ ...clean, hunks }).length).toBeLessThanOrEqual(20);
+    }
   });
 });

@@ -33,17 +33,16 @@ describe('parseSettings', () => {
 
   it('reads a complete object back unchanged', () => {
     expect(parseSettings({ openIn: 'new-window', autoOpen: true })).toEqual({
+      ...DEFAULT_SETTINGS,
       openIn: 'new-window',
       autoOpen: true,
-      debugLogging: false,
     });
   });
 
   it('fills in a field that is missing', () => {
     expect(parseSettings({ autoOpen: true })).toEqual({
-      openIn: DEFAULT_SETTINGS.openIn,
+      ...DEFAULT_SETTINGS,
       autoOpen: true,
-      debugLogging: false,
     });
   });
 
@@ -51,9 +50,8 @@ describe('parseSettings', () => {
     // Per field rather than all-or-nothing: a destination this version does
     // not know about must not also discard the auto-open choice.
     expect(parseSettings({ openIn: 'floating-panel', autoOpen: true })).toEqual({
-      openIn: DEFAULT_SETTINGS.openIn,
+      ...DEFAULT_SETTINGS,
       autoOpen: true,
-      debugLogging: false,
     });
   });
 
@@ -61,9 +59,9 @@ describe('parseSettings', () => {
     // `'false'` is truthy, so coercion here would turn a stored string into
     // auto-open being on.
     expect(parseSettings({ openIn: 'same-tab', autoOpen: 'false' })).toEqual({
+      ...DEFAULT_SETTINGS,
       openIn: 'same-tab',
       autoOpen: false,
-      debugLogging: false,
     });
   });
 
@@ -139,7 +137,49 @@ describe('debugLogging', () => {
 
   it('survives alongside the other settings', () => {
     expect(parseSettings({ openIn: 'new-window', autoOpen: true, debugLogging: true })).toEqual(
-      { openIn: 'new-window', autoOpen: true, debugLogging: true },
+      { ...DEFAULT_SETTINGS, openIn: 'new-window', autoOpen: true, debugLogging: true },
     );
+  });
+});
+
+describe('how a diff is drawn', () => {
+  it('defaults to one column, which is what GitHub sends you from', () => {
+    expect(DEFAULT_SETTINGS.splitView).toBe(false);
+  });
+
+  it('defaults to hiding nothing', () => {
+    // The only setting here that removes lines from a diff, so the default is
+    // the one that removes none of them. A reviewer who has never opened the
+    // options page must never be reading a shortened diff.
+    expect(DEFAULT_SETTINGS.ignoreWhitespace).toBe(false);
+  });
+
+  it('defaults to folding nothing away', () => {
+    expect(DEFAULT_SETTINGS.hideGenerated).toBe(false);
+  });
+
+  it.each(['splitView', 'ignoreWhitespace', 'hideGenerated'] as const)(
+    'reads a stored %s',
+    (key) => {
+      expect(parseSettings({ [key]: true })[key]).toBe(true);
+    },
+  );
+
+  it.each(['splitView', 'ignoreWhitespace', 'hideGenerated'] as const)(
+    'falls back to off for a non-boolean %s',
+    (key) => {
+      // `'false'` is truthy. On `ignoreWhitespace` a loose check would start
+      // hiding lines for someone whose stored value was trying to stop it.
+      expect(parseSettings({ [key]: 'false' })[key]).toBe(false);
+      expect(parseSettings({ [key]: 'true' })[key]).toBe(false);
+      expect(parseSettings({ [key]: 1 })[key]).toBe(false);
+    },
+  );
+
+  it('keeps one when its neighbour is corrupt', () => {
+    expect(parseSettings({ splitView: true, ignoreWhitespace: 'yes' })).toEqual({
+      ...DEFAULT_SETTINGS,
+      splitView: true,
+    });
   });
 });

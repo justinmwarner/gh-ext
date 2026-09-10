@@ -1,5 +1,5 @@
 /**
- * The banner for a pull request GitHub only partly answered.
+ * The notice for a pull request GitHub only partly answered.
  *
  * A GraphQL response is not pass or fail. A fine-grained token that grants the
  * repository but not one permission inside it gets the whole pull request back
@@ -9,9 +9,13 @@
  *
  * The wrong thing to do is render it quietly. A nulled `statusCheckRollup`
  * reaches `ChecksChip` as `null` and comes out as "No checks", which is not a
- * gap in the page — it is a false statement about the pull request. This banner
- * exists so that the one place the page cannot be trusted says so itself, and
- * points at the token, which is the only thing that can fix it.
+ * gap in the page — it is a false statement about the pull request. This exists
+ * so that the one place the page cannot be trusted says so itself, and points at
+ * the token, which is the only thing that can fix it.
+ *
+ * It used to be a banner between the top bar and the diff. It is now a section
+ * of the panel behind the top bar's notice button, which is where `NoticeCenter`
+ * explains the trade: read on demand, but never scrolled away from.
  */
 
 import type { DeniedField } from '@/lib/github/graphql-errors';
@@ -139,35 +143,33 @@ export function DeniedNotice({
   return (
     // `status`, not `alert`. The review below is real and usable; this is a
     // caveat on one part of it, not a reason to stop reading.
-    <div className="notice denied-notice" role="status">
-      <div className="denied-body">
+    <div className="notice-body" role="status">
+      <p>
+        GitHub would not show this token {list(areas.map((a) => a.what))}, so that
+        part of this page is missing rather than empty.
+      </p>
+      {permissions.length > 0 && (
         <p>
-          GitHub would not show this token {list(areas.map((a) => a.what))}, so that
-          part of this page is missing rather than empty.
+          Usually the token is missing the <strong>{list(permissions)}</strong>{' '}
+          permission. On the token's page
+          {section === null ? '' : ', under '}
+          {section === null ? '' : <strong>{section}</strong>}, set{' '}
+          {permissions.length === 1 ? 'it' : 'them'} to <strong>Read-only</strong>{' '}
+          and reload.
         </p>
-        {permissions.length > 0 && (
-          <p>
-            Usually the token is missing the <strong>{list(permissions)}</strong>{' '}
-            permission. On the token's page
-            {section === null ? '' : ', under '}
-            {section === null ? '' : <strong>{section}</strong>}, set{' '}
-            {permissions.length === 1 ? 'it' : 'them'} to <strong>Read-only</strong>{' '}
-            and reload.
-          </p>
-        )}
-        {/* GitHub's own words. The only part of this that is specific to what
-            actually happened, and the only part worth quoting to anyone. */}
-        <p className="detail">
-          {denied.map((entry) => (
-            <span key={`${entry.message} ${entry.path ?? ''}`} className="denied-line">
-              {entry.message}
-              {entry.path === null ? '' : ` — ${entry.path}`}
-              {entry.count > 1 ? ` (${entry.count} fields)` : ''}
-            </span>
-          ))}
-        </p>
-      </div>
-      <div className="denied-actions">
+      )}
+      {/* GitHub's own words. The only part of this that is specific to what
+          actually happened, and the only part worth quoting to anyone. */}
+      <p className="notice-detail">
+        {denied.map((entry) => (
+          <span key={`${entry.message} ${entry.path ?? ''}`} className="notice-line">
+            {entry.message}
+            {entry.path === null ? '' : ` — ${entry.path}`}
+            {entry.count > 1 ? ` (${entry.count} fields)` : ''}
+          </span>
+        ))}
+      </p>
+      <div className="notice-actions">
         <button type="button" className="button" onClick={openOptions}>
           Check your token
         </button>

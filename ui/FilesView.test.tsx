@@ -56,6 +56,9 @@ function mount(
         onSelectFromScroll={vi.fn()}
         jump={null}
         blobs={null}
+        ignoreWhitespace={false}
+        hideGenerated={false}
+        gitAttributes={[]}
         diffStyle="unified"
         diff={{ source: 'unified', truncated: false }}
         sides={BOTH_SIDES}

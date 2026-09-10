@@ -9,6 +9,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SETTINGS, SETTINGS_KEY } from '@/lib/settings';
 import { Shell } from './Shell';
 import { request } from './background';
 import { clearSideCache } from './fileSides';
@@ -26,9 +27,13 @@ vi.mock('./background', () => ({ request: vi.fn() }));
 
 const requestMock = request as unknown as Mock;
 
-beforeEach(() => {
+beforeEach(async () => {
   requestMock.mockReset();
   clockOffset = 0;
+  // The stub storage area outlives a test, so a stored preference would
+  // otherwise reach every test declared after the one that set it — and the
+  // symptom is a diff drawn in a layout the test never asked for.
+  await browser.storage.local.remove(SETTINGS_KEY);
   // `README.md` appears in the fixtures below, and a `.md` file now opens on
   // its rendered diff rather than on the text diff — which means the card reads
   // both sides through this seam on mount, where before it read nothing.
@@ -70,6 +75,22 @@ const refocusPastTheFloor = () => {
     window.dispatchEvent(new Event('focus'));
   });
   spy.mockRestore();
+};
+
+/**
+ * Open the top bar's notice panel.
+ *
+ * Nothing on this page announces itself in a banner any more. The four things
+ * a review cannot vouch for — a refused field, a capped list, a dead token, a
+ * head that moved — are behind one control that names the worst of them, so
+ * every assertion about what a notice *says* starts by finding that control.
+ *
+ * Finding it is half the assertion: the name passed in here is the label the
+ * bar is showing, which is the only part of a notice a reviewer sees without
+ * asking for it.
+ */
+const openNotices = async (name: RegExp): Promise<void> => {
+  await userEvent.click(await screen.findByRole('button', { name }));
 };
 
 describe('Shell', () => {
@@ -114,12 +135,15 @@ describe('Shell', () => {
     expect(files?.style.visibility).toBe('hidden');
   });
 
-  it('says when a list was cut short, and offers the way out', () => {
+  it('says when a list was cut short, and offers the way out', async () => {
     // The worst outcome is a reviewer who cannot tell "no more comments" from
     // "we dropped them", so a capped list is announced rather than absorbed.
     render(
       <Shell retry={() => {}} payload={prPayload({ truncated: { files: true, threads: true, commits: false } })} />,
     );
+
+    // The bar names it without being asked; the detail is one click behind it.
+    await openNotices(/list cut short/i);
 
     const notice = screen.getByRole('alert');
     expect(notice.textContent).toMatch(/files/i);
@@ -223,17 +247,20 @@ describe('Shell', () => {
 });
 
 /**
- * The layout preference, from the kebab all the way to what Pierre drew.
+ * The layout preference, from storage all the way to what Pierre drew.
  *
- * Worth an integration test rather than two unit ones because it crosses four
- * components — the menu sets state in `ReviewSurface`, which drills it through
- * `FilesView` into `DiffColumn` and out into an option on `CodeView` — and
- * every seam in that chain is a place a prop can be quietly dropped.
+ * Worth an integration test rather than two unit ones because it crosses five
+ * seams — `useSettings` reads `browser.storage`, `ReviewSurface` turns the flag
+ * into a `DiffStyle`, `FilesView` drills it into `DiffColumn`, and that lands
+ * as an option on `CodeView` — and every one of them is a place a value can be
+ * quietly dropped. It used to be driven from the kebab, which is where the
+ * chain started; the chain is longer now and starts further away.
  */
 describe('the diff layout', () => {
-  const openLayoutMenu = async () => {
-    await userEvent.click(screen.getByRole('button', { name: /diff options/i }));
-    return screen.getByRole('menuitemcheckbox', { name: /split view/i });
+  const storeSettings = async (patch: Record<string, unknown>): Promise<void> => {
+    await browser.storage.local.set({
+      [SETTINGS_KEY]: { ...DEFAULT_SETTINGS, ...patch },
+    });
   };
 
   it('opens unified, which is what the reviewer arrived from', async () => {
@@ -244,42 +271,89 @@ describe('the diff layout', () => {
       />,
     );
 
-    expect((await openLayoutMenu()).getAttribute('aria-checked')).toBe('false');
-  });
-
-  it('reaches the column when it is switched', async () => {
-    render(
-      <Shell
-        retry={() => {}}
-        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
-      />,
-    );
-
-    await userEvent.click(await openLayoutMenu());
-
-    await waitFor(() => {
-      expect(diffLayout('src/app.ts')).toBe('split');
-    });
-    expect((await openLayoutMenu()).getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('goes back, so the choice is not one-way', async () => {
-    render(
-      <Shell
-        retry={() => {}}
-        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
-      />,
-    );
-
-    await userEvent.click(await openLayoutMenu());
-    await waitFor(() => {
-      expect(diffLayout('src/app.ts')).toBe('split');
-    });
-
-    await userEvent.click(await openLayoutMenu());
     await waitFor(() => {
       expect(diffLayout('src/app.ts')).toBe('single');
     });
+  });
+
+  it('draws split when that is what was stored', async () => {
+    await storeSettings({ splitView: true });
+
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(diffLayout('src/app.ts')).toBe('split');
+    });
+  });
+
+  it('is no longer something the page itself can change', async () => {
+    // The guarantee that replaced the toggle: there is one place this is set,
+    // and it is not on the review. Two switches for one question is how a
+    // reviewer stops being able to tell which one is winning.
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /commit options/i }));
+
+    expect(screen.queryByRole('menuitemcheckbox', { name: /split view/i })).toBeNull();
+  });
+
+  it('hides the whitespace-only changes when that is what was stored', async () => {
+    await storeSettings({ ignoreWhitespace: true });
+
+    // A reindentation, because that is what there is to hide. The default
+    // fixture swaps one line for a different line, which the rewrite correctly
+    // leaves alone — and a file it left alone is now a file it says nothing
+    // about.
+    const reindented = fileFixture({
+      path: 'src/app.ts',
+      patch: [
+        'diff --git a/src/app.ts b/src/app.ts',
+        '--- a/src/app.ts',
+        '+++ b/src/app.ts',
+        '@@ -1,3 +1,3 @@',
+        ' one',
+        '-  spaced',
+        '+    spaced',
+        ' three',
+      ].join('\n'),
+    });
+
+    render(<Shell retry={() => {}} payload={prPayloadWithFiles([reindented])} />);
+
+    // The flag on the file's own row is the whole guarantee: a diff arriving
+    // already shortened has to say so, because the reviewer did not shorten it
+    // on this page — they ticked a box somewhere else, possibly last week.
+    await waitFor(() => {
+      expect(document.querySelector('.whitespace-flag')?.textContent).toMatch(
+        /whitespace/i,
+      );
+    });
+  });
+
+  it('says nothing on a file the rewrite had nothing to take out of', async () => {
+    await storeSettings({ ignoreWhitespace: true });
+
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([fileFixture({ path: 'src/app.ts' })])}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-file-card="src/app.ts"]')).not.toBeNull();
+    });
+    expect(document.querySelector('.whitespace-flag')).toBeNull();
   });
 });
 
@@ -412,6 +486,7 @@ describe('when the token stops working mid-review', () => {
     // on which file happens to be current.
     await userEvent.click(screen.getByRole('checkbox', { name: /src\/app\.ts/i }));
 
+    await openNotices(/token rejected/i);
     await waitFor(() => {
       expect(screen.getByText(/rejected your token/i)).toBeTruthy();
     });
@@ -427,6 +502,7 @@ describe('when the token stops working mid-review', () => {
 
     refocusPastTheFloor();
 
+    await openNotices(/new commits/i);
     await waitFor(() => {
       expect(screen.getByText(/new commits have been pushed/i)).toBeTruthy();
     });
@@ -442,6 +518,7 @@ describe('when the token stops working mid-review', () => {
     render(<Shell retry={retry} payload={prPayload()} />);
 
     refocusPastTheFloor();
+    await openNotices(/new commits/i);
     await waitFor(() => {
       expect(screen.getByText(/new commits have been pushed/i)).toBeTruthy();
     });
@@ -459,12 +536,15 @@ describe('when the token stops working mid-review', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
     refocusPastTheFloor();
+    await openNotices(/new commits/i);
     await waitFor(() => {
       expect(screen.getByText(/new commits have been pushed/i)).toBeTruthy();
     });
 
     await userEvent.click(screen.getByRole('button', { name: /^keep reading/i }));
+    // The panel closes with the last notice in it, and the bar stops naming it.
     expect(screen.queryByText(/new commits have been pushed/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /new commits/i })).toBeNull();
 
     // And it stays gone when the same commit is reported again.
     refocusPastTheFloor();
@@ -489,6 +569,7 @@ describe('when the token stops working mid-review', () => {
 
     refocusPastTheFloor();
 
+    await openNotices(/new commits/i);
     await waitFor(() => {
       expect(screen.getByText(/summary typed into the review bar/i)).toBeTruthy();
     });

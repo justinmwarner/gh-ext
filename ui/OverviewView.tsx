@@ -13,10 +13,13 @@
  * are already reading. This is where the numbers get their subjects back, so
  * "which commit should I read" can be answered before you are inside one.
  *
- * Two columns: the description gets the reading measure it needs, and the
- * facts about the change stand beside it rather than under it. Each list keeps
- * its top-bar summary at its head — the chip and the avatars are a glance, the
- * list is the answer, and having them apart meant looking in two places.
+ * Two columns, and only one of them is prose. The left is the description and
+ * nothing else, at a reading measure. The right is everything the reviewer
+ * *picks from or checks* — branches, checks, reviewers, commits — which is why
+ * the commit log is over there despite its rows being sentences. Each list
+ * keeps its one-glance summary at its head: the chip and the avatars are the
+ * glance, the list is the answer, and having them apart meant looking in two
+ * places.
  *
  * What is *outstanding* is deliberately not here. It has a view of its own,
  * because it is the thing a reviewer returns to most and it used to sit below
@@ -31,7 +34,8 @@ import { htmlToParagraphs } from './prBody';
 import { ChecksChip } from './ChecksChip';
 import { CommitLog } from './CommitLog';
 import { ReviewerAvatars } from './ReviewerAvatars';
-import { prBranches, prPermalink, prReviewers } from './prNode';
+import { branchUrl } from './githubUrl';
+import { prBranches, prHeadRepo, prPermalink, prReviewers } from './prNode';
 import { reviewerLabel, reviewerTone } from './reviewerLabel';
 
 export interface OverviewViewProps {
@@ -131,10 +135,33 @@ function Reviewers({ payload }: { payload: PrPayload }) {
 }
 
 /**
+ * One branch name, as a link where there is somewhere honest to point.
+ *
+ * `href` null keeps the name and drops the link rather than dropping the name.
+ * Which branch a pull request is merging into is a fact worth having on screen
+ * whether or not it can be opened, and a fork whose repository has since been
+ * deleted is exactly the case where the name is all that is left of it.
+ */
+function Branch({ name, href }: { name: string; href: string | null }) {
+  if (href === null) return <code>{name}</code>;
+  return (
+    <a className="branch-link" href={href}>
+      <code>{name}</code>
+    </a>
+  );
+}
+
+/**
  * What is being merged into what.
  *
  * Both names or neither. GitHub can null either side, and "main ←" reads as a
  * branch pair with one branch in it rather than as a missing field.
+ *
+ * The base branch is always in the repository the route names, so it always
+ * links. The head branch may not be: a pull request from a fork has its branch
+ * somewhere else, and `prHeadRepo` is what refuses to guess — pointing a fork's
+ * branch at the base repository is a 404 when nothing of that name is there,
+ * and someone else's code when something is.
  */
 function Branches({ payload }: { payload: PrPayload }) {
   const { base, head } = prBranches(payload.pullRequest);
@@ -143,13 +170,19 @@ function Branches({ payload }: { payload: PrPayload }) {
     return <p className="placeholder">GitHub did not say which branches.</p>;
   }
 
+  const from = prHeadRepo(payload.pullRequest);
+  const headRepo =
+    from.kind === 'same' ? payload.ref : from.kind === 'fork' ? from : null;
+
+  // `branchUrl` can answer null on its own account, which `Branch` handles the
+  // same way it handles a fork nobody can name: the name stays, the link goes.
   return (
     <p className="overview-branches" title={`Merging ${head} into ${base}`}>
-      <code>{base}</code>
+      <Branch name={base} href={branchUrl(payload.ref, base)} />
       <span className="branch-arrow" aria-hidden="true">
         ←
       </span>
-      <code>{head}</code>
+      <Branch name={head} href={headRepo === null ? null : branchUrl(headRepo, head)} />
     </p>
   );
 }
@@ -173,19 +206,6 @@ export function OverviewView({ payload, onReviewCommit }: OverviewViewProps) {
           <Description payload={payload} />
         </section>
 
-        {/* Under the description rather than in the column beside it: a
-            subject line is a sentence and wants the reading measure, and the
-            narrow column is for facts that fit on one line. */}
-        <section className="overview-section">
-          <SectionHead title="Commits">
-            <span className="overview-count">{payload.commits.length}</span>
-          </SectionHead>
-          <CommitLog
-            commits={payload.commits}
-            pr={payload.ref}
-            onReview={onReviewCommit}
-          />
-        </section>
       </div>
 
       <aside className="overview-meta">
@@ -206,6 +226,28 @@ export function OverviewView({ payload, onReviewCommit }: OverviewViewProps) {
             <ReviewerAvatars reviewers={prReviewers(payload.pullRequest)} />
           </SectionHead>
           <Reviewers payload={payload} />
+        </section>
+
+        {/* Last in this column, and no longer under the description.
+            It sat there because a commit subject is a sentence and wanted the
+            reading measure. What that missed is what the list is *for*: it is
+            not read, it is picked from — the reviewer is choosing which commit
+            to look at next, and choosing is what this column is already full
+            of. Under the description it also pushed itself off the bottom of
+            any pull request with a description of ordinary length.
+
+            Under Reviewers rather than above them because the three above it
+            are each a handful of lines and this one is not; a list that can run
+            to fifty rows in the middle would bury them. */}
+        <section className="overview-section">
+          <SectionHead title="Commits">
+            <span className="overview-count">{payload.commits.length}</span>
+          </SectionHead>
+          <CommitLog
+            commits={payload.commits}
+            pr={payload.ref}
+            onReview={onReviewCommit}
+          />
         </section>
       </aside>
     </div>

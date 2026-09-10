@@ -92,8 +92,13 @@ function createMark(doc: Document): SVGSVGElement {
   tile.setAttribute('fill', '#0d1117');
   svg.append(tile);
 
-  for (const [x, y, width, fill] of MARK_BARS) {
+  MARK_BARS.forEach(([x, y, width, fill], index) => {
     const bar = doc.createElementNS(NS, 'rect');
+    // Numbered so the stylesheet can stagger them. The bars are an added line,
+    // a removed line and an unchanged one, and drawing them in that order is
+    // the mark writing itself as a diff — which is the one place this card can
+    // say what it does without adding a word of copy.
+    bar.setAttribute('class', `bar bar-${index + 1}`);
     bar.setAttribute('x', String(x));
     bar.setAttribute('y', String(y));
     bar.setAttribute('width', String(width));
@@ -101,19 +106,59 @@ function createMark(doc: Document): SVGSVGElement {
     bar.setAttribute('rx', '7');
     bar.setAttribute('fill', fill);
     svg.append(bar);
-  }
+  });
   return svg;
 }
 
 /**
- * Primer's palette, hard-coded.
+ * The arrow on the button.
+ *
+ * Drawn rather than typed, so `.cta` still reports its label and nothing else:
+ * a `→` character would land in `textContent` and turn every assertion about
+ * what the button says into an assertion about how it is decorated.
+ *
+ * It is doing work, not ornament. This button does not submit anything or open
+ * a menu — it hands the reviewer to another tab — and an arrow is the shortest
+ * way to say that before it is pressed.
+ */
+function createArrow(doc: Document): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = doc.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'arrow');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  const path = doc.createElementNS(NS, 'path');
+  path.setAttribute('d', 'M2.5 8h10M8.5 4l4 4-4 4');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.8');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.append(path);
+  return svg;
+}
+
+/**
+ * Primer's palette, hard-coded, with the extension's own colours over it.
  *
  * Reading GitHub's CSS custom properties would track their themes exactly, but
  * those properties are defined on `:root` in the page and do not cross into a
  * shadow root, so every one would have to be read and copied on every theme
- * change. These six values have been stable across Primer's light and dark
+ * change. These values have been stable across Primer's light and dark
  * defaults for years, and being one shade off is a far smaller problem than a
  * card that inherits nothing and renders as unstyled HTML.
+ *
+ * What is *not* Primer is the lit edge, the bloom and the sweep. github.com is
+ * a page of grey rectangles by design, and a grey rectangle in the corner of it
+ * reads as one more piece of GitHub's chrome — or, worse, as the cookie banner
+ * it is shaped like. These say the card came from somewhere else, which is the
+ * one thing it has to communicate before anybody reads a word of it.
+ *
+ * Every animation here plays once, on arrival, and then the card is still. A
+ * loop in the corner of a page somebody is trying to read is not delight, it is
+ * a thing to be closed.
  */
 const STYLES = `
   :host {
@@ -130,17 +175,111 @@ const STYLES = `
   [hidden] {
     display: none !important;
   }
+
+  /* The card and the pill are one material at two sizes, so collapsing reads as
+     the same object folding up rather than as a swap for a second component.
+
+     The edge is a gradient, which needs two backgrounds and a transparent
+     border: the surface clipped to the padding box, the edge to the border box,
+     showing through the border the first one does not paint. */
+  .card,
+  .pill {
+    position: relative;
+    border: 1px solid transparent;
+    background:
+      linear-gradient(
+          160deg,
+          light-dark(#ffffff, #1b222c),
+          light-dark(#f3f6fa, #10161e)
+        )
+        padding-box,
+      /* Lit at the top-left and neutral the rest of the way round. A border
+         coloured all the way round reads as a status — green means something
+         specific three inches away, in the diff this card opens. */
+        linear-gradient(
+          140deg,
+          light-dark(rgba(31, 136, 61, 0.7), rgba(63, 185, 80, 0.8)),
+          light-dark(rgba(9, 105, 218, 0.45), rgba(88, 166, 255, 0.5)) 26%,
+          light-dark(#d1d9e0, #3d444d) 56%,
+          light-dark(#d1d9e0, #3d444d)
+        )
+        border-box;
+    box-shadow:
+      0 10px 28px light-dark(rgba(31, 35, 40, 0.14), rgba(1, 4, 9, 0.62)),
+      /* The brand's green, under the neutral shadow rather than instead of it:
+         enough to tint the page beneath the card, not enough to be a glow. */
+      0 4px 18px -8px light-dark(rgba(31, 136, 61, 0.4), rgba(63, 185, 80, 0.36));
+  }
+
   .card {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    min-width: 232px;
+    gap: 12px;
+    min-width: 248px;
     padding: 14px;
-    border: 1px solid light-dark(#d1d9e0, #3d444d);
-    border-radius: 12px;
-    background: light-dark(#ffffff, #151b23);
-    box-shadow: 0 8px 24px light-dark(rgba(31, 35, 40, 0.16), rgba(1, 4, 9, 0.6));
+    border-radius: 14px;
+    /* For the two decorative layers below, which are sized to the whole card
+       and would otherwise square off its corners. */
+    overflow: hidden;
   }
+
+  /* Colour bloomed in from the corners rather than laid over the whole surface,
+     so the card is still white in light mode and still near-black in dark —
+     it is lit, not tinted. */
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        120% 100% at 4% -12%,
+        light-dark(rgba(31, 136, 61, 0.13), rgba(63, 185, 80, 0.17)),
+        transparent 62%
+      ),
+      radial-gradient(
+        90% 80% at 104% 112%,
+        light-dark(rgba(9, 105, 218, 0.09), rgba(88, 166, 255, 0.13)),
+        transparent 58%
+      );
+  }
+
+  /* One pass of light across the card as it arrives. It rests off the left edge
+     and returns there, so a browser that never runs the animation shows nothing
+     at all rather than a band parked across the button.
+
+     Three stops rather than one, and the middle one is the reason: a white core
+     is the only thing that shows on the green button, and it is invisible on a
+     white card — so the flanks are tinted, which is the reverse. In dark mode
+     one pale band does both. */
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    transform: translateX(-140%);
+    background: linear-gradient(
+      104deg,
+      transparent 34%,
+      light-dark(rgba(31, 136, 61, 0.18), rgba(63, 185, 80, 0.14)) 44%,
+      light-dark(rgba(255, 255, 255, 0.92), rgba(224, 238, 255, 0.24)) 50%,
+      light-dark(rgba(9, 105, 218, 0.14), rgba(88, 166, 255, 0.14)) 56%,
+      transparent 66%
+    );
+    animation: sweep 820ms 200ms cubic-bezier(0.33, 0, 0.15, 1);
+  }
+
+  /* Above the bloom. Without this the two radial layers paint over the header
+     and the button, which are not positioned and so lose to anything that is. */
+  .head,
+  .cta,
+  .status {
+    position: relative;
+    z-index: 1;
+  }
+
   .head {
     display: flex;
     align-items: center;
@@ -162,6 +301,24 @@ const STYLES = `
        A hairline boundary rather than a lighter tile, so the logo itself is
        the same artwork on both themes. */
     box-shadow: 0 0 0 1px light-dark(transparent, rgba(240, 246, 252, 0.14));
+  }
+  /* The mark drawing itself: added, removed, unchanged, in that order and from
+     the left, which is how the diff underneath renders too. The backwards fill
+     holds each bar at zero through its delay; without it all three are full
+     width for the first 120ms and then jump. */
+  .bar {
+    transform-box: fill-box;
+    transform-origin: left center;
+    animation: draw 440ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  .bar-1 {
+    animation-delay: 120ms;
+  }
+  .bar-2 {
+    animation-delay: 200ms;
+  }
+  .bar-3 {
+    animation-delay: 280ms;
   }
   /* Sentence case, and quieter than the button. This is a label saying whose
      card this is, not the thing the reviewer came for. It used to be uppercase
@@ -196,23 +353,86 @@ const STYLES = `
     padding: 0;
     font-size: 16px;
     line-height: 1;
+    border-radius: 999px;
     background: transparent;
     color: light-dark(#59636e, #9198a1);
+    transition: background 140ms ease-out, color 140ms ease-out;
   }
   .collapse:hover {
-    background: light-dark(#eff2f5, #262c36);
+    background: light-dark(rgba(31, 35, 40, 0.07), rgba(240, 246, 252, 0.1));
     color: light-dark(#1f2328, #e6edf3);
   }
+  /* A pill, matching the collapsed state: the same shape growing and shrinking
+     is what makes the two reads as one thing. Its own gradient runs top to
+     bottom, so the button is lit from above while the card is lit from the
+     corner, and the two do not fight. */
   .cta {
-    padding: 9px 16px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 18px;
     font-weight: 600;
-    transition: background 120ms ease-out;
+    border-radius: 999px;
     color: #ffffff;
-    background: light-dark(#1f883d, #238636);
-    border-color: light-dark(rgba(31, 35, 40, 0.15), rgba(240, 246, 252, 0.1));
+    background: linear-gradient(180deg, #2ea043, light-dark(#1a7f37, #187433));
+    border-color: light-dark(rgba(31, 35, 40, 0.16), rgba(240, 246, 252, 0.12));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 4px 12px -5px light-dark(rgba(31, 136, 61, 0.55), rgba(63, 185, 80, 0.4));
+    transition:
+      transform 150ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 150ms ease-out,
+      filter 150ms ease-out;
   }
   .cta:hover {
-    background: light-dark(#1a7f37, #29903b);
+    transform: translateY(-1px);
+    filter: brightness(1.07);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      0 8px 16px -6px light-dark(rgba(31, 136, 61, 0.6), rgba(63, 185, 80, 0.5));
+  }
+  /* Back down under the finger, and dimmer. A button that only ever rises has
+     no bottom to it. */
+  .cta:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+  }
+  /* Leans towards where it is about to send you. Small: the arrow is a hint
+     about the destination, not an animation to watch. */
+  .arrow {
+    display: block;
+    width: 15px;
+    height: 15px;
+    flex: none;
+    opacity: 0.85;
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 180ms ease-out;
+  }
+  .cta:hover .arrow {
+    transform: translateX(3px);
+    opacity: 1;
+  }
+  /* The same pass of light as the card's, on hover, so the gesture the card
+     made on arrival is the one the button repeats when it is pointed at. */
+  .cta::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transform: translateX(-140%);
+    background: linear-gradient(
+      104deg,
+      transparent 38%,
+      rgba(255, 255, 255, 0.34) 50%,
+      transparent 62%
+    );
+  }
+  .cta:hover::after {
+    animation: sweep 680ms cubic-bezier(0.33, 0, 0.15, 1);
   }
   .status {
     margin: 0;
@@ -227,37 +447,68 @@ const STYLES = `
     font-size: 13px;
     font-weight: 500;
     border-radius: 999px;
-    transition: color 120ms ease-out, box-shadow 120ms ease-out;
-    border-color: light-dark(#d1d9e0, #3d444d);
-    background: light-dark(#ffffff, #151b23);
     color: light-dark(#59636e, #9198a1);
-    box-shadow: 0 4px 12px light-dark(rgba(31, 35, 40, 0.12), rgba(1, 4, 9, 0.5));
+    transition:
+      transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+      color 140ms ease-out,
+      box-shadow 160ms ease-out;
   }
   .pill:hover {
+    transform: translateY(-1px);
     color: light-dark(#1f2328, #e6edf3);
+    box-shadow:
+      0 14px 30px light-dark(rgba(31, 35, 40, 0.16), rgba(1, 4, 9, 0.66)),
+      0 6px 20px -8px light-dark(rgba(31, 136, 61, 0.5), rgba(63, 185, 80, 0.45));
   }
   /* Entrance. The default state is the visible one and the animation only
      plays from hidden to it, so a browser that never runs it — a headless
-     render, an extension that blocks animation — still shows the card. */
+     render, an extension that blocks animation — still shows the card.
+     It replays when the pill is expanded, which is the point: opening the card
+     is the same arrival as the first one, and should look like it. */
   .card,
   .pill {
-    animation: rise 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: rise 420ms cubic-bezier(0.16, 1, 0.3, 1);
   }
   @keyframes rise {
     from {
       opacity: 0;
-      transform: translateY(6px);
+      transform: translateY(10px) scale(0.96);
     }
   }
+  @keyframes sweep {
+    to {
+      transform: translateX(140%);
+    }
+  }
+  @keyframes draw {
+    from {
+      transform: scaleX(0);
+      opacity: 0;
+    }
+  }
+  /* Everything above is decoration on top of a card that is already legible, so
+     switching it off leaves a complete card rather than a broken one. The
+     gradients stay: they are not motion. */
   @media (prefers-reduced-motion: reduce) {
     .card,
-    .pill {
+    .pill,
+    .bar,
+    .card::after,
+    .cta:hover::after {
       animation: none;
     }
     .cta,
     .collapse,
-    .pill {
+    .pill,
+    .arrow {
       transition: none;
+    }
+    .cta:hover,
+    .pill:hover {
+      transform: none;
+    }
+    .cta:hover .arrow {
+      transform: none;
     }
   }
 `;
@@ -329,7 +580,7 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
   const cta = doc.createElement('button');
   cta.className = 'cta';
   cta.type = 'button';
-  cta.textContent = CTA;
+  cta.append(doc.createTextNode(CTA), createArrow(doc));
 
   const status = doc.createElement('p');
   status.className = 'status';

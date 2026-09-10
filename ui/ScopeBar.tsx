@@ -20,11 +20,13 @@
  * kebab. The sentence is the part that varies in length, so it goes where
  * growing costs nothing — the tabs shift right and the strip scrolls.
  *
- * "Everything else" is why the kebab says *diff* options rather than *commit*
- * options. The layout the column draws in belongs to the same sentence as the
- * commits it is drawing — both are answers to "what is on screen" — and the
- * alternative was a fourth control on a row whose whole design was getting it
- * down to three.
+ * "Everything else" is now only ever about *which commits*, so the kebab says
+ * so. It used to say "diff options" and to carry the split-view toggle, on the
+ * argument that how the column is drawn is part of the same sentence as what
+ * it is drawing. That toggle has moved to the options page — being one column
+ * or two is a fact about the reviewer, not about this pull request — and a
+ * menu named for a category with one member left in it was naming the wrong
+ * thing.
  */
 
 import type { DiffScope, ResolvedScope } from '@/lib/review/diffScope';
@@ -78,9 +80,6 @@ export interface ScopeBarProps {
   onOpenPicker: () => void;
   onSinceReview: () => void;
   onShowAll: () => void;
-  /** Whether the column is drawing the two files side by side. */
-  splitView: boolean;
-  onToggleSplitView: () => void;
 }
 
 /**
@@ -143,8 +142,6 @@ export function ScopeBar({
   onOpenPicker,
   onSinceReview,
   onShowAll,
-  splitView,
-  onToggleSplitView,
 }: ScopeBarProps) {
   const failed = requestError !== null;
   const narrowing = showing(scope, busy, failed);
@@ -176,17 +173,6 @@ export function ScopeBar({
     items.push({ id: 'all', label: 'Show all commits', onSelect: onShowAll });
   }
 
-  // Last, and never disabled. The three above it all depend on a commit list
-  // that GitHub may not have sent; how the diff on screen is drawn does not
-  // depend on anything, so it is the one item here that always works.
-  items.push({
-    id: 'split',
-    label: 'Split view',
-    onSelect: onToggleSplitView,
-    checked: splitView,
-    title: 'Show the old and new files in two columns instead of one.',
-  });
-
   return (
     <div className="scope-bar" data-scope={scopeState(scope, failed)}>
       {/* Left, because it is the part that varies in length. Growing here
@@ -215,7 +201,7 @@ export function ScopeBar({
 
       <CommitTabs commits={commits} scope={chosen} onScope={onScope} />
 
-      <MenuButton label="Diff options" items={items} />
+      <MenuButton label="Commit options" items={items} />
 
       {/* `status` rather than `alert`: none of these is a failure of something
           the reviewer just did, and an assertive announcement on every toggle

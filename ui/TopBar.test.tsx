@@ -32,18 +32,24 @@ beforeEach(() => {
   requestMock.mockReset();
 });
 
-const tree = (payload: PrPayload) => (
+const tree = (payload: PrPayload, movedTo: string | null = null) => (
   <ReviewSessionProvider
     pullRequest={payload.pullRequest}
     prRef={payload.ref}
     threads={payload.threads}
     drafts={new DraftStore(memoryStore())}
   >
-    <TopBar payload={payload} />
+    <TopBar
+      payload={payload}
+      retry={() => {}}
+      movedTo={movedTo}
+      onDismissMoved={() => {}}
+    />
   </ReviewSessionProvider>
 );
 
-const mount = (payload: PrPayload = prPayload()) => render(tree(payload));
+const mount = (payload: PrPayload = prPayload(), movedTo: string | null = null) =>
+  render(tree(payload, movedTo));
 
 describe('TopBar', () => {
   it('renders the title and number from the payload', () => {
@@ -169,5 +175,80 @@ describe('while a review is pending', () => {
     mount();
 
     expect(screen.queryByText(/not posted/i)).toBeNull();
+  });
+});
+
+/**
+ * Who is offered a review to open.
+ *
+ * The button is absent rather than disabled in both cases, which is the
+ * opposite of what the footer does with Approve — and deliberately. A disabled
+ * Approve sits beside an enabled Comment, so the pair says "that one, not
+ * this"; there is no such neighbour here, and a primary button that can never
+ * be pressed is chrome that reads as a bug. `NoticeCenter` carries the reason
+ * for the permission case, and authorship needs none.
+ */
+describe('starting a review', () => {
+  const startButton = () => screen.queryByRole('button', { name: /start a review/i });
+
+  it('is offered on someone else’s pull request', () => {
+    mount();
+
+    expect(startButton()).not.toBeNull();
+  });
+
+  it('is not offered on your own', () => {
+    // GitHub would accept it, as a COMMENT review. The two verdicts worth
+    // opening a review for are both refused on your own work, and a comment
+    // written without one posts immediately — which is what an author wants.
+    mount(prPayload({ pullRequest: pullRequestNode({ viewerDidAuthor: true }) }));
+
+    expect(startButton()).toBeNull();
+  });
+
+  it('is not offered to an account that can only read', () => {
+    // Worse than useless there: the review would open, comments would queue on
+    // it, and the submit would be refused — leaving every one of them invisible
+    // with no way to post them.
+    mount(
+      prPayload({
+        pullRequest: pullRequestNode({ repository: { viewerPermission: 'READ' } }),
+      }),
+    );
+
+    expect(startButton()).toBeNull();
+  });
+
+  it('is offered when the permission field is missing', () => {
+    // An older cached payload. Silence is not a refusal.
+    mount(
+      prPayload({ pullRequest: pullRequestNode({ repository: undefined }) }),
+    );
+
+    expect(startButton()).not.toBeNull();
+  });
+
+  it('still shows a review already open, whoever opened it', async () => {
+    // The one case where the button has to survive the rule. A review resumed
+    // from GitHub is submitted from the footer, and hiding the chip that says
+    // one exists would leave the reviewer with queued comments and nothing on
+    // screen saying so.
+    requestMock.mockResolvedValue({
+      ok: true,
+      data: { data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_9' } } } },
+    });
+    const payload = prPayload();
+    const { rerender } = mount(payload);
+
+    await userEvent.click(screen.getByRole('button', { name: /start a review/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /review pending/i })).toBeDefined();
+    });
+
+    rerender(
+      tree(prPayload({ pullRequest: pullRequestNode({ viewerDidAuthor: true }) })),
+    );
+
+    expect(screen.getByRole('button', { name: /review pending/i })).toBeDefined();
   });
 });

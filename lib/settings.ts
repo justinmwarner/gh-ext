@@ -23,6 +23,52 @@ export interface Settings {
    * probably using for their own work.
    */
   debugLogging: boolean;
+  /**
+   * Draw every file's diff without the changes that were only whitespace.
+   *
+   * Here rather than on the page, and that reverses a decision this file's
+   * neighbours used to argue for. The objection was real and is worth keeping,
+   * because this setting has to answer it: a preference that *hides lines*
+   * must not be able to arrive already on without the reviewer knowing.
+   *
+   * What answers it is where the switch now lives. A per-file button on a card,
+   * remembered across sessions, is a diff quietly reshaped by a decision made
+   * last Tuesday on a different pull request — the reviewer has no reason to
+   * look at the card header for the explanation. A checkbox on the options
+   * page, under the sentence saying what it hides, is a decision made about
+   * every review, in the one place a reviewer already goes to change how this
+   * extension behaves.
+   *
+   * The per-file button is gone rather than demoted. Two switches for one
+   * question is how a reviewer ends up unsure which of them is winning.
+   */
+  ignoreWhitespace: boolean;
+  /**
+   * Draw the old and new file in two columns rather than one.
+   *
+   * Purely how the same lines are arranged, so it carries none of the hazard
+   * above: nothing is hidden either way. It is stored for the ordinary reason
+   * — a reviewer who prefers side by side prefers it on every pull request,
+   * and setting it again on each one is the chore an extension exists to
+   * remove.
+   */
+  splitView: boolean;
+  /**
+   * Fold away the diff of a file nobody wrote.
+   *
+   * Folded rather than hidden, and that is the whole reason this one is not as
+   * dangerous as {@link ignoreWhitespace} despite sounding worse. The file
+   * stays in the tree and in the column, keeps its name and its counts, wears a
+   * label saying why its body is not drawn, and is one press from open. Nothing
+   * about the pull request becomes unknowable; a lockfile's four thousand lines
+   * simply stop sitting between two files somebody wrote.
+   *
+   * Off by default all the same. A fresh install shows what GitHub shows, and
+   * `lib/review/generated.ts` is a heuristic over paths — being wrong about one
+   * is cheap once the reviewer has opted in and knows the rule exists, and
+   * expensive on the first pull request they ever open here.
+   */
+  hideGenerated: boolean;
 }
 
 /** `storage.local` key holding the whole {@link Settings} object. */
@@ -49,6 +95,12 @@ export const DEFAULT_SETTINGS: Settings = {
   openIn: 'new-tab',
   autoOpen: false,
   debugLogging: false,
+  // Both off, so a first review looks like GitHub's own until the reviewer
+  // says otherwise. `ignoreWhitespace` especially: the default for a setting
+  // that hides lines is the one that hides none of them.
+  ignoreWhitespace: false,
+  splitView: false,
+  hideGenerated: false,
 };
 
 /**
@@ -84,16 +136,21 @@ export function parseSettings(raw: unknown): Settings {
   }
 
   const stored = raw as Record<string, unknown>;
+
+  // Strictly a boolean: the string 'false' is truthy, so a loose check would
+  // turn a setting on for someone whose stored value was trying to turn it off.
+  const flag = (key: keyof Settings & string): boolean =>
+    typeof stored[key] === 'boolean'
+      ? (stored[key] as boolean)
+      : (DEFAULT_SETTINGS[key] as boolean);
+
   return {
     openIn: isOpenIn(stored.openIn) ? stored.openIn : DEFAULT_SETTINGS.openIn,
-    autoOpen:
-      typeof stored.autoOpen === 'boolean' ? stored.autoOpen : DEFAULT_SETTINGS.autoOpen,
-    // Strictly a boolean: the string 'false' is truthy, so a loose check would
-    // turn logging on for someone whose stored value was trying to turn it off.
-    debugLogging:
-      typeof stored.debugLogging === 'boolean'
-        ? stored.debugLogging
-        : DEFAULT_SETTINGS.debugLogging,
+    autoOpen: flag('autoOpen'),
+    debugLogging: flag('debugLogging'),
+    ignoreWhitespace: flag('ignoreWhitespace'),
+    splitView: flag('splitView'),
+    hideGenerated: flag('hideGenerated'),
   };
 }
 

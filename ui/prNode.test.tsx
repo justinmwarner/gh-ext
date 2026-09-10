@@ -10,7 +10,12 @@
 
 import { describe, expect, it } from 'vitest';
 import type { PullRequestNode } from '@/lib/messages';
-import { prReviewers } from './prNode';
+import {
+  prHeadRepo,
+  prReviewers,
+  prViewerCanReview,
+  prViewerPermission,
+} from './prNode';
 import { pullRequestNode } from './prPayload.fixture';
 
 const requesting = (...reviewers: unknown[]): PullRequestNode =>
@@ -154,5 +159,106 @@ describe('prReviewers', () => {
     );
 
     expect(prReviewers(node).map((r) => r.kind)).toEqual(['user', 'team']);
+  });
+});
+
+/**
+ * Where a fork's head branch lives, and when to admit we do not know.
+ *
+ * The stakes are not "the link 404s". A pull request from `someone/widgets`
+ * with a branch called `main` linked into `acme/widgets` lands on `acme`'s own
+ * `main` — a real page, full of code, that is not the code under review.
+ */
+describe('prHeadRepo', () => {
+  it('reports the reviewed repository for a branch in it', () => {
+    expect(prHeadRepo(pullRequestNode())).toEqual({ kind: 'same' });
+  });
+
+  it('names the fork a cross-repository branch is on', () => {
+    const node = pullRequestNode({
+      isCrossRepository: true,
+      headRepository: { nameWithOwner: 'someone/widgets' },
+    });
+
+    expect(prHeadRepo(node)).toEqual({ kind: 'fork', owner: 'someone', repo: 'widgets' });
+  });
+
+  it('gives up on a fork GitHub no longer has', () => {
+    // Deleting the fork leaves the pull request readable and `headRepository`
+    // null. There is then nowhere honest to point.
+    const node = pullRequestNode({ isCrossRepository: true, headRepository: null });
+
+    expect(prHeadRepo(node)).toEqual({ kind: 'unknown' });
+  });
+
+  it('gives up rather than assuming, when the field was never asked for', () => {
+    // A payload cached by a build that predates the query field. Reading the
+    // silence as "same repository" is exactly the mistake that links a fork's
+    // branch into the base repo.
+    const node = pullRequestNode({ isCrossRepository: undefined });
+
+    expect(prHeadRepo(node)).toEqual({ kind: 'unknown' });
+  });
+
+  it.each(['widgets', 'a/b/c', '/widgets', 'acme/', ''])(
+    'gives up on %o, which is not an owner and a name',
+    (nameWithOwner) => {
+      const node = pullRequestNode({
+        isCrossRepository: true,
+        headRepository: { nameWithOwner },
+      });
+
+      expect(prHeadRepo(node)).toEqual({ kind: 'unknown' });
+    },
+  );
+});
+
+describe('prViewerPermission', () => {
+  it('reads what GitHub said', () => {
+    expect(prViewerPermission(pullRequestNode())).toBe('WRITE');
+  });
+
+  it('is null when the field is absent', () => {
+    expect(prViewerPermission(pullRequestNode({ repository: undefined }))).toBeNull();
+  });
+});
+
+/**
+ * Whether to offer to open a review.
+ *
+ * Both arms remove a control, so both are biased the same way: anything this
+ * build does not recognize means yes. A missing button is not recoverable from
+ * by the reviewer, and a button that fails is at least legible.
+ */
+describe('prViewerCanReview', () => {
+  it('says yes to someone else’s pull request with write access', () => {
+    expect(prViewerCanReview(pullRequestNode())).toBe(true);
+  });
+
+  it('says no on your own pull request', () => {
+    // GitHub would allow it — as a COMMENT review — but the two verdicts worth
+    // opening a review for are both refused, and comments on your own diff post
+    // perfectly well without one.
+    expect(prViewerCanReview(pullRequestNode({ viewerDidAuthor: true }))).toBe(false);
+  });
+
+  it('says no with read-only access', () => {
+    const node = pullRequestNode({ repository: { viewerPermission: 'READ' } });
+
+    expect(prViewerCanReview(node)).toBe(false);
+  });
+
+  it.each(['WRITE', 'TRIAGE', 'MAINTAIN', 'ADMIN'])('says yes with %s', (permission) => {
+    // TRIAGE included deliberately. It cannot push, but it can review, and a
+    // fine-grained token issued under it can carry pull-request write.
+    const node = pullRequestNode({ repository: { viewerPermission: permission } });
+
+    expect(prViewerCanReview(node)).toBe(true);
+  });
+
+  it('says yes when the permission is missing, rather than guessing', () => {
+    // An older cached payload. Guessing "no" here would remove the button from
+    // someone entitled to it, with nothing on screen to explain where it went.
+    expect(prViewerCanReview(pullRequestNode({ repository: undefined }))).toBe(true);
   });
 });

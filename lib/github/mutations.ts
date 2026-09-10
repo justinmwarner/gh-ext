@@ -177,6 +177,38 @@ export const UNRESOLVE_THREAD = `mutation UnresolveThread($threadId: ID!) {
 }`;
 
 /**
+ * What may be done to these threads now, asked again.
+ *
+ * A query rather than a mutation, and the only one in this file, because it
+ * belongs to the same conversation: it exists to correct flags that a mutation
+ * returned and that have since stopped being true.
+ *
+ * A thread written into a PENDING review comes back from
+ * `addPullRequestReviewThread` describing a thread nobody else can see yet, and
+ * some of what a viewer may do to it is answered against that. Submitting the
+ * review makes it a real thread on the pull request without touching anything
+ * this page holds, so the flags stay as they were written — and the reviewer
+ * meets a Resolve button that is disabled on a conversation that is plainly
+ * there. Reloading fixed it, which is the tell: the server has always been
+ * right and only the copy here was stale.
+ *
+ * Asked rather than assumed. "It submitted, so it must be resolvable" is a
+ * guess, and a wrong one for anybody who may review a repository but not write
+ * to it — GitHub lets them submit the review and still refuses the resolve.
+ * See `ReadOnlyNotice`, which is the page-level half of that same rule.
+ *
+ * `nodes` takes up to 100 ids and returns null in place of any it could not
+ * resolve, so the reader has to tolerate holes rather than index by position.
+ */
+export const THREAD_PERMISSIONS = `query ThreadPermissions($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on PullRequestReviewThread {
+      id isResolved viewerCanReply viewerCanResolve viewerCanUnresolve
+    }
+  }
+}`;
+
+/**
  * Open a PENDING review.
  *
  * `event` is deliberately absent: omitting it is what leaves the review in

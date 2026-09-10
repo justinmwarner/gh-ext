@@ -56,7 +56,13 @@ export function CommitLog({ commits, pr, onReview }: CommitLogProps) {
             <span className="commit-log-number" aria-hidden="true">
               {index + 1}
             </span>
-            <span className="commit-log-headline">{commit.messageHeadline}</span>
+            {/* Titled because it truncates: the column this list sits in is
+                340px, and a subject that runs past that is exactly the one a
+                reviewer wants the rest of. The accessible name above already
+                carries it in full, so this is for the pointer. */}
+            <span className="commit-log-headline" title={commit.messageHeadline}>
+              {commit.messageHeadline}
+            </span>
             <span className="commit-log-meta">
               <code>{commit.abbreviatedOid}</code>
               {' · '}

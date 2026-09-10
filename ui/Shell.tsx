@@ -42,10 +42,6 @@ import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
 import { TopBar } from './TopBar';
 import { type ReviewView, ViewSwitcher, viewId, viewTabId } from './ViewSwitcher';
-import { DeniedNotice } from './DeniedNotice';
-import { HeadMovedNotice } from './HeadMovedNotice';
-import { TokenRejectedNotice } from './TokenRejectedNotice';
-import { TruncationNotice } from './TruncationNotice';
 import { type CurrentFile, NO_FILE, fromCommand, fromScroll, fromTree } from './currentFile';
 import { pullRequestUrl } from './githubUrl';
 import type { BlobRefs } from './blobLoader';
@@ -57,6 +53,8 @@ import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
 import { useCompareDiff } from './useCompareDiff';
 import { useHeadMoved } from './useHeadMoved';
 import { useKeymap } from './useKeymap';
+import { useGitAttributes } from './useGitAttributes';
+import { useSettings } from './useSettings';
 
 /** Which overlay is open. Only ever one: they all want the same keystrokes. */
 type Overlay =
@@ -121,25 +119,42 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const [view, setView] = useState<ReviewView>('files');
 
   /**
-   * Unified or side by side, for the session and no longer.
+   * How the diff is drawn, from the options page rather than from this page.
    *
-   * This is the natural place to have started persisting interface state, and
-   * it is deliberately not the place. Nothing on this page is remembered —
-   * not the rail width, not which files are collapsed, not the per-file
-   * comparison mode, whose own control says so and says why. One preference in
-   * `chrome.storage` would not be a feature, it would be the first half of a
-   * settings system, and the second half arrives one control at a time.
+   * Both of these — one column or two, and whether whitespace-only changes are
+   * hidden — used to be controls here and be forgotten on reload. The argument
+   * for that was that a remembered display preference decides what a pull
+   * request looks like before the reviewer has opened it, and for ignoring
+   * whitespace that means arriving at a diff with lines already taken out of
+   * it.
    *
-   * The reason for it not being the exception is specific rather than tidy.
-   * The review page's job is to be honest about what the reviewer has seen, and
-   * a remembered display preference decides what a pull request looks like
-   * before they have opened it — for split that is merely surprising, but it is
-   * the same door that "ignore whitespace, everywhere, still on from last
-   * Tuesday" walks through, and that one hides lines. Per session, both of
-   * them, and the reviewer is never reading a diff shaped by a decision they
-   * have forgotten making.
+   * That hazard is real and has not gone away; what changed is where the
+   * switch is. A setting on the options page is a decision a reviewer made
+   * about every review, in the place they already go to change how this
+   * extension behaves, next to the sentence saying what it hides — not a
+   * button on a file header that happened to still be pressed. `Settings`
+   * carries the long version of this.
+   *
+   * Still nothing else on this page is remembered: not the rail width, not
+   * which files are collapsed, not the per-file comparison mode, whose own
+   * control says so and says why. Those are answers to *this* pull request.
+   * These two are answers to how the reviewer reads diffs.
    */
-  const [diffStyle, setDiffStyle] = useState<DiffStyle>('unified');
+  const settings = useSettings();
+  const diffStyle: DiffStyle = settings.splitView ? 'split' : 'unified';
+  /**
+   * What the repository declares about its own generated files.
+   *
+   * Only fetched while the setting that consults it is on — a reviewer who has
+   * not asked for generated files to be folded should not have this extension
+   * reading extra files out of their repositories. `useGitAttributes` says why
+   * it is the root file and no other.
+   */
+  const gitAttributes = useGitAttributes(
+    payload.ref,
+    payload.headSha,
+    settings.hideGenerated,
+  );
 
   const column = useRef<DiffColumnHandle>(null);
 
@@ -376,34 +391,17 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
 
   return (
     <div className="shell" data-current-file={current.path ?? ''} data-view={view}>
-      <TopBar payload={payload} />
-      {/* First of the banners, because it is the only one that says the page
-          below is out of date rather than incomplete — and because it is the
-          only one with an expiry: the other two describe this payload forever,
-          while this one is about a commit that is getting further away. */}
-      {headMoved.movedTo !== null && (
-        <HeadMovedNotice
-          loaded={payload.headSha}
-          movedTo={headMoved.movedTo}
-          reviewPending={session.pending.kind === 'pending'}
-          onReload={retry}
-          onDismiss={headMoved.dismiss}
-        />
-      )}
-      <TruncationNotice
-        truncated={payload.truncated}
-        pr={payload.ref}
-        href={prPermalink(payload.pullRequest)}
+      {/* Everything this page cannot vouch for — a moved head, a capped list,
+          a refused field, a dead token, an account that may only read — used to
+          be a stack of banners between here and the diff. They are all in the
+          bar now, behind one control that names the worst of them;
+          `NoticeCenter` explains the trade. */}
+      <TopBar
+        payload={payload}
+        retry={retry}
+        movedTo={headMoved.movedTo}
+        onDismissMoved={headMoved.dismiss}
       />
-      <DeniedNotice
-        denied={payload.denied}
-        pr={payload.ref}
-        href={prPermalink(payload.pullRequest)}
-      />
-      {/* Above the views rather than in place of them. What is on screen was
-          loaded with a token that worked and is still worth reading; only
-          writing has stopped. */}
-      {session.tokenRejected && <TokenRejectedNotice retry={retry} />}
 
       <div className="shell-body">
         <ViewSwitcher active={view} unresolved={unresolved} onSelect={setView} />
@@ -445,10 +443,6 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
                 );
               }}
               onShowAll={() => setScope(WHOLE_DIFF)}
-              splitView={diffStyle === 'split'}
-              onToggleSplitView={() => {
-                setDiffStyle((now) => (now === 'split' ? 'unified' : 'split'));
-              }}
             />
 
             <FilesView
@@ -469,6 +463,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               }
               sides={sides}
               diffStyle={diffStyle}
+              ignoreWhitespace={settings.ignoreWhitespace}
+              hideGenerated={settings.hideGenerated}
+              gitAttributes={gitAttributes}
               columnRef={column}
             />
           </div>

@@ -164,7 +164,16 @@ code {
 .topbar {
   position: sticky;
   top: 0;
-  z-index: 10;
+  /* Above `.scope-bar`, which is the row directly beneath it and was at the
+     same 10 — so the later of the two in the document won, and the scope bar
+     painted over anything hanging out of this one. Nothing was hanging out of
+     it until the notice panel did, and the panel came out with its heading
+     under the tab strip. The two never overlap in the other direction: the
+     kebab's menu opens downwards, over the diff.
+
+     The layers on this page, bottom to top: 1 sticky file headers, 10 the
+     scope bar, 15 here, 20 the overlays. */
+  z-index: 15;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -741,7 +750,12 @@ button.scope-showing:hover {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 2px;
+  /* Between the tabs and the Options button below them, and nowhere else — the
+     tabs keep their own tighter gap. It is a floor rather than the spacing:
+     `margin-top: auto` normally leaves most of the rail between the two, but on
+     a window short enough to use it all, this is what stops Options arriving
+     flush against Overview and reading as a fourth tab. */
+  gap: 10px;
   /* Sized by its longest label rather than by a number that has to be kept in
      step with one. "Conversations" was being clipped to "Conversa…". */
   width: max-content;
@@ -749,6 +763,22 @@ button.scope-showing:hover {
   padding: 8px 6px;
   border-right: 1px solid light-dark(#d1d9e0, #3d444d);
   background: light-dark(#f6f8fa, #010409);
+}
+
+/* The `tablist` itself, which is the three views and nothing else — Options
+   is a button in the rail, not a fourth tab. See `ViewSwitcher`. */
+.view-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* On the floor of the rail, which is what `margin-top: auto` buys in a flex
+   column. No rule above it: the distance is the grouping, and a hairline with
+   three hundred pixels of nothing over it draws the eye to a boundary that is
+   not where the interesting one is. */
+.view-options {
+  margin-top: auto;
 }
 
 .view-tab {
@@ -1283,89 +1313,197 @@ button.scope-showing:hover {
   border-radius: 6px;
 }
 
-/* A capped list is not a failure, so this warns rather than alarms — but it
-   sits above the fold with the escape hatch in it, because the page below it
-   is genuinely incomplete. */
-.truncation-notice {
-  display: flex;
-  gap: 12px;
+/* ------------------------------------------------------ the notice panel */
+
+/*
+ * Everything the page cannot vouch for, in the top bar rather than under it.
+ *
+ * These four things were four stacked banners: `truncation`, `denied`,
+ * `token-rejected` and `head-moved`, each one a row between the reviewer and
+ * the diff for as long as the tab was open. `ui/NoticeCenter.tsx` says why they
+ * moved; this is what they look like now.
+ *
+ * Three tones and no more: red for the one thing that stops the reviewer
+ * writing, amber for a page that arrived incomplete, blue for a pull request
+ * that simply moved on. The button carries the worst tone present, and the
+ * panel repeats it per section, so a reviewer who opened it on red knows which
+ * of the three sections is the red one.
+ */
+.notice-trigger {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 0 16px 12px;
-  border-left-color: light-dark(#bf8700, #d29922);
+  gap: 6px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid;
+  border-radius: 999px;
+  transition: background 120ms ease-out;
 }
 
-.truncation-notice .button {
+/* Colour on the text and the edge rather than a filled chip. Filled, this
+   competes with `Start a review` two inches to its right — and that button is
+   the thing the reviewer came here to press. */
+.notice-trigger[data-tone='blocked'] {
+  color: light-dark(#a40e26, #ff8182);
+  border-color: light-dark(#ffcecb, #6e2529);
+  background: light-dark(#fff0ee, #2b1618);
+}
+
+.notice-trigger[data-tone='blocked']:hover {
+  background: light-dark(#ffe3e0, #3a1c1e);
+}
+
+.notice-trigger[data-tone='incomplete'] {
+  color: light-dark(#7d4e00, #e3b341);
+  border-color: light-dark(#f0d58c, #6b4b12);
+  background: light-dark(#fff8c5, #2b2416);
+}
+
+.notice-trigger[data-tone='incomplete']:hover {
+  background: light-dark(#fdf0a3, #3a301b);
+}
+
+.notice-trigger[data-tone='moved'] {
+  color: light-dark(#0550ae, #79c0ff);
+  border-color: light-dark(#b6d7ff, #1f4b7d);
+  background: light-dark(#ddf4ff, #12233a);
+}
+
+.notice-trigger[data-tone='moved']:hover {
+  background: light-dark(#c6e9ff, #17304d);
+}
+
+.notice-icon {
   flex: none;
 }
 
-/* GitHub answered, but refused part of the answer. The review below is real;
-   one region of it is missing rather than empty, and the only thing that can
-   change that is the token — hence the settings button beside the escape
-   hatch. Same shape as the truncation banner, since it says the same kind of
-   thing: trust what is here, and know what is not. */
-.denied-notice {
+/* Only drawn when there is more than one, so it never reads as "1 of 1". */
+.notice-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+  background: light-dark(rgb(31 35 40 / 9%), rgb(240 246 252 / 12%));
+}
+
+/*
+ * Anchored to the bar rather than to the button.
+ *
+ * `.topbar` is `position: sticky` with a `z-index`, which makes it the nearest
+ * positioned ancestor and a stacking context of its own — so `top: 100%` is the
+ * underside of the bar, and nothing in here can climb over the overlays, which
+ * sit at 20 in the root. Nothing between here and the viewport clips: `.shell`
+ * is a plain flex column and the bar has no overflow of its own.
+ *
+ * Which also means this panel can only reach as high as the bar does. That is
+ * why `.topbar` sits at 15 rather than the 10 it shared with `.scope-bar`: at
+ * 10 the scope bar won on document order and took the top of this panel with
+ * it.
+ */
+.notice-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 12px;
+  z-index: 5;
+  width: min(460px, calc(100vw - 24px));
+  max-height: min(70vh, 620px);
+  overflow-y: auto;
+  background: light-dark(#ffffff, #151b23);
+  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px light-dark(rgb(140 149 159 / 25%), rgb(1 4 9 / 65%));
+}
+
+.notice-item {
+  padding: 12px 14px;
+  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+}
+
+.notice-item:last-child {
+  border-bottom: 0;
+}
+
+/* The heading names the problem in three words so the panel can be skimmed;
+   everything under it is the explanation. Same icon as the button, so the row
+   the button was talking about is the one that is obviously it. */
+.notice-item-title {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin: 0 16px 12px;
-  border-left-color: light-dark(#bf8700, #d29922);
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.denied-notice p {
-  margin: 0 0 4px;
+.notice-item[data-tone='blocked'] .notice-item-title {
+  color: light-dark(#a40e26, #ff8182);
 }
 
-.denied-notice p:last-child {
+.notice-item[data-tone='incomplete'] .notice-item-title {
+  color: light-dark(#7d4e00, #e3b341);
+}
+
+.notice-item[data-tone='moved'] .notice-item-title {
+  color: light-dark(#0550ae, #79c0ff);
+}
+
+/* Stacked, not the row the banners were. Each of these was a sentence beside
+   its buttons, sharing the width of the page; here the panel is 460px and the
+   buttons were being squeezed into whatever the sentence left them. */
+.notice-body {
+  font-size: 13px;
+}
+
+.notice-body p {
+  margin: 0 0 8px;
+}
+
+.notice-body p:last-child {
   margin-bottom: 0;
 }
 
-.denied-notice .detail {
+/* GitHub's own words, kept quiet: they are for pasting into a bug report, not
+   for reading first. */
+.notice-detail {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  /* GitHub's own words, kept quiet: they are for pasting into a bug report,
-     not for reading first. */
+  font-size: 11px;
   color: light-dark(#59636e, #9198a1);
   overflow-wrap: anywhere;
 }
 
-.denied-actions {
+/* The second paragraph of a notice: what to do about it, or what caused it.
+   Quieter than the first without changing size, because it is still prose to
+   be read rather than a detail to be skipped. */
+.notice-more {
+  color: light-dark(#59636e, #9198a1);
+}
+
+/* Always the last thing in a notice, so every one of them reads the same way:
+   what happened, then what can be done about it. */
+.notice-actions {
   display: flex;
-  flex: none;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  margin-top: 10px;
 }
 
-/* The pull request moved while it was being read. Blue rather than the amber
-   the two banners above it use, and the difference is the point: those say the
-   page arrived incomplete, which is a fault. This says the world moved on,
-   which is not one — nothing here is broken and nothing needs doing unless the
-   reviewer decides it does. Same shape as its neighbours, so a page carrying
-   two of them still reads as one column of notices. */
-.head-moved-notice {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin: 0 16px 12px;
-  border-left-color: light-dark(#0969da, #4493f8);
-}
-
-.head-moved-notice p {
-  margin: 0 0 4px;
-}
-
-.head-moved-notice p:last-child {
-  margin-bottom: 0;
-}
-
-/* The commits, in the same face the commit list and the picker set them in.
-   A reviewer comparing what is on screen against what `git log` just told them
+/* The commits, in the same face the commit list and the picker set them in. A
+   reviewer comparing what is on screen against what `git log` just told them
    should not have to work out whether these are the same kind of thing. */
-.head-moved-notice code {
+.notice-body code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
@@ -1722,19 +1860,24 @@ button.scope-showing:hover {
 
 /* ------------------------------------------------------ the Overview view */
 
-/* Two columns: the description gets a reading measure, the facts about the
-   change stand beside it rather than under it. One column below 900px, where
-   two would leave neither of them readable. */
+/* Two columns: the description gets a reading measure, everything the reviewer
+   picks from or checks stands beside it rather than under it. One column below
+   900px, where two would leave neither of them readable.
+
+   340px rather than the 300 it was. The commit log moved into this column and
+   its rows are subjects — sentences, not the one-line facts the other three
+   sections hold — so the column had to grow enough for a subject to be worth
+   reading before it is cut off. */
 .overview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 40px;
   align-content: start;
   width: 100%;
   /* Sized so the description column lands near its own 72ch measure. Wider,
      and the two columns sit against opposite edges of the window with a void
      between them that reads as a rendering fault. */
-  max-width: 1000px;
+  max-width: 1040px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -1811,13 +1954,22 @@ button.scope-showing:hover {
   border-top: 1px solid light-dark(#eaeef2, #21262d);
 }
 
-/* Three columns: the number the strip also uses, the subject, and the facts.
-   The subject gets whatever is left, because it is the part worth reading. */
+/* Two rows rather than three columns, which is what moving into the 340px
+   column cost. The sha, the author and the date on the same line as the
+   subject left the subject about twelve characters before the ellipsis; under
+   it, they take space that was empty anyway and the subject gets the width.
+
+   The number spans both rows so it stays level with the top of the subject,
+   which is what keeps this list scannable against the strip above the diff. */
 .commit-log-open {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-areas:
+    'number headline'
+    'number meta';
   align-items: baseline;
-  gap: var(--gap);
+  column-gap: var(--gap);
+  row-gap: 2px;
   flex: 1 1 auto;
   min-width: 0;
   padding: 7px 8px;
@@ -1836,6 +1988,7 @@ button.scope-showing:hover {
 }
 
 .commit-log-number {
+  grid-area: number;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1843,16 +1996,23 @@ button.scope-showing:hover {
 }
 
 .commit-log-headline {
+  grid-area: headline;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* Truncates too. It is three short facts and the first of them — the sha — is
+   the one worth having, so what is lost off the end is a date the row above or
+   below almost certainly repeats. */
 .commit-log-meta {
-  flex: 0 0 auto;
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
   font-size: 12px;
   white-space: nowrap;
+  text-overflow: ellipsis;
   color: light-dark(#59636e, #9198a1);
 }
 
@@ -1897,6 +2057,7 @@ button.scope-showing:hover {
 }
 
 .overview-branches code {
+  display: block;
   padding: 1px 6px;
   border-radius: 6px;
   background: light-dark(#f6f8fa, #212830);
@@ -1905,6 +2066,25 @@ button.scope-showing:hover {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A branch name that opens the branch.
+   Underlined only on hover: two code chips side by side with a permanent rule
+   under each read as a form field rather than as a pair of links, and the
+   arrow between them is what already says these two go together. */
+.branch-link {
+  display: inline-flex;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.branch-link:hover code,
+.branch-link:focus-visible code {
+  color: light-dark(#0969da, #4493f8);
+  background: light-dark(#eaeef2, #2a313c);
+  text-decoration: underline;
 }
 
 .checks-list,
@@ -2497,52 +2677,50 @@ button.scope-showing:hover {
   background: light-dark(#0969da, #316dca);
 }
 
-/* Not a segmented control, because it is not a choice between alternatives —
-   it is one thing that is either on or off. So it reads as a single button
-   and borrows the mode buttons' metrics rather than their grouping.
+/* Amber, and deliberately not any of the colours a control on this page wears:
+   it is not a control, and what it says is a caveat on the whole card under it
+   — the body below is not the diff GitHub is showing anyone else on this pull
+   request.
 
-   It sits on the head row beside the viewed checkbox, so it must not take
-   width from the path: `flex: 0 0 auto` keeps it at its label's size however
-   long the filename is. */
-.whitespace-toggle {
+   On the head row beside the counts, so it cannot take width from the path:
+   `flex: 0 0 auto` keeps it at its label's size however long the filename is.
+   It was four lines of prose in the card's body, on every text file in the
+   pull request; the words are all still here, on the title and in the
+   accessible description. */
+.whitespace-flag {
   flex: 0 0 auto;
-  padding: 2px 10px;
+  padding: 1px 8px;
   font: inherit;
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 11px;
+  line-height: 18px;
   white-space: nowrap;
-  color: light-dark(#59636e, #9198a1);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
-  border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
   cursor: pointer;
-  transition:
-    background-color 0.12s ease,
-    color 0.12s ease;
-}
-
-.whitespace-toggle:hover {
-  background: light-dark(#eef1f4, #262c36);
-}
-
-/* Amber rather than the mode switcher's blue, and deliberately not the same
-   "this is selected" colour. A selected mode is a preference; this one means
-   the diff below is not the diff GitHub is showing anyone else on the pull
-   request, and it is the only control on the page whose being on is a caveat
-   on everything under it. */
-.whitespace-toggle[aria-pressed='true'] {
-  color: light-dark(#953800, #f0b72f);
-  border-color: light-dark(#d4a72c, #855b0f);
+  color: light-dark(#4d2d00, #f0b72f);
+  border: 1px solid light-dark(#d4a72c, #855b0f);
+  border-radius: 999px;
   background: light-dark(#fff8c5, #2e2a1a);
 }
 
-/* Tinted to match the toggle that turned it on, so the sentence and the
-   control read as one thing rather than as a note that happens to be nearby.
-   The left border is the same device `.notice` uses for a caveat. */
-.file-note[data-whitespace-note] {
-  color: light-dark(#4d2d00, #d8a657);
-  border-left: 4px solid light-dark(#d4a72c, #855b0f);
-  background: light-dark(#fff8c5, #2e2a1a);
+/* Grey rather than amber. A generated file is not a caveat on what is on
+   screen — nothing has been rewritten and no line is missing from anything
+   being drawn — it is a statement that there is nothing here worth your
+   attention. Amber is reserved for the one flag that means the body below is
+   not the diff GitHub is showing. */
+.whitespace-flag[data-held='generated'] {
+  color: light-dark(#59636e, #9198a1);
+  border-color: light-dark(#d1d9e0, #3d444d);
+  background: light-dark(#f6f8fa, #212830);
+}
+
+.whitespace-flag:hover {
+  filter: brightness(0.97);
+}
+
+/* Pressed means the reviewer overrode the rule and is reading the file in full.
+   Drawn as an outline rather than a fill: the rule still applies to this file,
+   and a chip that looked identical to its neighbours would stop saying so. */
+.whitespace-flag[aria-pressed='true'] {
+  background: none;
 }
 
 .mode-button[aria-pressed='true']:hover {

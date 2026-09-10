@@ -16,8 +16,12 @@ const URL = 'chrome-extension://abc/review.html#/pr/acme/widgets/7';
 const settings = (openIn: OpenIn, autoOpen = true): Settings => ({
   openIn,
   autoOpen,
-  // Irrelevant to where a review opens; present because Settings requires it.
+  // None of these three touch where a review opens; they are here because
+  // Settings requires them.
   debugLogging: false,
+  ignoreWhitespace: false,
+  splitView: false,
+  hideGenerated: false,
 });
 
 const ask = (

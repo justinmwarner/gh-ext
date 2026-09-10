@@ -60,14 +60,43 @@ export async function writeCardCollapsed(collapsed: boolean): Promise<void> {
  * would conclude the setting was broken.
  */
 export async function followLoggingSetting(): Promise<void> {
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local') return;
-    const change = changes[SETTINGS_KEY];
-    if (change === undefined) return;
-    setLoggingEnabled(parseSettings(change.newValue).debugLogging);
+  onSettingsChanged((settings) => {
+    setLoggingEnabled(settings.debugLogging);
   });
 
   // After the listener, not before: a settings write landing between the two
   // would otherwise be missed and the flag left stale.
   setLoggingEnabled((await readSettings()).debugLogging);
+}
+
+/**
+ * Call back whenever the stored settings change, in any extension context.
+ *
+ * The options page is a page of its own, so every preference it writes has to
+ * cross a process boundary to reach an open review. Without this the reviewer
+ * changes how diffs are drawn, comes back to the tab they were reading, and
+ * finds nothing has moved — which reads as a setting that does not work rather
+ * than one that needs a reload.
+ *
+ * Returns its own undo, because a React effect has to be able to take its
+ * listener back down.
+ */
+export function onSettingsChanged(onChange: (settings: Settings) => void): () => void {
+  const listener = (
+    changes: Record<string, { newValue?: unknown }>,
+    areaName: string,
+  ): void => {
+    if (areaName !== 'local') return;
+    const change = changes[SETTINGS_KEY];
+    if (change === undefined) return;
+    // Parsed rather than passed through: a write from a build that knows more
+    // fields than this one arrives here, and `parseSettings` is what stops an
+    // unrecognized value reaching the page.
+    onChange(parseSettings(change.newValue));
+  };
+
+  browser.storage.onChanged.addListener(listener);
+  return () => {
+    browser.storage.onChanged.removeListener(listener);
+  };
 }

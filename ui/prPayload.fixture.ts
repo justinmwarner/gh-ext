@@ -51,6 +51,13 @@ export function pullRequestNode(
     merged: false,
     baseRefName: 'main',
     headRefName: 'cache-the-diff',
+    // The ordinary case: a branch in the repository being reviewed, opened by
+    // someone else, by a viewer who may write there. Every test that wants one
+    // of the awkward shapes — a fork, an author, a read-only account —
+    // overrides the one field that makes it awkward.
+    isCrossRepository: false,
+    headRepository: { nameWithOwner: 'acme/widgets' },
+    repository: { viewerPermission: 'WRITE' },
     permalink: 'https://github.com/acme/widgets/pull/42',
     author: { login: 'rowan', avatarUrl: 'https://avatars.example/rowan' },
     latestReviews: {

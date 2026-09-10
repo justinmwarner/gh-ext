@@ -163,6 +163,33 @@ describe('ThreadCard', () => {
     ).toBe(true);
   });
 
+  it('says which rule refused, not merely that one did', () => {
+    // "You do not have permission to do this" was what this said, and it names
+    // nothing to check. GitHub's own rule is short and has two remedies in it:
+    // open the pull request, or hold write access — and if the reviewer already
+    // believes they do, the token is the thing that is narrower than they are.
+    mount(reviewThread({ path: 'src/app.ts', viewerCanResolve: false }));
+
+    const button = screen.getByRole('button', { name: 'Resolve conversation' });
+    const described = button.getAttribute('aria-describedby');
+    expect(described).not.toBeNull();
+
+    // Announced with the button, so it is not a pointer-only affordance on a
+    // control that is not even in the tab order.
+    const reason = document.getElementById(described ?? '');
+    expect(reason?.textContent).toMatch(/write access to the repository/i);
+    expect(reason?.textContent).toMatch(/token may have less access/i);
+    expect(button.getAttribute('title')).toBe(reason?.textContent);
+  });
+
+  it('explains nothing when there is nothing to explain', () => {
+    mount(reviewThread({ path: 'src/app.ts' }));
+
+    const button = screen.getByRole('button', { name: 'Resolve conversation' });
+    expect(button.getAttribute('aria-describedby')).toBeNull();
+    expect(button.getAttribute('title')).toBeNull();
+  });
+
   it('disables reopening when the viewer may not unresolve', () => {
     mount(
       reviewThread({

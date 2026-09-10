@@ -62,6 +62,24 @@ describe('mounting', () => {
     expect(find(card, '.cta').textContent).toBe('Start a Better Review');
   });
 
+  it('points at where the button is about to send you', () => {
+    // Drawn rather than typed, which is what keeps the assertion above about
+    // the label and not about the decoration: a `→` character would be in
+    // `textContent` and every match on the button's words would have to know it.
+    const { card } = open();
+    expect(card.root.querySelector('.cta .arrow')).not.toBeNull();
+  });
+
+  it('draws the mark as three bars that can be staggered', () => {
+    // The bars animate in one after another, added then removed then
+    // unchanged, which the stylesheet times off these classes. Unnumbered,
+    // all three arrive at once and the mark is a logo rather than a diff.
+    const { card } = open();
+    expect(card.root.querySelectorAll('.card .mark .bar').length).toBe(3);
+    expect(card.root.querySelector('.card .mark .bar-1')).not.toBeNull();
+    expect(card.root.querySelector('.card .mark .bar-3')).not.toBeNull();
+  });
+
   it('leaves nothing behind when destroyed', () => {
     const { card } = open();
     card.destroy();

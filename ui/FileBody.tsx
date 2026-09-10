@@ -32,35 +32,18 @@ export interface FileBodyProps {
   file: ReviewFile;
   /** How this file is being compared. Already resolved against what it offers. */
   mode: string;
-  /** The rewrite this file is being read through, or null for GitHub's diff. */
-  whitespace: WhitespaceDiff | null;
   /** Threads on this file that the diff cannot draw. */
   unanchored: readonly ListedThread[];
   /** The two commits a rich comparison reads whole files from. */
   blobs: BlobRefs | null;
 }
 
-export function FileBody({
-  file,
-  mode,
-  whitespace,
-  unanchored,
-  blobs,
-}: FileBodyProps) {
+export function FileBody({ file, mode, unanchored, blobs }: FileBodyProps) {
   const body = fileBody(file);
   const raw = mode === RAW.id;
 
   return (
     <div className="file-body" data-file-body={file.path}>
-      {/* Not `role="status"`. This does not announce an event, it labels what
-          is underneath it for as long as it is underneath it — and it is the
-          only thing on the page that says the body is not GitHub's diff. */}
-      {whitespace !== null && (
-        <p className="file-note" data-whitespace-note role="note">
-          {whitespaceNotice(whitespace)}
-        </p>
-      )}
-
       {/* The sentence explaining an absent diff belongs to the raw view alone.
           Left on, a PNG in its side-by-side comparison would carry "Binary
           file changed. There is no text diff to show" directly above the two
@@ -88,10 +71,12 @@ export function FileBody({
  *
  * A rich comparison is not asked about here: it always has a body, and the
  * column knows that from the mode without consulting this.
+ *
+ * One condition rather than two, since the whitespace caveat moved onto the
+ * header: with the setting on for the whole pull request, that used to mean
+ * every text file in it grew an annotation, which is precisely the strip of
+ * chrome this predicate exists to avoid.
  */
-export function hasBodyContent(
-  whitespace: WhitespaceDiff | null,
-  unanchored: readonly ListedThread[],
-): boolean {
-  return whitespace !== null || unanchored.length > 0;
+export function hasBodyContent(unanchored: readonly ListedThread[]): boolean {
+  return unanchored.length > 0;
 }

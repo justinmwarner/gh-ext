@@ -11,6 +11,11 @@
  * column has to scroll and the tree has directories, two hunks per file so a
  * comment can sit in collapsed context, and five threads covering anchored,
  * out-of-hunk, outdated, file-level and resolved.
+ *
+ * Five more files sit outside that list, each because it is the one thing the
+ * fourteen cannot be: an image, a table, an added file, a deleted one, and one
+ * whose two hunks do not balance. Nineteen in all, and the counts in the tree
+ * and the bar are sums over every one of them.
  */
 
 export const PR = { owner: 'acme', repo: 'widgets', number: 42 } as const;
@@ -96,6 +101,71 @@ const patchFor = (path: string): string =>
 export const IMAGE_FILE = 'assets/logo.png';
 export const TABLE_FILE = 'data/rows.csv';
 
+/**
+ * The three files that are not a line-for-line edit.
+ *
+ * Every entry in `FILES` swaps exactly one line for one line, twice — which
+ * made the whole fixture a pull request in which nothing is ever only added and
+ * nothing is ever only removed. Four things went untested by that: the tree's
+ * `A` and `D` markers, a hunk with no counterpart on the other side, the line
+ * numbering when the two sides stop agreeing, and a file that has no base or no
+ * head to read at all.
+ *
+ * Kept out of `FILES` for the same reason the image and the table are: what
+ * reads that list is counting text files with two symmetric hunks each, and
+ * none of these is one.
+ */
+export const ADDED_FILE = 'lib/cache.ts';
+export const DELETED_FILE = 'lib/memo.ts';
+/** Modified, but unevenly: the first hunk only removes, the second only adds. */
+export const UNEVEN_FILE = 'lib/trim.ts';
+
+/**
+ * One line reindented, one line genuinely changed, in the same run.
+ *
+ * The case the whitespace rewrite exists for, and until this the fixture had
+ * none: every other file here swaps a line for a different line, which is
+ * exactly what the rewrite is supposed to leave alone. Without a file it can
+ * shorten, "ignore whitespace" could be turned on in a browser and nothing
+ * observable would happen.
+ *
+ * Both kinds of change in one hunk on purpose. It keeps a diff on screen after
+ * the rewrite — so the card says what it hid rather than that the whole file
+ * was whitespace — and it is the shape that catches a rewrite pairing the
+ * wrong two lines, since only one of the two pairs may be merged.
+ */
+export const REINDENTED_FILE = 'lib/indent.ts';
+
+/**
+ * A file nobody wrote, and the one the repository insists is worth reading.
+ *
+ * Two of them, because folding generated files has two halves and only one is
+ * interesting to get right. Any pattern list catches a lockfile; what a
+ * reviewer notices is a repository that declared `-linguist-generated` on one
+ * of its own and was overruled anyway.
+ *
+ * `.js` rather than `.json`, in both cases: a `.json` file opens on the
+ * structural comparison rather than on a text diff, and the rule under test is
+ * about the text diff.
+ */
+export const GENERATED_FILE = 'dist/bundle.js';
+export const EXEMPTED_FILE = 'dist/hand-written.js';
+
+/**
+ * The repository's own word on the two above.
+ *
+ * Served at the head commit from the same contents endpoint the diff expander
+ * reads, which is the whole of how this reaches the page — GitHub answers the
+ * generated question nowhere else. See `lib/review/generated.ts`.
+ */
+export const GITATTRIBUTES_TEXT = [
+  '# What this repository considers generated.',
+  '* text=auto',
+  'dist/** linguist-generated',
+  `${EXEMPTED_FILE} -linguist-generated`,
+  '',
+].join('\n');
+
 /** The one file served as real Markdown, so the rendered diff has prose to mark. */
 export const MARKDOWN_FILE = 'docs/readme.md';
 
@@ -180,15 +250,164 @@ const TABLE_PATCH = [
   ' nut,9,0.30',
 ].join('\n');
 
-export const UNIFIED_DIFF = [
-  ...FILES.map(patchFor),
-  IMAGE_PATCH,
-  TABLE_PATCH,
+/**
+ * A file that did not exist before, as git writes one: no base blob, and
+ * `/dev/null` where the old path goes.
+ */
+const ADDED_PATCH = [
+  `diff --git a/${ADDED_FILE} b/${ADDED_FILE}`,
+  'new file mode 100644',
+  'index 0000000..4444444',
+  '--- /dev/null',
+  `+++ b/${ADDED_FILE}`,
+  '@@ -0,0 +1,4 @@',
+  '+const entries = new Map();',
+  '+',
+  '+export const remember = (key, value) => entries.set(key, value);',
+  '+export const recall = (key) => entries.get(key);',
 ].join('\n');
 
-/** The whole file, consistent with the patch above, for expanding context. */
-export const wholeFile = (path: string, side: 'base' | 'head'): string =>
-  [
+/** And its opposite: every line removed, and no head blob to read. */
+const DELETED_PATCH = [
+  `diff --git a/${DELETED_FILE} b/${DELETED_FILE}`,
+  'deleted file mode 100644',
+  'index 5555555..0000000',
+  `--- a/${DELETED_FILE}`,
+  '+++ /dev/null',
+  '@@ -1,3 +0,0 @@',
+  '-const memo = new Map();',
+  '-',
+  '-export default memo;',
+].join('\n');
+
+/**
+ * Modified, but not line for line.
+ *
+ * The first hunk only removes and the second only adds, which is the case every
+ * other file in this fixture is missing. From the first hunk onwards the two
+ * sides stop agreeing about line numbers — every head line is three below its
+ * base counterpart until the second hunk gives two of them back — and
+ * everything downstream of that, the gutter, a comment's anchor, the expander's
+ * arithmetic, has to be right about it.
+ */
+const UNEVEN_PATCH = [
+  `diff --git a/${UNEVEN_FILE} b/${UNEVEN_FILE}`,
+  'index 6666666..7777777 100644',
+  `--- a/${UNEVEN_FILE}`,
+  `+++ b/${UNEVEN_FILE}`,
+  '@@ -1,5 +1,2 @@',
+  ' first line',
+  `-old alpha of ${UNEVEN_FILE}`,
+  `-old beta of ${UNEVEN_FILE}`,
+  `-old gamma of ${UNEVEN_FILE}`,
+  ' third line',
+  '@@ -20,2 +17,4 @@',
+  ' line twenty',
+  `+new delta of ${UNEVEN_FILE}`,
+  `+new epsilon of ${UNEVEN_FILE}`,
+  ' line twentyone',
+].join('\n');
+
+const REINDENTED_PATCH = [
+  `diff --git a/${REINDENTED_FILE} b/${REINDENTED_FILE}`,
+  'index 8888888..9999999 100644',
+  `--- a/${REINDENTED_FILE}`,
+  `+++ b/${REINDENTED_FILE}`,
+  '@@ -1,4 +1,4 @@',
+  ' first line',
+  '-  spaced line',
+  `-old body of ${REINDENTED_FILE}`,
+  '+    spaced line',
+  `+new body of ${REINDENTED_FILE}`,
+  ' last line',
+].join('\n');
+
+export const UNIFIED_DIFF = [
+  ...FILES.map(patchFor),
+  patchFor(GENERATED_FILE),
+  patchFor(EXEMPTED_FILE),
+  // Among the ordinary text files rather than after the odd ones. What follows
+  // the two rich cards is what `the last card can still be read` measures its
+  // scroll against, and a file appended there moves the ground under it.
+  REINDENTED_PATCH,
+  IMAGE_PATCH,
+  TABLE_PATCH,
+  ADDED_PATCH,
+  DELETED_PATCH,
+  UNEVEN_PATCH,
+].join('\n');
+
+/** The unmodified middle of the uneven file, shared by both of its sides. */
+const UNEVEN_MIDDLE = Array.from({ length: 14 }, (_, i) => `context line ${i + 6}`);
+
+/**
+ * The whole file, consistent with the patch above, for expanding context.
+ *
+ * The four odd files answer for themselves, because the generic shape below
+ * is a 22-line file that differs on two lines — which is true of everything in
+ * `FILES` and of none of them. An expander handed the generic text for a file
+ * whose two sides are different lengths would splice in lines that are not in
+ * it, under hunk headers that still line up: the one failure here that shows no
+ * symptom at all.
+ *
+ * A file that does not exist on one side has no lines on that side, which is
+ * what the empty string says.
+ */
+export const wholeFile = (path: string, side: 'base' | 'head'): string => {
+  if (path === ADDED_FILE) {
+    return side === 'base'
+      ? ''
+      : [
+          'const entries = new Map();',
+          '',
+          'export const remember = (key, value) => entries.set(key, value);',
+          'export const recall = (key) => entries.get(key);',
+        ].join('\n');
+  }
+
+  if (path === DELETED_FILE) {
+    return side === 'head'
+      ? ''
+      : ['const memo = new Map();', '', 'export default memo;'].join('\n');
+  }
+
+  if (path === REINDENTED_FILE) {
+    // Four lines on both sides: the reindent keeps its line, and the changed
+    // line replaces its own.
+    return [
+      'first line',
+      side === 'base' ? '  spaced line' : '    spaced line',
+      side === 'base' ? `old body of ${path}` : `new body of ${path}`,
+      'last line',
+    ].join('\n');
+  }
+
+  if (path === UNEVEN_FILE) {
+    return side === 'base'
+      ? [
+          'first line',
+          `old alpha of ${path}`,
+          `old beta of ${path}`,
+          `old gamma of ${path}`,
+          'third line',
+          ...UNEVEN_MIDDLE,
+          'line twenty',
+          'line twentyone',
+          'line twentytwo',
+        ].join('\n')
+      : [
+          'first line',
+          'third line',
+          ...UNEVEN_MIDDLE,
+          'line twenty',
+          `new delta of ${path}`,
+          `new epsilon of ${path}`,
+          'line twentyone',
+          'line twentytwo',
+        ].join('\n');
+  }
+
+  return [
     'first line',
     side === 'base' ? `old ${path}` : `new ${path}`,
     'third line',
@@ -197,6 +416,7 @@ export const wholeFile = (path: string, side: 'base' | 'head'): string =>
     side === 'base' ? `old tail of ${path}` : `new tail of ${path}`,
     'line twentytwo',
   ].join('\n');
+};
 
 const comment = (id: string, body: string) => ({
   id,
@@ -285,6 +505,65 @@ export const THREADS = [
   }),
 ];
 
+/**
+ * The GraphQL rows for the three files that are not a one-for-one edit.
+ *
+ * Counted rather than assumed: these are the numbers the tree draws beside the
+ * path and the ones the bar above the column sums, and a fixture that put
+ * `+1 −1` on a deleted file would make the page look right while saying
+ * something that cannot be true.
+ *
+ * The image and the table are deliberately still absent from this connection.
+ * They are the case where GraphQL listed fewer files than the diff carries, and
+ * the page has to fall back to counting the patch itself.
+ */
+const UNEVEN_ROWS = [
+  {
+    path: ADDED_FILE,
+    additions: 4,
+    deletions: 0,
+    changeType: 'ADDED',
+    viewerViewedState: 'UNVIEWED',
+  },
+  {
+    path: DELETED_FILE,
+    additions: 0,
+    deletions: 3,
+    changeType: 'DELETED',
+    viewerViewedState: 'UNVIEWED',
+  },
+  {
+    path: UNEVEN_FILE,
+    additions: 2,
+    deletions: 3,
+    changeType: 'MODIFIED',
+    viewerViewedState: 'UNVIEWED',
+  },
+  {
+    path: REINDENTED_FILE,
+    additions: 2,
+    deletions: 2,
+    changeType: 'MODIFIED',
+    viewerViewedState: 'UNVIEWED',
+  },
+  // The generic two-hunk shape, so these two differ from `FILES` in one thing
+  // only: what the repository says about them.
+  {
+    path: GENERATED_FILE,
+    additions: 2,
+    deletions: 2,
+    changeType: 'MODIFIED',
+    viewerViewedState: 'UNVIEWED',
+  },
+  {
+    path: EXEMPTED_FILE,
+    additions: 2,
+    deletions: 2,
+    changeType: 'MODIFIED',
+    viewerViewedState: 'UNVIEWED',
+  },
+];
+
 export const PULL_REQUEST_NODE = {
   id: 'PR_kwDOABCD',
   number: PR.number,
@@ -298,6 +577,12 @@ export const PULL_REQUEST_NODE = {
   baseRefOid: BASE_SHA,
   headRefOid: HEAD_SHA,
   permalink: 'https://github.com/acme/widgets/pull/42',
+  // A branch in the repository being reviewed, by someone else, seen by an
+  // account that may write there. Every test that needs one of the awkward
+  // shapes overrides the field that makes it awkward.
+  isCrossRepository: false,
+  headRepository: { nameWithOwner: 'acme/widgets' },
+  repository: { viewerPermission: 'WRITE' },
   author: { login: 'rowan', avatarUrl: 'https://avatars.example/rowan' },
   viewerDidAuthor: false,
   reviewDecision: 'REVIEW_REQUIRED',
@@ -348,15 +633,18 @@ export const PULL_REQUEST_NODE = {
     ],
   },
   files: {
-    totalCount: FILES.length,
+    totalCount: FILES.length + UNEVEN_ROWS.length,
     pageInfo: { hasNextPage: false, endCursor: null },
-    nodes: FILES.map((path) => ({
-      path,
-      additions: 1,
-      deletions: 1,
-      changeType: 'MODIFIED',
-      viewerViewedState: 'UNVIEWED',
-    })),
+    nodes: [
+      ...FILES.map((path) => ({
+        path,
+        additions: 1,
+        deletions: 1,
+        changeType: 'MODIFIED',
+        viewerViewedState: 'UNVIEWED',
+      })),
+      ...UNEVEN_ROWS,
+    ],
   },
   reviewThreads: {
     totalCount: THREADS.length,

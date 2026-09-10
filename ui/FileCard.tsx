@@ -20,9 +20,15 @@
  * numbers.
  */
 
+import { useId } from 'react';
 import { RAW, modesForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
-import type { WhitespaceDiff } from '@/lib/review/whitespace';
+import {
+  type WhitespaceDiff,
+  whitespaceLabel,
+  whitespaceNotice,
+} from '@/lib/review/whitespace';
+import type { HeldBack } from './DiffColumn';
 import { ModeSwitcher } from './ModeSwitcher';
 import { fileBody } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
@@ -105,11 +111,66 @@ export interface FileCardProps {
    *
    * Non-null is the state that has to be visible from across the room: the
    * body below is then not what anyone else on this pull request is looking
-   * at, and nothing in a diff of code announces that by itself.
+   * at, and nothing in a diff of code announces that by itself. `FileBody`
+   * carries that sentence, which is why there is no longer a control up here
+   * — the setting is on the options page, and a header badge saying the same
+   * thing as the note directly below it would be the fact twice.
    */
   whitespace: WhitespaceDiff | null;
-  onToggleWhitespace: (path: string) => void;
+  /**
+   * Which rule this file is being read through, or null for none.
+   *
+   * Stays set while the reviewer is looking at the file in full: the word is
+   * also the control that put it back, so taking it away at the moment it is
+   * pressed would strand them.
+   */
+  held: HeldBack | null;
+  /** The reviewer asked to see this one as GitHub sent it. */
+  shown: boolean;
+  onToggleShown: (path: string) => void;
 }
+
+/** What the chip on the head row says, and what pressing it will do. */
+interface Flag {
+  held: HeldBack;
+  label: string;
+  title: string;
+  /** The long form, for a screen reader — a `title` reaches only a pointer. */
+  description: string;
+}
+
+const GENERATED =
+  'This file looks generated — a lockfile, build output, or something a tool ' +
+  'writes — so its diff is folded away rather than sitting between the files ' +
+  'somebody wrote. Nothing about it is hidden: the name, the counts and the ' +
+  'change type are GitHub’s.';
+
+const flagFor = (
+  held: HeldBack | null,
+  whitespace: WhitespaceDiff | null,
+  shown: boolean,
+): Flag | null => {
+  if (held === 'generated') {
+    return {
+      held,
+      label: 'Generated',
+      title: `${GENERATED} ${shown ? 'Press to fold it away again.' : 'Press to read it anyway.'}`,
+      description: GENERATED,
+    };
+  }
+
+  if (held === 'whitespace' && whitespace !== null) {
+    const notice = whitespaceNotice(whitespace);
+    return {
+      held,
+      label: whitespaceLabel(whitespace, shown),
+      title: `${notice} ${shown ? 'Press to hide it again.' : 'Press to see GitHub’s diff for this file.'}`,
+      description: notice,
+    };
+  }
+
+  return null;
+};
 
 export function FileCard({
   file,
@@ -119,25 +180,24 @@ export function FileCard({
   mode,
   onChangeMode,
   whitespace,
-  onToggleWhitespace,
+  held,
+  shown,
+  onToggleShown,
 }: FileCardProps) {
+  const flag = flagFor(held, whitespace, shown);
+  const flagId = useId();
   const body = fileBody(file);
   const raw = mode === RAW.id;
-  /**
-   * There is a text diff here to have an opinion about.
-   *
-   * Read off GitHub's patch rather than off what is drawn, so the control does
-   * not vanish at the moment it is used: a file whose every change was
-   * whitespace has an empty body once this is on, and a toggle that removed
-   * itself would leave the reviewer no way back.
-   */
+  /** There is a text diff here, rather than a binary or a rich comparison. */
   const textDiff = raw && body.kind === 'diff';
   // Nothing to collapse: the card is already only its header, and a toggle that
   // reveals an empty rectangle is a lie about there being more to see. A card in
   // a rich mode is in exactly that state — its body is the comparison below,
-  // and the collapse toggle would be pointing at nothing. So is a file the
-  // recompute emptied.
-  const collapsible = textDiff && whitespace?.hunks !== 0;
+  // and the collapse toggle would be pointing at nothing. So is a file whose
+  // every change was whitespace, unless the reviewer has asked to see it, in
+  // which case GitHub's own patch is back and there is something under there.
+  const emptied = whitespace?.hunks === 0 && !shown;
+  const collapsible = textDiff && !emptied;
   const modes = modesForFile(file);
 
   return (
@@ -178,29 +238,47 @@ export function FileCard({
           <span className="deletions">{`${MINUS}${file.deletions}`}</span>
         </span>
 
-        {/* On the head row rather than on a line of its own, and that is a
-            constraint rather than a preference. Every card in the column would
-            have grown by a row — `ModeSwitcher` draws nothing for an ordinary
-            source file — and the height of these headers is what decides which
-            files `CodeView` virtualizes in and where `topmostFile` says the
-            reviewer is. One extra row of chrome has already moved that once.
+        {/* On the head row, beside the counts, because that is the row a
+            reviewer reads to decide whether to look at this file at all — and
+            because the row cannot grow. `ModeSwitcher` draws nothing for an
+            ordinary source file, so a line of its own would add a row to every
+            card in the column, and the height of these headers is what decides
+            which files `CodeView` virtualizes in and where `topmostFile` says
+            the reviewer is.
 
-            Only where there is a text diff to take the whitespace out of: on a
-            binary, a withheld patch or a rich comparison it would be a button
-            with nothing behind it. */}
-        {textDiff && (
-          <button
-            type="button"
-            className="whitespace-toggle"
-            // `aria-pressed` rather than a class, for the same reason the mode
-            // buttons use it: this one changes what the card shows, and a
-            // visual-only toggle says nothing to a screen reader.
-            aria-pressed={whitespace !== null}
-            title="Hide changes where only the indentation or spacing moved."
-            onClick={() => onToggleWhitespace(file.path)}
-          >
-            Ignore whitespace
-          </button>
+            A button rather than a label, and the same one for both rules: it
+            says what is being kept back and it is how the reviewer gets it. A
+            separate "show anyway" beside the word would be two controls for one
+            thought, and putting it on the collapse chevron instead would mean
+            the chevron did something different on these cards than on every
+            other one.
+
+            The visible words are hidden from a screen reader and the whole
+            sentence given instead — "Whitespace hidden. Whitespace ignored,
+            this diff was recomputed here…" is the same fact twice before the
+            useful half arrives. */}
+        {flag !== null && (
+          <>
+            <button
+              type="button"
+              className="whitespace-flag"
+              data-held={flag.held}
+              aria-pressed={shown}
+              title={flag.title}
+              // Described rather than named by the long form. The name of a
+              // button is what a screen reader reads on the way past it and
+              // announces on every press; three sentences there would bury the
+              // two words that say which file this is about.
+              aria-describedby={flagId}
+              onClick={() => onToggleShown(file.path)}
+            >
+              {flag.label}
+            </button>
+            {/* Outside the button, or it would be part of the name after all. */}
+            <span className="visually-hidden" id={flagId}>
+              {flag.description}
+            </span>
+          </>
         )}
 
         <ViewedCheckbox path={file.path} state={file.viewedState} />

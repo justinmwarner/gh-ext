@@ -220,6 +220,69 @@ describe('the branches', () => {
     expect(screen.getByText(/did not say which branches/i)).toBeDefined();
     expect(screen.queryByTitle(/merging/i)).toBeNull();
   });
+
+  it('opens each branch on GitHub', () => {
+    mount(prPayload());
+
+    expect(screen.getByRole('link', { name: 'main' }).getAttribute('href')).toBe(
+      'https://github.com/acme/widgets/tree/main',
+    );
+    expect(screen.getByRole('link', { name: 'cache-the-diff' }).getAttribute('href')).toBe(
+      'https://github.com/acme/widgets/tree/cache-the-diff',
+    );
+  });
+
+  it('sends a fork’s branch to the fork', () => {
+    // The failure this prevents is not a 404. A fork with a branch called
+    // `main` linked into the base repository lands on the base repository's own
+    // `main` — a real page, full of code, that is not the code under review.
+    mount(
+      prPayload({
+        pullRequest: pullRequestNode({
+          headRefName: 'patch-1',
+          isCrossRepository: true,
+          headRepository: { nameWithOwner: 'someone/widgets' },
+        }),
+      }),
+    );
+
+    expect(screen.getByRole('link', { name: 'patch-1' }).getAttribute('href')).toBe(
+      'https://github.com/someone/widgets/tree/patch-1',
+    );
+  });
+
+  it('keeps the name and drops the link when the fork is gone', () => {
+    mount(
+      prPayload({
+        pullRequest: pullRequestNode({
+          headRefName: 'patch-1',
+          isCrossRepository: true,
+          headRepository: null,
+        }),
+      }),
+    );
+
+    expect(screen.getByText('patch-1')).toBeDefined();
+    expect(screen.queryByRole('link', { name: 'patch-1' })).toBeNull();
+    // The base is in the repository the route names, so it is unaffected.
+    expect(screen.getByRole('link', { name: 'main' })).toBeDefined();
+  });
+
+  it('does not guess where an older payload’s head branch was', () => {
+    // Cached before the query asked. Reading the silence as "the same
+    // repository" is the mistake above, arrived at from the other direction.
+    mount(
+      prPayload({
+        pullRequest: pullRequestNode({
+          headRefName: 'patch-1',
+          isCrossRepository: undefined,
+          headRepository: undefined,
+        }),
+      }),
+    );
+
+    expect(screen.queryByRole('link', { name: 'patch-1' })).toBeNull();
+  });
 });
 
 describe('the summaries beside each list', () => {
@@ -313,5 +376,29 @@ describe('the commits', () => {
 
     const link = screen.getByRole('link', { name: /on github/i });
     expect(link.getAttribute('href')).toContain('/commit/');
+  });
+
+  it('stands in the column of things to pick from, not under the description', () => {
+    // It sat under the description because a subject is a sentence and wanted
+    // the reading measure. What that missed is that the list is not read, it is
+    // picked from — and under a description of ordinary length it was pushed
+    // off the bottom of the view entirely.
+    const { container } = mount(prPayload());
+
+    const meta = container.querySelector('.overview-meta');
+    expect(meta?.querySelector('.commit-log')).not.toBeNull();
+    expect(container.querySelector('.overview-main .commit-log')).toBeNull();
+  });
+
+  it('comes after the reviewers, not before them', () => {
+    // The three sections above it are a handful of lines each and this one is
+    // not. In the middle, a list of fifty commits buries them.
+    const { container } = mount(prPayload());
+
+    const headings = [
+      ...container.querySelectorAll<HTMLElement>('.overview-meta h2'),
+    ].map((heading) => heading.textContent);
+
+    expect(headings).toEqual(['Branches', 'Checks', 'Reviewers', 'Commits']);
   });
 });

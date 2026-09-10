@@ -121,13 +121,17 @@ function RateLimit({ snapshot }: { snapshot: RateLimitSnapshot | null }) {
 }
 
 /**
- * Where a review opens, and whether it opens by itself.
+ * Every preference this extension has, in two sections.
  *
  * Saved on change rather than behind a Save button. These are preferences, not
  * a credential: there is nothing to validate, nothing to get half-typed, and
  * the effect of getting one wrong is one tab in the wrong place.
+ *
+ * One component for both sections because they are one stored object, and a
+ * second copy of the read-modify-write below is how two of them start
+ * overwriting each other's fields.
  */
-function Reviewing() {
+function Preferences() {
   const [settings, setSettings] = useState<Settings | null>(null);
 
   useEffect(() => {
@@ -160,63 +164,128 @@ function Reviewing() {
   const autoAvailable = autoOpenAvailable(settings.openIn);
 
   return (
-    <section className="settings">
-      <h2>Reviewing</h2>
+    <>
+      <section className="settings">
+        <h2>Reviewing</h2>
 
-      <fieldset className="choices">
-        <legend>Open reviews in</legend>
-        {DESTINATIONS.map((destination) => (
-          <label key={destination.value}>
-            <input
-              type="radio"
-              name="openIn"
-              value={destination.value}
-              checked={settings.openIn === destination.value}
-              onChange={() => update({ openIn: destination.value })}
-            />
-            <span>
-              {destination.label}
-              <span className="hint">{destination.hint}</span>
+        <fieldset className="choices">
+          <legend>Open reviews in</legend>
+          {DESTINATIONS.map((destination) => (
+            <label key={destination.value}>
+              <input
+                type="radio"
+                name="openIn"
+                value={destination.value}
+                checked={settings.openIn === destination.value}
+                onChange={() => update({ openIn: destination.value })}
+              />
+              <span>
+                {destination.label}
+                <span className="hint">{destination.hint}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.autoOpen}
+            disabled={!autoAvailable}
+            onChange={(event) => update({ autoOpen: event.target.checked })}
+          />
+          <span>
+            Open a review automatically when I land on a pull request
+            <span className="hint">
+              {autoAvailable
+                ? 'Opened in the background and left there, so nothing moves while you are reading. The card is still on the page if you close it and want it back.'
+                : 'Not available when reviews open in this tab: it would replace the pull request the moment you arrived, and going back would immediately do it again.'}
             </span>
-          </label>
-        ))}
-      </fieldset>
-
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={settings.autoOpen}
-          disabled={!autoAvailable}
-          onChange={(event) => update({ autoOpen: event.target.checked })}
-        />
-        <span>
-          Open a review automatically when I land on a pull request
-          <span className="hint">
-            {autoAvailable
-              ? 'Opened in the background and left there, so nothing moves while you are reading. The card is still on the page if you close it and want it back.'
-              : 'Not available when reviews open in this tab: it would replace the pull request the moment you arrived, and going back would immediately do it again.'}
           </span>
-        </span>
-      </label>
+        </label>
 
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={settings.debugLogging}
-          onChange={(event) => update({ debugLogging: event.target.checked })}
-        />
-        <span>
-          Write diagnostics to the browser console
-          <span className="hint">
-            Off by default, and off is the right setting unless you are
-            investigating something. This extension runs on every github.com
-            page, so anything it logs lands in a console you are probably using
-            for your own work. Turn it on before reporting a bug, then turn it
-            back off.
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.debugLogging}
+            onChange={(event) => update({ debugLogging: event.target.checked })}
+          />
+          <span>
+            Write diagnostics to the browser console
+            <span className="hint">
+              Off by default, and off is the right setting unless you are
+              investigating something. This extension runs on every github.com
+              page, so anything it logs lands in a console you are probably
+              using for your own work. Turn it on before reporting a bug, then
+              turn it back off.
+            </span>
           </span>
-        </span>
-      </label>
-    </section>
+        </label>
+      </section>
+
+      {/* Its own section rather than two more checkboxes above. Everything up
+          there answers "what happens when I open a review"; these two answer
+          "what does a diff look like once it is open", and they are the only
+          settings on this page that change what the reviewer is looking at
+          rather than what the extension does. */}
+      <section className="settings">
+        <h2>Reading a diff</h2>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.splitView}
+            onChange={(event) => update({ splitView: event.target.checked })}
+          />
+          <span>
+            Show the old and new file side by side
+            <span className="hint">
+              Two columns instead of one, on every file of every pull request.
+              Nothing is hidden either way — it is the same changes, arranged
+              differently.
+            </span>
+          </span>
+        </label>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.hideGenerated}
+            onChange={(event) => update({ hideGenerated: event.target.checked })}
+          />
+          <span>
+            Fold away the diffs of generated files
+            <span className="hint">
+              Lockfiles, minified bundles, protobuf stubs, snapshots and vendored
+              trees. Each one stays in the list with its name and its counts, says
+              on its own row that it was folded, and opens with one press —
+              nothing becomes unknowable, it just stops sitting between the files
+              somebody wrote. A repository that marks its own files{' '}
+              <code>linguist-generated</code> in <code>.gitattributes</code> is
+              obeyed in preference to any of that, in both directions.
+            </span>
+          </span>
+        </label>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.ignoreWhitespace}
+            onChange={(event) => update({ ignoreWhitespace: event.target.checked })}
+          />
+          <span>
+            Hide changes where only the whitespace moved
+            <span className="hint">
+              Reindented and rewrapped lines stop counting as changes, which is
+              what makes a reformat readable. This is the one setting here that{' '}
+              <strong>removes lines from the diff</strong>, so every file it
+              shortens says so above its body, and a comment left on a line that
+              only moved is listed rather than quietly dropped.
+            </span>
+          </span>
+        </label>
+      </section>
+    </>
   );
 }
 
@@ -367,7 +436,7 @@ function App() {
     <main>
       <h1>A Better Reviewer</h1>
 
-      <Reviewing />
+      <Preferences />
 
       {/* Only while there is no token to speak of. Once one is stored this is
           six inches of instructions for something already done. */}

@@ -80,7 +80,23 @@ export const PULL_REQUEST_QUERY = `query PullRequestReview($owner: String!, $rep
       # 2026-09-01 for Task 26; it is the base-side counterpart of the field
       # beside it and is a non-null GitObjectID on PullRequest.
       baseRefName headRefName baseRefOid headRefOid
+      # Where the head branch actually lives. The base pair is always in the
+      # repository the route names, but a fork's head branch is not — linking
+      # it there would point at a branch that does not exist, or worse at a
+      # same-named branch that does and is somebody else's code.
+      # The head repository is null once the fork is deleted, which is the case
+      # the UI leaves as plain text. Executed against the live schema on
+      # 2026-09-09.
+      isCrossRepository
+      headRepository { nameWithOwner }
       permalink
+      # What this account may do here, which is not the same question as what
+      # the pull request allows. Reviewing needs read access and GitHub says so;
+      # *resolving a conversation* needs write access or authorship, and a
+      # fine-grained token can never exceed the role it was issued under. So
+      # READ is the one value that means the write controls on this page cannot
+      # work, and it is read here rather than inferred from a failed mutation.
+      repository { viewerPermission }
       author { login avatarUrl }
       # GitHub rejects an approval of your own pull request. Comparing
       # author.login against the viewer would need the viewer's login, which

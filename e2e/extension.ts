@@ -38,8 +38,10 @@ import {
   TABLE_FILE,
   TABLE_TEXT,
   UNIFIED_DIFF,
+  GITATTRIBUTES_TEXT,
   wholeFile,
 } from './fixture';
+import { GITATTRIBUTES } from '@/ui/useGitAttributes';
 
 export const EXTENSION_PATH = fileURLToPath(
   new URL('../.output/chrome-mv3', import.meta.url),
@@ -58,6 +60,29 @@ export interface ApiLog {
    * has to detect and join rather than fail in. Set it before opening the page.
    */
   pendingReviewId: string | null;
+  /**
+   * A permission the token is refused on the pull request query.
+   *
+   * The one shape of GitHub reply nothing else here produces: `data` and
+   * `errors` together, with the refused subtree nulled out. It is not an
+   * error the worker can retry or report — the pull request came back, and is
+   * correct apart from the part that did not — so the page renders it and says
+   * which part it cannot vouch for. Set it before opening the page.
+   */
+  deniedPath: (string | number)[] | null;
+  /**
+   * What GitHub says this account may do in the repository.
+   *
+   * `READ` is the state the page has to be legible in: everything that writes
+   * is refused, and the reviewer meets that one control at a time unless the
+   * page says so once. Set it before opening the page.
+   */
+  viewerPermission: string;
+  /**
+   * What `.gitattributes` says at the head commit, or null for a repository
+   * that has none — which is most of them, and is a 404 rather than an error.
+   */
+  gitAttributes: string | null;
 }
 
 const json = (route: Route, body: unknown) =>
@@ -100,8 +125,38 @@ function graphqlReply(
         },
       };
 
-    case 'PullRequestReview':
-      return { data: { repository: { pullRequest: PULL_REQUEST_NODE } } };
+    case 'PullRequestReview': {
+      const node = {
+        ...PULL_REQUEST_NODE,
+        repository: { viewerPermission: log.viewerPermission },
+      };
+      if (log.deniedPath === null) {
+        return { data: { repository: { pullRequest: node } } };
+      }
+      // Both halves, the way GitHub sends them: the node with the refused
+      // subtree nulled, and one error naming where it was refused. A fixture
+      // that sent only the error would be testing a failure the worker treats
+      // as a failed load, which is a different page entirely.
+      return {
+        data: {
+          repository: {
+            pullRequest: {
+              ...node,
+              commits: {
+                nodes: [{ commit: { oid: HEAD_SHA, statusCheckRollup: null } }],
+              },
+            },
+          },
+        },
+        errors: [
+          {
+            type: 'FORBIDDEN',
+            message: 'Resource not accessible by personal access token',
+            path: log.deniedPath,
+          },
+        ],
+      };
+    }
 
     case 'PullRequestCommits':
       // `totalCount` matches what is sent, so this fixture is not silently
@@ -161,6 +216,18 @@ function graphqlReply(
               ...POSTED_THREAD,
               path: String(variables['path'] ?? POSTED_THREAD.path),
               line: variables['line'] ?? POSTED_THREAD.line,
+              // Not resolvable, and that is the honest answer rather than a
+              // hostile fixture. This mutation can only write into a PENDING
+              // review, so at the instant it replies the thread is one nobody
+              // else can see — and GitHub answers these against the thread as
+              // it is, not as it is about to be.
+              //
+              // The page used to keep this answer after submitting the review,
+              // which left a freshly posted comment with a Resolve button that
+              // could not be pressed until a reload. A fixture that said `true`
+              // here could not have caught it.
+              viewerCanResolve: false,
+              viewerCanUnresolve: false,
               comments: {
                 totalCount: 1,
                 nodes: [
@@ -174,6 +241,25 @@ function graphqlReply(
           },
         },
       };
+
+    // Asked once a review is submitted, for the threads that were on it. By
+    // then they are ordinary threads on the pull request, so the flags the
+    // `AddThread` reply gave are out of date and these are the current ones.
+    case 'ThreadPermissions': {
+      const ids = Array.isArray(variables['ids']) ? variables['ids'] : [];
+      return {
+        data: {
+          nodes: ids.map((id) => ({
+            __typename: 'PullRequestReviewThread',
+            id,
+            isResolved: false,
+            viewerCanReply: true,
+            viewerCanResolve: true,
+            viewerCanUnresolve: false,
+          })),
+        },
+      };
+    }
 
     case 'StartReview':
       // GitHub allows one pending review per pull request, and this fake obeys
@@ -222,7 +308,15 @@ function graphqlReply(
  * instead of quietly succeeding against github.com.
  */
 export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
-  const log: ApiLog = { operations: [], variables: [], urls: [], pendingReviewId: null };
+  const log: ApiLog = {
+    operations: [],
+    variables: [],
+    urls: [],
+    pendingReviewId: null,
+    deniedPath: null,
+    viewerPermission: 'WRITE',
+    gitAttributes: GITATTRIBUTES_TEXT,
+  };
 
   await context.route('https://api.github.com/**', async (route) => {
     const request = route.request();
@@ -282,6 +376,24 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
     if (contents !== null) {
       const path = decodeURIComponent(contents[1] ?? '');
       const side = url.searchParams.get('ref') === BASE_SHA ? 'base' : 'head';
+
+      // The repository's own word on which of its files are generated, read
+      // from the same endpoint as everything else here. A repository without
+      // one is the ordinary case and answers 404, which is a real state rather
+      // than a failure — `api.gitAttributes` set to null is how a test asks for
+      // it.
+      if (path === GITATTRIBUTES) {
+        if (log.gitAttributes === null) {
+          await route.fulfill({ status: 404, body: 'Not Found' });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/plain',
+          body: log.gitAttributes,
+        });
+        return;
+      }
 
       // The two files the rich comparisons are for. Answered as real bytes and
       // real CSV rather than as the generic text every other path gets, because

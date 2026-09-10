@@ -1,5 +1,5 @@
 /**
- * The banner for a token that has stopped working mid-review.
+ * The notice for a token that has stopped working mid-review.
  *
  * Fine-grained tokens expire — the options page recommends the shortest expiry
  * you can live with — and an organisation owner can revoke one at any moment.
@@ -16,13 +16,17 @@
  * Deliberately not a full-page state. The pull request on screen is still
  * readable and still worth reading, and replacing it would throw away a diff
  * the reviewer is midway through for a problem that does not affect reading.
+ *
+ * It is the worst of the notices `NoticeCenter` collects, so it is the one the
+ * top bar's button names while it is present — including over `ReadOnlyNotice`,
+ * which is the same kind of "you cannot write" but is not the one to fix first.
  */
 
 import { openOptions } from './openOptions';
 
 export function TokenRejectedNotice({ retry }: { retry: () => void }) {
   return (
-    <aside className="denied-notice" role="alert">
+    <aside className="notice-body" role="alert">
       <p>
         GitHub has rejected your token, so nothing can be posted, resolved or
         marked as viewed until it is replaced. The pull request below is what
@@ -32,7 +36,7 @@ export function TokenRejectedNotice({ retry }: { retry: () => void }) {
         Fine-grained tokens expire, and an organisation owner can revoke one.
         Check whether yours is still valid, then reload this pull request.
       </p>
-      <div className="denied-actions">
+      <div className="notice-actions">
         <button type="button" className="button primary" onClick={openOptions}>
           Check your token
         </button>

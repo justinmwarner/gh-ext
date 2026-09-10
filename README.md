@@ -82,8 +82,8 @@ Required permissions:
 `statusCheckRollup.contexts` is a union of both check types, so **Checks** and
 **Commit statuses** are separate grants and a token needs both to show a
 complete list. Missing either one is not fatal — GitHub refuses those nodes
-individually and the review page renders with a banner saying the checks are
-hidden — but the checks will be incomplete or absent until it is granted.
+individually and the review page renders, with the top bar naming what it could
+not show — but the checks will be incomplete or absent until it is granted.
 
 **The token is stored per machine and is not synced.** That is deliberate —
 `chrome.storage.sync` would replicate a credential across every browser signed

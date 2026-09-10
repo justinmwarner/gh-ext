@@ -30,6 +30,7 @@ import type { BlobRefs } from './blobLoader';
 import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { CurrentFile } from './currentFile';
 import { fileComments } from './fileTreeData';
+import type { GeneratedRule } from '@/lib/review/generated';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession } from './reviewSession';
 import { useDragSize } from './useDragSize';
@@ -55,6 +56,12 @@ export interface FilesViewProps {
   sides: AnchorableSides;
   /** Unified or side by side. Passed straight through, like `sides`. */
   diffStyle: DiffStyle;
+  /** Draw every file without its whitespace-only changes. Also passed through. */
+  ignoreWhitespace: boolean;
+  /** Fold away the diff of a file nobody wrote. Also passed through. */
+  hideGenerated: boolean;
+  /** What the repository declared about its own generated files. */
+  gitAttributes: readonly GeneratedRule[];
   columnRef?: Ref<DiffColumnHandle>;
 }
 
@@ -69,6 +76,9 @@ export function FilesView({
   diff,
   sides,
   diffStyle,
+  ignoreWhitespace,
+  hideGenerated,
+  gitAttributes,
   columnRef,
 }: FilesViewProps) {
   const session = useReviewSession();
@@ -167,6 +177,9 @@ export function FilesView({
           diff={diff}
           sides={sides}
           diffStyle={diffStyle}
+          ignoreWhitespace={ignoreWhitespace}
+          hideGenerated={hideGenerated}
+          gitAttributes={gitAttributes}
           current={current}
           onScrollTo={onSelectFromScroll}
           jump={jump}

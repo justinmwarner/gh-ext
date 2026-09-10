@@ -25,7 +25,7 @@
  *   onion-skin mode that is not offered for a one-sided image.
  */
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { ReviewComment, ReviewThread } from '@/lib/github/types';
 import { threadPosition } from './reviewThreads';
 import { commentKey, useReviewSession } from './reviewSession';
@@ -286,6 +286,26 @@ function ReplyBox({ thread }: { thread: ReviewThread }) {
   );
 }
 
+/**
+ * Why GitHub says no, in the words of the rule it is applying.
+ *
+ * "You do not have permission to do this" was what this said, and it is the
+ * sentence that sends people looking for a bug. It names no rule, so there is
+ * nothing to check and nothing to fix — and the reviewer standing in front of
+ * it is usually someone who *can* resolve conversations on GitHub in the other
+ * tab, using an account this page is reading through a narrower token.
+ *
+ * GitHub's own rule is short and worth quoting: a conversation may be resolved
+ * by someone who opened the pull request, or who has write access to the
+ * repository. Saying that gives the reviewer both possible remedies at once.
+ * The page-level half of the same explanation is `ReadOnlyNotice`, which is
+ * where the token gets named.
+ */
+const NO_PERMISSION =
+  'Only the author of this pull request, or someone with write access to the ' +
+  'repository, can resolve its conversations. If that should be you, your ' +
+  'token may have less access than your account does.';
+
 function ResolveButton({ thread }: { thread: ReviewThread }) {
   const session = useReviewSession();
   const next = !thread.isResolved;
@@ -294,19 +314,36 @@ function ResolveButton({ thread }: { thread: ReviewThread }) {
   // visible. A control that accepts a click and does nothing reads as broken,
   // and the viewed checkbox next to it already says busy the same way.
   const inFlight = session.resolveInFlight.has(thread.id);
+  const ruleId = useId();
 
   return (
-    <button
-      type="button"
-      className="button thread-resolve"
-      disabled={!allowed || inFlight}
-      title={allowed ? undefined : 'You do not have permission to do this.'}
-      onClick={() => {
-        void session.setResolved(thread.id, next);
-      }}
-    >
-      {next ? 'Resolve conversation' : 'Unresolve conversation'}
-    </button>
+    <>
+      <button
+        type="button"
+        className="button thread-resolve"
+        disabled={!allowed || inFlight}
+        title={allowed ? undefined : NO_PERMISSION}
+        // A `title` is a pointer affordance and nothing else: no keyboard
+        // reaches it, and a disabled button is not in the tab order to be
+        // reached from. So the sentence is also an accessible description,
+        // which is announced with the button whether or not it can be pressed.
+        aria-describedby={allowed ? undefined : ruleId}
+        onClick={() => {
+          void session.setResolved(thread.id, next);
+        }}
+      >
+        {next ? 'Resolve conversation' : 'Unresolve conversation'}
+      </button>
+      {/* Hidden rather than printed under the button. It is the same three
+          lines on every thread of a pull request nobody can resolve, and a
+          reviewer who has read it once does not need twenty more copies down
+          the column — `ReadOnlyNotice` is where it is said in the open. */}
+      {!allowed && (
+        <span className="visually-hidden" id={ruleId}>
+          {NO_PERMISSION}
+        </span>
+      )}
+    </>
   );
 }
 

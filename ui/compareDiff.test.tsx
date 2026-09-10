@@ -128,7 +128,7 @@ function payloadWith(options: PayloadOptions = {}): PrPayload {
  * that refuses to run — a disabled one — leaves the menu where it was.
  */
 const menuItem = async (user: UserEvent, name: RegExp): Promise<HTMLElement> => {
-  const kebab = screen.getByRole('button', { name: /diff options/i });
+  const kebab = screen.getByRole('button', { name: /commit options/i });
   if (kebab.getAttribute('aria-expanded') !== 'true') await user.click(kebab);
   const found = [
     ...screen.getByRole('menu').querySelectorAll<HTMLElement>('.menu-item'),

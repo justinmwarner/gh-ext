@@ -77,10 +77,49 @@ export interface WhitespaceDiff {
    * did not matter.
    */
   partial: boolean;
+  /**
+   * The rewrite took something out. False means the patch above is GitHub's,
+   * character for character.
+   *
+   * Not derivable from the counters beside it, which is why it is here.
+   * `dropped` counts whole hunks that vanished, and the case this feature
+   * exists for — a reindented function — usually loses no hunk at all: the
+   * `-`/`+` pairs inside one merge into context lines and the hunk survives,
+   * smaller. A file where nothing at all moved is the other way round: every
+   * counter reads the same as one where a great deal did.
+   *
+   * The card reads this to decide whether to say anything. With the setting on
+   * for the whole pull request, most files have no whitespace-only change in
+   * them, and a caveat on all of them is a caveat nobody reads on the one that
+   * needed it.
+   */
+  changed: boolean;
 }
 
 /**
- * What the card says while this is on.
+ * Two words for the file header, saying which of the two states this is.
+ *
+ * The distinction is worth the branch because one of them leaves an empty
+ * card. A file whose every change was whitespace has nothing under its header
+ * at all, and a header that only said "whitespace hidden" would leave the
+ * reviewer looking for the diff it was describing.
+ *
+ * Short because of where it goes. This sits on the row with the path and the
+ * counts, on every affected file, and the row cannot grow — the height of
+ * these headers is what decides which files the viewer virtualizes in.
+ * {@link whitespaceNotice} is the long form, and the card carries it too.
+ */
+export function whitespaceLabel(diff: WhitespaceDiff, shown = false): string {
+  // Reading the file in full is a state worth saying out loud rather than
+  // leaving to `aria-pressed` and a colour. "Whitespace hidden" on a card that
+  // is at that moment showing every line of GitHub's diff is simply untrue, and
+  // the reviewer who pressed it is the one who most needs the label to keep up.
+  if (shown) return 'Whitespace shown';
+  return diff.hunks === 0 ? 'Only whitespace' : 'Whitespace hidden';
+}
+
+/**
+ * The whole of what the card has to say while this is on.
  *
  * The first sentence is not a nicety and not a status line — it is the whole
  * licence for the mode existing. Every other person on this pull request is
@@ -88,6 +127,12 @@ export interface WhitespaceDiff {
  * a line is unchanged when GitHub says it changed. The second half is the
  * reassurance that makes the first half liveable: the numbers underneath are
  * still GitHub's, so a comment left here lands where it reads.
+ *
+ * It was a paragraph in the card's body and is now the header flag's title and
+ * its accessible description — the same words, off the reading surface. As a
+ * paragraph it was four lines above the first hunk of *every* file in the pull
+ * request, saying the same thing each time, which is how a caveat stops being
+ * read at all.
  *
  * The rest is only added when it is true, because a notice that always says
  * four things is a notice nobody finishes reading.
@@ -252,7 +297,7 @@ export function withoutWhitespaceChanges(
   const lines = patch.split('\n');
   const first = lines.findIndex((line) => HUNK_HEADER.test(line));
   if (first === -1) {
-    return { patch, hunks: 0, dropped: 0, partial: false };
+    return { patch, hunks: 0, dropped: 0, partial: false, changed: false };
   }
 
   const out: string[] = lines.slice(0, first);
@@ -292,5 +337,12 @@ export function withoutWhitespaceChanges(
     at = end;
   }
 
-  return { patch: out.join('\n'), hunks, dropped, partial: spend.spent };
+  const rewritten = out.join('\n');
+  return {
+    patch: rewritten,
+    hunks,
+    dropped,
+    partial: spend.spent,
+    changed: rewritten !== patch,
+  };
 }

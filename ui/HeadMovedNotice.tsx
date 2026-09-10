@@ -1,5 +1,5 @@
 /**
- * The banner for a pull request that moved while it was being read.
+ * The notice for a pull request that moved while it was being read.
  *
  * Everything on the page below is a photograph of one commit, and once the head
  * moves that photograph is of a diff that no longer exists. The consequence is
@@ -9,11 +9,15 @@
  * outdated the moment the review is submitted. The reviewer cannot see any of
  * that happening, which is why it has to be said.
  *
+ * Said in the top bar's notice panel rather than in a banner over the diff. The
+ * button that opens it names this — "New commits" — so the fact is on screen
+ * whether or not the panel is open; see `NoticeCenter`.
+ *
  * What it deliberately does not do is fix it. Reloading rebuilds the file list,
  * so doing it on the reviewer's behalf would take the diff out from under
  * somebody midway through a sentence about it — a worse outcome than the
- * staleness, and one they did not ask for. The banner states the fact, prices
- * the remedy, and leaves the decision where it belongs.
+ * staleness, and one they did not ask for. It states the fact, prices the
+ * remedy, and leaves the decision where it belongs.
  *
  * Pricing the remedy is the part that has to be exactly right, because a
  * reviewer follows this advice. A reload unmounts the shell, and what that
@@ -63,21 +67,19 @@ export function HeadMovedNotice({
     // reviewer is typing a comment — that is precisely when they were last
     // somewhere else — and an assertive live region would read itself out over
     // the top of them. Polite still announces; it just waits its turn.
-    <aside className="notice head-moved-notice" role="status">
-      <div className="head-moved-text">
-        <p>
-          New commits have been pushed to this pull request. It is now at{' '}
-          <code>{short(movedTo)}</code>, and everything below was read at{' '}
-          <code>{short(loaded)}</code> — including the line numbers a new comment
-          would be attached to.
-        </p>
-        <p>
-          {reviewPending
-            ? 'Your queued comments are safe: they are held in a pending review on GitHub, and reloading finds them again — though it can no longer say how many there are. The summary typed into the review bar is not saved anywhere, so reloading loses it.'
-            : 'Reloading costs you your place in the diff and any context you expanded to reach it. Comment drafts are saved and come back on their own.'}
-        </p>
-      </div>
-      <div className="denied-actions">
+    <aside className="notice-body" role="status">
+      <p>
+        New commits have been pushed to this pull request. It is now at{' '}
+        <code>{short(movedTo)}</code>, and everything below was read at{' '}
+        <code>{short(loaded)}</code> — including the line numbers a new comment
+        would be attached to.
+      </p>
+      <p>
+        {reviewPending
+          ? 'Your queued comments are safe: they are held in a pending review on GitHub, and reloading finds them again — though it can no longer say how many there are. The summary typed into the review bar is not saved anywhere, so reloading loses it.'
+          : 'Reloading costs you your place in the diff and any context you expanded to reach it. Comment drafts are saved and come back on their own.'}
+      </p>
+      <div className="notice-actions">
         <button type="button" className="button primary" onClick={onReload}>
           Reload at {short(movedTo)}
         </button>

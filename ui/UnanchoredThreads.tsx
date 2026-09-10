@@ -31,8 +31,9 @@ const REASONS: Record<ListedReason, string> = {
   // Named by the reviewer's own action rather than by "not shown", because it
   // is the one reason in this list they turned on themselves and can turn off.
   'whitespace-only':
-    'Nothing but whitespace changed where this was written, and this file is ' +
-    'set to ignore that. Stop ignoring whitespace to see it in place.',
+    'Nothing but whitespace changed where this was written, and diffs are set ' +
+    'to hide that. Turn off “hide changes where only the whitespace moved” on ' +
+    'the options page to see it in place.',
 };
 
 export function UnanchoredThreads({

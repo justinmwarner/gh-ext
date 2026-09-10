@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { commitUrl, pullRequestUrl, safeGitHubUrl } from './githubUrl';
+import { branchUrl, commitUrl, pullRequestUrl, safeGitHubUrl } from './githubUrl';
 
 const PR = { owner: 'acme', repo: 'widgets', number: 42 };
 
@@ -35,6 +35,50 @@ describe('commitUrl', () => {
 
   it('escapes the oid too, which is the part that varies most', () => {
     expect(commitUrl(PR, '../../etc')).not.toContain('../..');
+  });
+});
+
+describe('branchUrl', () => {
+  it('points at the branch in the repository it was given', () => {
+    expect(branchUrl(PR, 'main')).toBe('https://github.com/acme/widgets/tree/main');
+  });
+
+  it('keeps the slashes in a branch name, which GitHub needs', () => {
+    // `release%2F2.4` is not a path GitHub resolves to the branch, so the
+    // segments are escaped one at a time rather than the whole name at once.
+    expect(branchUrl(PR, 'release/2.4')).toBe(
+      'https://github.com/acme/widgets/tree/release/2.4',
+    );
+  });
+
+  it('escapes everything else in a segment', () => {
+    expect(branchUrl(PR, 'feature/a b?c#d')).toBe(
+      'https://github.com/acme/widgets/tree/feature/a%20b%3Fc%23d',
+    );
+  });
+
+  it('refuses a name that would climb out of the repository', () => {
+    // The slashes in a branch name are left unescaped so GitHub resolves them,
+    // which is exactly what makes `..` a path segment rather than two dots.
+    expect(branchUrl(PR, '../../etc')).toBeNull();
+    expect(branchUrl(PR, 'release/../../etc')).toBeNull();
+    expect(branchUrl(PR, '.')).toBeNull();
+  });
+
+  it('keeps a name that merely contains dots', () => {
+    expect(branchUrl(PR, 'v1.2..3')).toBe('https://github.com/acme/widgets/tree/v1.2..3');
+  });
+
+  it('escapes an owner that would otherwise walk out of the path', () => {
+    expect(branchUrl({ ...PR, owner: 'a/../b' }, 'main')).toContain('a%2F..%2Fb');
+  });
+
+  it('takes a repository that is not the one in the route', () => {
+    // The fork case. The head branch of a cross-repository pull request is not
+    // in the repository being reviewed.
+    expect(branchUrl({ owner: 'someone', repo: 'widgets' }, 'patch-1')).toBe(
+      'https://github.com/someone/widgets/tree/patch-1',
+    );
   });
 });
 

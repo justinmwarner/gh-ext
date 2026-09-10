@@ -19,12 +19,17 @@
  * `ScopeBar`, on its own row: a reviewer has to be able to tell a diff scoped
  * to one commit from the whole pull request at a glance, and a toggle among
  * the other actions up here was not that.
+ *
+ * The newest thing here is the one that removed a whole row from the page:
+ * everything the review cannot vouch for used to be a stack of banners under
+ * this bar, and is now one control in it. `NoticeCenter` says why.
  */
 
-import type { PrPayload } from '@/lib/messages';
+import type { PrPayload, PullRequestNode } from '@/lib/messages';
+import { NoticeCenter } from './NoticeCenter';
 import { OpenInGitHub } from './OpenInGitHub';
 import { StateBadge } from './StateBadge';
-import { prPermalink, prState } from './prNode';
+import { prPermalink, prState, prViewerCanReview } from './prNode';
 import { REVIEW_START, useReviewSession } from './reviewSession';
 
 /**
@@ -62,10 +67,22 @@ function PendingChip() {
  * this is inert: a second review would orphan the first along with everything
  * queued on it, and the footer is where an open one is submitted or discarded.
  */
-function StartReviewButton() {
+function StartReviewButton({ node }: { node: PullRequestNode }) {
   const session = useReviewSession();
   const pending = session.pending.kind === 'pending';
   const failure = session.failures.get(REVIEW_START);
+
+  // Absent rather than disabled, unlike the verdicts in the footer. A disabled
+  // Approve sits beside an enabled Comment and the pair says "this one, not
+  // that one" — there is a way forward and the greying names it. There is no
+  // way forward here, and a permanently dead primary button in the sticky bar
+  // is chrome that reads as broken. `NoticeCenter` carries the explanation, so
+  // the fact is still on screen; it is just not on a control.
+  //
+  // Only once a review is not already open. A review resumed from GitHub still
+  // has to be submittable from the footer, and hiding this would not have
+  // stopped it existing.
+  if (!pending && !prViewerCanReview(node)) return null;
 
   return (
     <>
@@ -95,10 +112,17 @@ function StartReviewButton() {
 
 export interface TopBarProps {
   payload: PrPayload;
+  /** Ask the worker for this pull request again. */
+  retry: () => void;
+  /** The commit the pull request is on now, if it has moved since it loaded. */
+  movedTo: string | null;
+  /** Keep reading the commit already on screen. */
+  onDismissMoved: () => void;
 }
 
-export function TopBar({ payload }: TopBarProps) {
+export function TopBar({ payload, retry, movedTo, onDismissMoved }: TopBarProps) {
   const node = payload.pullRequest;
+  const session = useReviewSession();
 
   return (
     <header className="topbar">
@@ -110,8 +134,21 @@ export function TopBar({ payload }: TopBarProps) {
       </div>
 
       <div className="topbar-actions">
+        {/* First, and that is a layout decision rather than a reading order.
+            This row is right-aligned, so a control at the head of it grows
+            leftwards: `Open in GitHub` and `Start a review` stay exactly where
+            they were when a notice appears. Put it last and every notice that
+            arrives mid-review shifts the button under the reviewer's pointer. */}
+        <NoticeCenter
+          payload={payload}
+          tokenRejected={session.tokenRejected}
+          movedTo={movedTo}
+          reviewPending={session.pending.kind === 'pending'}
+          onReload={retry}
+          onDismissMoved={onDismissMoved}
+        />
         <OpenInGitHub pr={payload.ref} href={prPermalink(node)} />
-        <StartReviewButton />
+        <StartReviewButton node={node} />
       </div>
     </header>
   );

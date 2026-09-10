@@ -22,20 +22,45 @@
 import { HEADER_BUDGET } from '@/lib/review/columnTail';
 import { REACHED } from '@/ui/currentFile';
 import {
+  ADDED_FILE,
   BASE_SHA,
+  DELETED_FILE,
+  EXEMPTED_FILE,
   FILES,
   FIRST_SHA,
+  GENERATED_FILE,
   IMAGE_FILE,
   MARKDOWN_FILE,
   PRIOR_SHA,
+  REINDENTED_FILE,
   TABLE_FILE,
   THREADS,
+  UNEVEN_FILE,
 } from './fixture';
 import { expect, reviewUrl, test } from './extension';
 import type { BrowserContext, Page } from '@playwright/test';
 
 /** The scrollport `CodeView` was handed. */
 const VIEW = '.diff-view';
+
+/**
+ * Every file in the column, in the order `UNIFIED_DIFF` concatenates them.
+ *
+ * `FILES` alone is not the column. Five more follow it — the image, the table,
+ * and the added, deleted and unevenly-modified files — and a walk down the
+ * column reaches all of them.
+ */
+const COLUMN_ORDER = [
+  ...FILES,
+  GENERATED_FILE,
+  EXEMPTED_FILE,
+  REINDENTED_FILE,
+  IMAGE_FILE,
+  TABLE_FILE,
+  ADDED_FILE,
+  DELETED_FILE,
+  UNEVEN_FILE,
+] as const;
 
 /**
  * The measured half of a card, which is a separate element from its header.
@@ -79,7 +104,7 @@ async function cardTops(page: Page): Promise<{ path: string; top: number }[]> {
  * run — a disabled one — leaves the menu where it was.
  */
 async function scopeMenuItem(page: Page, name: RegExp) {
-  const kebab = page.getByRole('button', { name: /diff options/i });
+  const kebab = page.getByRole('button', { name: /commit options/i });
   if ((await kebab.getAttribute('aria-expanded')) !== 'true') await kebab.click();
   return page.getByRole('menu').locator('.menu-item').filter({ hasText: name });
 }
@@ -563,6 +588,197 @@ test('hovering a tree row names the whole path', async ({ context, extensionId, 
   await expect(row).toHaveAttribute('title', 'src/components/Button.tsx');
 });
 
+/**
+ * What the page cannot vouch for, in the bar rather than under it.
+ *
+ * A fine-grained token that grants the repository but not `Checks` gets the
+ * whole pull request back with `statusCheckRollup` nulled and one error beside
+ * it. That used to open a banner between the top bar and the diff; it is now a
+ * section of a panel behind one control in the bar, and the thing to prove in a
+ * real browser is that the control is reachable, that what is behind it is the
+ * same sentence as before, and that a page with a caveat on it is not a page
+ * with a row taken off the top of the diff.
+ */
+test('a refused permission is named in the bar, not banded across the page', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  api.deniedPath = [
+    'repository',
+    'pullRequest',
+    'commits',
+    'nodes',
+    0,
+    'commit',
+    'statusCheckRollup',
+  ];
+
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Nothing between the bar and the diff: the caveat costs the review no
+  // vertical space at all until it is asked for.
+  await expect(page.locator('.notice-panel')).toHaveCount(0);
+
+  const trigger = page.getByRole('button', { name: /partly hidden/i });
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAttribute('data-tone', 'incomplete');
+
+  await trigger.click();
+  const panel = page.getByRole('dialog', { name: /cannot show/i });
+  await expect(panel).toContainText(/would not show this token the status checks/i);
+  // And GitHub's own words, for pasting into a bug report.
+  await expect(panel).toContainText(/not accessible by personal access token/i);
+
+  // It hangs below the bar rather than being clipped inside it.
+  const bar = await page.locator('.topbar').boundingBox();
+  const box = await panel.boundingBox();
+  expect(bar).not.toBeNull();
+  expect(box).not.toBeNull();
+  expect((box?.y ?? 0)).toBeGreaterThanOrEqual((bar?.y ?? 0) + (bar?.height ?? 0));
+  expect(box?.height ?? 0).toBeGreaterThan(40);
+
+  // Escape leaves it, and the keyboard lands back where it started.
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+/**
+ * A read-only account, which is the state the page used to be least legible in.
+ *
+ * Every refusal arrived on its own: a greyed-out Resolve with a tooltip nobody
+ * without a mouse could read, and — before this — a Start a review that opened
+ * a pending review GitHub would refuse to submit, stranding every comment
+ * queued on it. Nothing said why, and nothing connected the two.
+ */
+test('an account that can only read is told so once, not control by control', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  api.viewerPermission = 'READ';
+
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Not offered at all: a review that can be opened and never submitted is
+  // worse than no button, because the comments on it are invisible until it is.
+  await expect(page.getByRole('button', { name: /start a review/i })).toHaveCount(0);
+
+  const trigger = page.getByRole('button', { name: /read-only/i });
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAttribute('data-tone', 'blocked');
+
+  await trigger.click();
+  const panel = page.getByRole('dialog', { name: /cannot show/i });
+  await expect(panel).toContainText(/read-only on this repository/i);
+  // Both remedies, in the order they are worth trying.
+  await expect(panel).toContainText(/pull requests: read and write/i);
+  await expect(panel.getByRole('button', { name: /check your token/i })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+
+  // And the diff is still there to read, which is most of what this page is
+  // for. A permission problem is not a reason to replace a pull request.
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+});
+
+test('an ordinary account is offered a review and told nothing about permissions', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await expect(page.getByRole('button', { name: /start a review/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /read-only/i })).toHaveCount(0);
+});
+
+/**
+ * The three files that are not a one-for-one edit.
+ *
+ * Every other file in the fixture swaps one line for one line, which meant the
+ * tree only ever drew `M +1 −1` — so `A`, `D` and an asymmetric pair of counts
+ * were rendered by nothing, anywhere, and the store screenshots showed a pull
+ * request in which nothing is ever only added or only removed.
+ */
+test('the tree marks what was added and what was deleted', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const expected = [
+    {
+      path: ADDED_FILE,
+      status: 'added',
+      letter: 'A',
+      additions: '+4',
+      deletions: '−0',
+      line: 'const entries = new Map();',
+    },
+    {
+      path: DELETED_FILE,
+      status: 'deleted',
+      letter: 'D',
+      additions: '+0',
+      deletions: '−3',
+      line: 'export default memo;',
+    },
+    // Modified, but unevenly: the counts differ, which is the case a fixture of
+    // one-line swaps can never produce.
+    {
+      path: UNEVEN_FILE,
+      status: 'modified',
+      letter: 'M',
+      additions: '+2',
+      deletions: '−3',
+      line: `old alpha of ${UNEVEN_FILE}`,
+    },
+  ];
+
+  for (const file of expected) {
+    const row = page.locator(`[data-path="${file.path}"]`);
+    await expect(row).toHaveAttribute('data-status', file.status);
+    await expect(row.locator('.tree-status')).toHaveText(file.letter);
+    await expect(row.locator('.additions')).toHaveText(file.additions);
+    await expect(row.locator('.deletions')).toHaveText(file.deletions);
+  }
+
+  // And they are counted into the bar above the column rather than only drawn
+  // in the rail.
+  await expect(page.locator('.scope-status')).toContainText(
+    `${COLUMN_ORDER.length} files changed`,
+  );
+
+  // And each of the three really draws. The counts above come from GraphQL, so
+  // they would be right even if the patches were malformed — and a hunk header
+  // whose line counts do not add up is exactly the kind of thing a hand-written
+  // fixture gets wrong, and exactly the kind of thing a renderer drops in
+  // silence. Reached through the tree, which is what scrolls the column to a
+  // card that has not been virtualized in yet.
+  for (const file of expected) {
+    await page.locator(`[data-path="${file.path}"]`).click();
+    await expect(page.locator(`[data-file-card="${file.path}"]`)).toBeVisible();
+    await expect(page.getByText(file.line, { exact: true })).toBeVisible();
+  }
+
+  // The uneven file's second hunk too, which is the one that only adds: it is
+  // twenty lines below the one that only removes, and everything between them
+  // is numbered three apart on the two sides.
+  await expect(
+    page.getByText(`new delta of ${UNEVEN_FILE}`, { exact: true }),
+  ).toBeVisible();
+});
+
 test('each file in the diff is a block of its own', async ({ context, extensionId, api }) => {
   void api;
   // `stickyHeaders` is on, so a file's header stays pinned while its body
@@ -668,6 +884,98 @@ test('switching views and back leaves the diff exactly where it was', async ({
   ).toBeVisible();
 });
 
+/**
+ * The Overview's right-hand column: everything a reviewer picks from or checks.
+ *
+ * Checked in a browser rather than in jsdom because both claims here are about
+ * layout. That the commit log is *in* that column is structural and jsdom can
+ * see it; that it still reads at 340px, with its subjects on their own line
+ * above the sha, needs something that lays out.
+ */
+test('the overview gathers what is pickable in one column, commits last', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await openView(page, /overview/i);
+
+  const meta = page.locator('.overview-meta');
+  await expect(meta.locator('h2')).toHaveText([
+    'Branches',
+    'Checks',
+    'Reviewers',
+    'Commits',
+  ]);
+  // Not under the description, where a description of ordinary length pushed
+  // it off the bottom of the view.
+  await expect(page.locator('.overview-main .commit-log')).toHaveCount(0);
+
+  // The subject sits above the sha rather than beside it, which is what buys
+  // it the width to be worth reading in a column this narrow.
+  const rows = await meta.locator('.commit-log-open').first().evaluate((node) => {
+    const headline = node.querySelector('.commit-log-headline')?.getBoundingClientRect();
+    const meta = node.querySelector('.commit-log-meta')?.getBoundingClientRect();
+    return { headline: headline?.top ?? 0, meta: meta?.top ?? 0, width: headline?.width ?? 0 };
+  });
+  expect(rows.meta).toBeGreaterThan(rows.headline);
+  expect(rows.width).toBeGreaterThan(180);
+});
+
+/**
+ * The rail's way out, which only a real extension can prove works.
+ *
+ * `runtime.openOptionsPage` is the whole of the mechanism, and it is exactly
+ * the part jsdom stubs away: the unit test asserts the call, and this asserts
+ * that the call lands on a page with the settings on it.
+ */
+test('the rail opens the options page, without leaving the review', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const opened = context.waitForEvent('page');
+  // Scoped and exact: the diff's kebab is called "Commit options", and a
+  // substring match on "Options" finds both.
+  await page
+    .locator('.viewswitcher')
+    .getByRole('button', { name: 'Options', exact: true })
+    .click();
+  const options = await opened;
+
+  await expect(options).toHaveURL(new RegExp(`^chrome-extension://${extensionId}/options.html`));
+  await expect(options.getByRole('heading', { name: /reading a diff/i })).toBeVisible();
+
+  // A new tab, not this one. The review is a page a reviewer is midway
+  // through, and replacing it to change a checkbox would cost them their
+  // scroll position and every line of context they expanded.
+  await expect(page.locator('.shell')).toBeVisible();
+  await options.close();
+});
+
+test('each branch opens that branch on GitHub', async ({ context, extensionId, api }) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await openView(page, /overview/i);
+
+  const branches = page.locator('.overview-branches');
+  await expect(branches.getByRole('link', { name: 'main' })).toHaveAttribute(
+    'href',
+    'https://github.com/acme/widgets/tree/main',
+  );
+  await expect(branches.getByRole('link', { name: 'cache-the-diff' })).toHaveAttribute(
+    'href',
+    'https://github.com/acme/widgets/tree/cache-the-diff',
+  );
+});
+
 test('scrolling the diff column walks the tree selection forward, in file order', async ({
   context,
   extensionId,
@@ -677,11 +985,11 @@ test('scrolling the diff column walks the tree selection forward, in file order'
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  // The whole column, not just `FILES`: the image and the table follow it in
-  // `UNIFIED_DIFF`, and the walk reaches them now that the tail gives the column
-  // the scroll range its rich cards were costing it.
+  // The whole column, not just `FILES`: the image, the table and the three
+  // uneven files follow it in `UNIFIED_DIFF`, and the walk reaches them now that
+  // the tail gives the column the scroll range its rich cards were costing it.
   const order = new Map<string, number>(
-    [...FILES, IMAGE_FILE, TABLE_FILE].map((path, index) => [path, index]),
+    COLUMN_ORDER.map((path, index) => [path, index]),
   );
   const seen: string[] = [];
 
@@ -808,9 +1116,12 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
   // the review is opened, written to, and submitted in one go — and this
   // asserts the third round trip really happens, in a real browser, because
   // the version that did not looked identical on screen.
+  // Polled rather than read once: the fourth is sent after the submit resolves,
+  // so a straight read here catches the sequence one trip short.
   const reads = ['PullRequestReview', 'ViewerPendingReview', 'PullRequestCommits'];
-  const mutations = api.operations.filter((name) => !reads.includes(name));
-  expect(mutations).toEqual(['StartReview', 'AddThread', 'SubmitReview']);
+  await expect
+    .poll(() => api.operations.filter((name) => !reads.includes(name)))
+    .toEqual(['StartReview', 'AddThread', 'SubmitReview', 'ThreadPermissions']);
   expect(api.variables[api.operations.indexOf('SubmitReview')]?.['event']).toBe(
     'COMMENT',
   );
@@ -822,6 +1133,64 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
 
   // Nothing is left queued: no pending-review bar, no "not posted" chip.
   await expect(page.getByText(/not posted yet/i)).toHaveCount(0);
+});
+
+/**
+ * The comment you just posted can be resolved, without reloading first.
+ *
+ * `addPullRequestReviewThread` can only write into a PENDING review, so the
+ * thread it hands back is described as one nobody else can see — and not
+ * everything is permitted on one of those. The page kept that description after
+ * submitting the review, so a reviewer posted a comment and met a Resolve
+ * button they could not press on a conversation plainly in front of them.
+ * Reloading fixed it, which was the tell: only the copy on the page was stale.
+ *
+ * In a browser rather than in jsdom because the fourth round trip is the fix,
+ * and the fixture answers it the way GitHub does — unresolvable on the way in,
+ * resolvable once the review is submitted.
+ */
+test('a comment just posted can be resolved without reloading', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const gutter = page
+    .locator('diffs-container')
+    .first()
+    .locator('[data-column-number][data-line-type="change-addition"]')
+    .first();
+  await gutter.click();
+  await page.locator('body').press('c');
+
+  const box = page.getByRole('textbox', { name: /comment on src\/app\.ts/i });
+  await expect(box).toBeVisible();
+  await box.fill('Resolvable straight away.');
+  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+
+  const posted = filesView(page)
+    .locator('[data-thread="PRRT_posted"]')
+    .last();
+  await expect(posted.getByText('Resolvable straight away.')).toBeVisible();
+
+  // The assertion the bug was: enabled, on the page the comment was written on.
+  await expect(posted.getByRole('button', { name: /resolve conversation/i })).toBeEnabled();
+
+  // Asked for, rather than guessed at. Submitting a review does not by itself
+  // earn the right to resolve — read access is enough to review a repository
+  // and not enough to resolve on it.
+  expect(api.operations).toContain('ThreadPermissions');
+  expect(api.variables[api.operations.indexOf('ThreadPermissions')]?.['ids']).toEqual([
+    'PRRT_posted',
+  ]);
+
+  // And it works, rather than merely looking as though it would.
+  await posted.getByRole('button', { name: /resolve conversation/i }).click();
+  await expect
+    .poll(() => api.operations.filter((name) => name === 'ResolveThread').length)
+    .toBe(1);
 });
 
 /**
@@ -1112,14 +1481,41 @@ test('a comment expanded into view survives narrowing the diff', async ({
   await expect(page.getByLabel('Diff').getByText('Out of hunk comment.')).toBeVisible();
 });
 
-test('split view redraws the column, and keeps the comments on it', async ({
+/**
+ * The options page reaching an open review, twice over.
+ *
+ * Both of these used to be controls on the review itself, remembered for the
+ * session and no longer. They are settings now, which makes the chain much
+ * longer — a checkbox on one extension page, `storage.local`, a change event,
+ * a hook, four components and an option handed to Pierre — and every seam in
+ * it is a place a value can be dropped in a way jsdom cannot see.
+ *
+ * Driven by ticking the real checkbox rather than by writing storage directly.
+ * Writing storage would skip the half of the chain most likely to break: that
+ * the options page writes the field the review reads.
+ */
+async function setPreference(
+  context: BrowserContext,
+  extensionId: string,
+  name: RegExp,
+): Promise<void> {
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  const box = options.getByRole('checkbox', { name });
+  await expect(box).toBeVisible();
+  await box.check();
+  await expect(box).toBeChecked();
+  await options.close();
+}
+
+test('split view is a setting, and reaches a review that is already open', async ({
   context,
   extensionId,
   api,
 }) => {
   void api;
   // The layout is the one thing jsdom cannot check at all — it performs no
-  // layout — and this is a control whose entire job is layout. §B.3 promises
+  // layout — and this is a preference whose entire job is layout. §B.3 promises
   // that moving between the two needs no annotation change; here is that
   // promise against the production build, in a browser that lays out.
   const page = await context.newPage();
@@ -1128,7 +1524,10 @@ test('split view redraws the column, and keeps the comments on it', async ({
   const diff = page.locator('diffs-container').first().locator('[data-diff-type]').first();
   await expect(diff).toHaveAttribute('data-diff-type', 'single');
 
-  await chooseScope(page, /split view/i);
+  // Ticked while this review is open, and it has to land here without a
+  // reload — a setting that needs the tab restarted reads as one that does not
+  // work.
+  await setPreference(context, extensionId, /side by side/i);
 
   await expect(diff).toHaveAttribute('data-diff-type', 'split');
   // Still real, highlighted, numbered code — not an empty two-column frame.
@@ -1139,45 +1538,192 @@ test('split view redraws the column, and keeps the comments on it', async ({
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
-
-  await scopeChecked(page, /split view/i, 'true');
 });
 
-test('a file can be read without its whitespace, and says that it is', async ({
+test('a diff read without its whitespace says so, on the row of each file it shortened', async ({
   context,
   extensionId,
   api,
 }) => {
   void api;
-  // The label is the requirement, not the decoration: the body under it is not
-  // what anybody else on this pull request is looking at. Checked in the real
-  // build because it is the shipped stylesheet that has to make it visible.
+  // The caveat is the requirement, not the decoration: the body under it is not
+  // what anybody else on this pull request is looking at, and the reviewer did
+  // not shorten it on this page — they ticked a box on another one, quite
+  // possibly weeks ago.
+  //
+  // Which is why the setting goes on *before* the review opens. That is the
+  // state a reviewer actually lives in, and it is the one where the caveat has
+  // to carry itself with no recent action to remind them. Ticking it against an
+  // open review is a different claim and `split view` already makes it.
+  //
+  // In the real build because it is the shipped stylesheet that has to make the
+  // flag visible without letting the head row grow.
+  await setPreference(context, extensionId, /whitespace moved/i);
+
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const card = page.locator('[data-file-card="src/app.ts"]');
-  // The toggle is on the header; the notice it turns on is in the body, which
-  // is a separate element because that is the half `CodeView` measures.
-  const note = fileBody(page, 'src/app.ts').locator('[data-whitespace-note]');
-  const toggle = card.getByRole('button', { name: /ignore whitespace/i });
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  // The last of twenty files, so it is virtualized out until the tree scrolls
+  // the column to it.
+  await page.locator(`[data-path="${REINDENTED_FILE}"]`).click();
+  await expect(page.locator(`[data-file-card="${REINDENTED_FILE}"]`)).toBeVisible();
 
-  await toggle.click();
+  const flag = page.locator(`[data-file-card="${REINDENTED_FILE}"] .whitespace-flag`);
+  const indentedRows = page
+    .locator('diffs-container')
+    .filter({ has: page.locator(`[data-file-card="${REINDENTED_FILE}"]`) });
+  await expect(flag).toBeVisible();
+  await expect(flag).toHaveText(/whitespace hidden/i);
+  // The words that used to be a paragraph in the body, kept where a pointer and
+  // a screen reader can each still reach them.
+  await expect(flag).toHaveAttribute('title', /not the diff GitHub is showing/i);
+  // Named by the two words and described by the sentence they stand for, so a
+  // screen reader reaching the button does not have to hear three sentences to
+  // learn which file it is on.
+  const describedBy = await flag.getAttribute('aria-describedby');
+  await expect(page.locator(`#${describedBy ?? 'missing'}`)).toContainText(
+    /comments still attach to GitHub/i,
+  );
 
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(note).toContainText(/not the diff GitHub is showing/i);
-  // Per file. The next card is still showing GitHub's diff, unannounced.
+  // The per-file button that used to turn this on is gone: one question, one
+  // switch.
   await expect(
-    fileBody(page, 'src/beta.ts').locator('[data-whitespace-note]'),
+    page.locator(`[data-file-card="${REINDENTED_FILE}"]`).getByRole('button', {
+      name: /ignore whitespace/i,
+    }),
   ).toHaveCount(0);
 
-  // The column survived being rebuilt under a new key: there is still code.
+  // And the rewrite really landed, which is what the flag is claiming. Counted
+  // in change rows rather than by looking for a vanished line, because the
+  // reindented line does not vanish — it stops being a change and becomes a
+  // context line, which is the entire trick. GitHub's patch has two of each;
+  // the drawn one has one.
+  await expect(
+    indentedRows.locator('[data-column-number][data-line-type="change-addition"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText(`new body of ${REINDENTED_FILE}`, { exact: true }),
+  ).toBeVisible();
+
+  // And it is the way back, not merely a label. Pressing it restores GitHub's
+  // own patch for this one file, without disturbing the setting.
+  await expect(flag).toHaveAttribute('aria-pressed', 'false');
+  await flag.click();
+
+  // Back to the file: restoring GitHub's patch rebuilds the column under a new
+  // key, and a card twenty files down is virtualized out by that. By way of
+  // another row, because the tree still holds this one as the current file and
+  // choosing the file you are already on scrolls nowhere.
+  await page.locator('[data-path="src/app.ts"]').click();
+  await page.locator(`[data-path="${REINDENTED_FILE}"]`).click();
+  await expect(flag).toHaveAttribute('aria-pressed', 'true');
+  await expect(flag).toHaveText(/whitespace shown/i);
+  // Both changes are changes again, which is the point of asking for it.
+  await expect(
+    indentedRows.locator('[data-column-number][data-line-type="change-addition"]'),
+  ).toHaveCount(2);
+
+  // Nothing on a file it had nothing to take out of. With the setting on for
+  // the whole pull request, a caveat on all twenty is one nobody reads on the
+  // one that needed it.
+  await page.locator('[data-path="src/app.ts"]').click();
+  await expect(page.locator('[data-file-card="src/app.ts"]')).toBeVisible();
+  await expect(
+    page.locator('[data-file-card="src/app.ts"] .whitespace-flag'),
+  ).toHaveCount(0);
+
+  // The column survived being built under the setting: there is still code.
   await expect(
     page.locator('diffs-container').first().locator('[data-column-number]').first(),
   ).toBeVisible();
+});
 
-  await toggle.click();
-  await expect(note).toHaveCount(0);
+/**
+ * Folding away the files nobody wrote, and the repository's veto.
+ *
+ * GitHub answers this question over no API at all — see
+ * `lib/review/generated.ts` — so the whole mechanism is ours: a pattern list,
+ * and `.gitattributes` fetched at the head commit through the same contents
+ * endpoint the diff expander uses. Only a real browser can show that the second
+ * of those actually arrives, since it crosses the worker, the message channel
+ * and a cache.
+ */
+test('a generated file is folded to its header, unless the repository says otherwise', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  await setPreference(context, extensionId, /generated files/i);
+
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Folded: a header, a flag saying why, and no rows under it.
+  await page.locator(`[data-path="${GENERATED_FILE}"]`).click();
+  const generated = page.locator(`[data-file-card="${GENERATED_FILE}"]`);
+  await expect(generated).toBeVisible();
+  const flag = generated.getByRole('button', { name: 'Generated' });
+  await expect(flag).toBeVisible();
+  await expect(flag).toHaveAttribute('aria-pressed', 'false');
+  await expect(
+    page.getByText(`new ${GENERATED_FILE}`, { exact: true }),
+  ).toHaveCount(0);
+
+  // Nothing about it is hidden, only its reading: GitHub's own counts are still
+  // on the row, which is what makes this different in kind from ignoring
+  // whitespace.
+  await expect(generated.locator('.additions')).toHaveText('+2');
+
+  // The repository declared this one hand-written despite living under
+  // `dist/**`, and that has to beat any pattern of ours.
+  await page.locator(`[data-path="${EXEMPTED_FILE}"]`).click();
+  const exempted = page.locator(`[data-file-card="${EXEMPTED_FILE}"]`);
+  await expect(exempted).toBeVisible();
+  await expect(exempted.getByRole('button', { name: 'Generated' })).toHaveCount(0);
+  await expect(page.getByText(`new ${EXEMPTED_FILE}`, { exact: true })).toBeVisible();
+});
+
+test('a folded file opens when the reviewer presses the word on its row', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The escape hatch. One press, on the same control that explained the folding
+  // — a separate "show anyway" beside the word would be two controls for one
+  // thought.
+  await setPreference(context, extensionId, /generated files/i);
+
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await page.locator(`[data-path="${GENERATED_FILE}"]`).click();
+
+  const flag = page
+    .locator(`[data-file-card="${GENERATED_FILE}"]`)
+    .getByRole('button', { name: 'Generated' });
+  await flag.click();
+
+  await expect(flag).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText(`new ${GENERATED_FILE}`, { exact: true })).toBeVisible();
+});
+
+test('nothing is folded until the setting asks for it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await page.locator(`[data-path="${GENERATED_FILE}"]`).click();
+
+  await expect(
+    page.locator(`[data-file-card="${GENERATED_FILE}"]`).getByRole('button', {
+      name: 'Generated',
+    }),
+  ).toHaveCount(0);
+  await expect(page.getByText(`new ${GENERATED_FILE}`, { exact: true })).toBeVisible();
 });
 
 test('the numbered strip scopes the diff, and keeps All within reach', async ({
@@ -1733,17 +2279,17 @@ test('no card header is taller than the height the viewer assumes', async ({
   await openReview(page, extensionId);
 
   // Every card, not just the first screen: the column virtualizes, and the
-  // tall ones are the rich comparisons at the bottom.
+  // tall ones are the rich comparisons near the bottom.
+  //
+  // Driven through the tree rather than by scrolling to a handful of fractions.
+  // Fractions only sample, so which cards a run happened to catch depended on
+  // how many files the fixture had — adding one moved the sampling off the
+  // Markdown card and the test failed for a reason that had nothing to do with
+  // header heights. A row per file misses none of them.
   const tallest = new Map<string, number>();
-  for (const fraction of [0, 0.25, 0.5, 0.75, 0.9, 1]) {
-    await page.evaluate(
-      ([selector, value]) => {
-        const view = document.querySelector(selector as string) as HTMLElement;
-        view.scrollTop = (view.scrollHeight - view.clientHeight) * (value as number);
-      },
-      [VIEW, fraction] as const,
-    );
-    await page.waitForTimeout(400);
+  for (const path of COLUMN_ORDER) {
+    await page.locator(`[data-path="${path}"]`).click();
+    await expect(page.locator(`[data-file-card="${path}"]`)).toBeVisible();
     for (const [path, height] of await page.evaluate(() =>
       [...document.querySelectorAll('[data-file-card]')].map(
         (node) =>
@@ -1757,10 +2303,8 @@ test('no card header is taller than the height the viewer assumes', async ({
     }
   }
 
-  // Enough of them to be worth the walk, and the rich ones among them.
-  expect(tallest.size).toBeGreaterThan(FILES.length);
-  expect(tallest.has(MARKDOWN_FILE)).toBe(true);
-  expect(tallest.has(IMAGE_FILE)).toBe(true);
+  // Every one of them, which is what walking the tree buys over sampling.
+  expect([...COLUMN_ORDER].filter((path) => !tallest.has(path))).toEqual([]);
 
   const over = [...tallest].filter(([, height]) => height > HEADER_BUDGET);
   expect(over).toEqual([]);

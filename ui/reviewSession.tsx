@@ -35,6 +35,7 @@ import {
   RESOLVE_THREAD,
   START_REVIEW,
   SUBMIT_REVIEW,
+  THREAD_PERMISSIONS,
   UNMARK_VIEWED,
   UNRESOLVE_THREAD,
   UPDATE_COMMENT,
@@ -350,11 +351,20 @@ function readThread(value: unknown): ReviewThread | null {
   };
 }
 
-/** The permission and resolution flags a resolve mutation sends back. */
+/**
+ * The permission and resolution flags a thread payload carries.
+ *
+ * Field by field, and absent is not false. These arrive from two places — a
+ * resolve mutation and {@link THREAD_PERMISSIONS} — and a document that
+ * selected three of the four must leave the fourth alone rather than clear it.
+ */
 function readResolution(value: unknown): Partial<ReviewThread> | null {
   if (!isRecord(value)) return null;
   const patch: Partial<ReviewThread> = {};
   if (typeof value['isResolved'] === 'boolean') patch.isResolved = value['isResolved'];
+  if (typeof value['viewerCanReply'] === 'boolean') {
+    patch.viewerCanReply = value['viewerCanReply'];
+  }
   if (typeof value['viewerCanResolve'] === 'boolean') {
     patch.viewerCanResolve = value['viewerCanResolve'];
   }
@@ -362,6 +372,28 @@ function readResolution(value: unknown): Partial<ReviewThread> | null {
     patch.viewerCanUnresolve = value['viewerCanUnresolve'];
   }
   return Object.keys(patch).length === 0 ? null : patch;
+}
+
+/**
+ * The threads a `nodes(ids:)` reply actually carried, paired with their id.
+ *
+ * Positional matching is not available: GraphQL answers an id it could not
+ * resolve with a null in the list, and an inline fragment on the wrong type
+ * with an empty object. Both are ordinary — a thread can be deleted between
+ * the submit and this read — so each entry names itself or is dropped.
+ */
+function readThreadFlags(value: unknown): Map<string, Partial<ReviewThread>> {
+  const found = new Map<string, Partial<ReviewThread>>();
+  if (!Array.isArray(value)) return found;
+
+  for (const node of value) {
+    if (!isRecord(node)) continue;
+    const id = node['id'];
+    if (typeof id !== 'string') continue;
+    const patch = readResolution(node);
+    if (patch !== null) found.set(id, patch);
+  }
+  return found;
 }
 
 const field = (data: JsonValue, mutation: string, key: string): unknown =>
@@ -479,6 +511,8 @@ export function ReviewSessionProvider({
   commentingNow.current = commentInFlight;
   const queuedNow = useRef(queued);
   queuedNow.current = queued;
+  const unpublishedNow = useRef(unpublished);
+  unpublishedNow.current = unpublished;
 
   const prId = typeof pullRequest.id === 'string' ? pullRequest.id : '';
 
@@ -882,6 +916,51 @@ export function ReviewSessionProvider({
   );
 
   /**
+   * Ask again what may be done to the threads a review has just published.
+   *
+   * The bug this exists for is small on screen and thoroughly confusing: you
+   * write a comment, submit the review, and the conversation you just posted
+   * has a Resolve button you cannot press. Reloading fixes it, which is the
+   * whole diagnosis — GitHub has been right the entire time and only the copy
+   * on this page was stale.
+   *
+   * It is stale because of when it was written down. A thread queued on a
+   * PENDING review is described by `addPullRequestReviewThread` as it is *at
+   * that moment*: unpublished, and not everything is permitted on one of those.
+   * Submitting turns it into an ordinary thread on the pull request and touches
+   * nothing here, so the flags go on describing a thread that no longer exists
+   * in that form.
+   *
+   * Asked rather than assumed — see {@link THREAD_PERMISSIONS}. Deciding that a
+   * submitted review implies a resolvable thread would be wrong for anyone who
+   * may review a repository without being able to write to it.
+   *
+   * Failure is silent and deliberately so. Nothing was lost: the review is
+   * submitted, every comment is on GitHub, and the worst case is the disabled
+   * button that was there before this ran. An error about a request the
+   * reviewer did not make, on top of a submit that worked, would read as the
+   * submit having gone wrong.
+   */
+  const republish = useCallback(
+    async (threadIds: readonly string[]): Promise<void> => {
+      // `nodes` caps at 100 ids. A review holding more than that is not a case
+      // worth a second round trip — the ones past the cap keep the flags they
+      // had, which is exactly the state this whole function is improving on.
+      const ids = threadIds.slice(0, 100);
+      if (ids.length === 0) return;
+
+      const response = await mutate(THREAD_PERMISSIONS, { ids });
+      if (!response.ok) return;
+
+      const flags = readThreadFlags(
+        isRecord(response.data.data) ? response.data.data['nodes'] : undefined,
+      );
+      for (const [id, patch] of flags) patchThread(id, patch);
+    },
+    [mutate, patchThread],
+  );
+
+  /**
    * Get a review to write into — a new one, or the one already open.
    *
    * GitHub allows one PENDING review per pull request and answers a second with
@@ -1050,6 +1129,12 @@ export function ReviewSessionProvider({
         return true;
       }
 
+      // The review this thread was written into existed for the two round
+      // trips above and is now submitted, so the thread is real — but the copy
+      // held here was described mid-way through that, while it was still inside
+      // an unsubmitted review. Without this the reviewer posts a comment and
+      // finds Resolve greyed out on it until they reload.
+      if (created !== null) await republish([created.id]);
       return true;
     },
     [
@@ -1060,6 +1145,7 @@ export function ReviewSessionProvider({
       mutate,
       openOrJoinReview,
       queueThread,
+      republish,
       takeThread,
     ],
   );
@@ -1181,12 +1267,17 @@ export function ReviewSessionProvider({
       }
 
       dispatch({ type: 'submitted' });
+      // Read before the marks are cleared: this is the only record of which
+      // threads the review was holding, and `forgetQueued` is about to empty
+      // it.
+      const published = [...unpublishedNow.current];
       // Posted now, so nothing is outstanding. Leaving the marks would keep
       // saying otherwise on threads that are live on GitHub.
       forgetQueued();
+      await republish(published);
       return true;
     },
-    [clearFailure, fail, forgetQueued, mutate, reviewPresence],
+    [clearFailure, fail, forgetQueued, mutate, republish, reviewPresence],
   );
 
   /**

@@ -73,6 +73,59 @@ export function prBranches(node: PullRequestNode): {
 }
 
 /**
+ * Which repository the head branch is on.
+ *
+ * Three answers rather than two, because "we do not know" is a real state and
+ * has to be distinguishable from "the same one". A payload cached by a build
+ * that predates `isCrossRepository` carries neither field, and treating that
+ * silence as "same repository" would link a fork's branch into the base repo —
+ * a 404 at best, and at worst a branch of the same name that exists there and
+ * belongs to somebody else. `unknown` is what stops the link being drawn.
+ */
+export type HeadRepo =
+  | { kind: 'same' }
+  | { kind: 'fork'; owner: string; repo: string }
+  | { kind: 'unknown' };
+
+export function prHeadRepo(node: PullRequestNode): HeadRepo {
+  const cross = node['isCrossRepository'];
+  if (cross === false) return { kind: 'same' };
+  if (cross !== true) return { kind: 'unknown' };
+
+  const repository = node['headRepository'];
+  // Null once the fork is deleted, which GitHub allows while leaving the pull
+  // request readable. There is then nowhere to point at.
+  if (!isRecord(repository)) return { kind: 'unknown' };
+
+  const nameWithOwner = readString(repository['nameWithOwner']);
+  if (nameWithOwner === null) return { kind: 'unknown' };
+
+  // Exactly two parts. A repository name cannot contain a slash, so anything
+  // else is a field this build does not understand rather than a name to guess
+  // at.
+  const parts = nameWithOwner.split('/');
+  const [owner, repo] = parts;
+  if (parts.length !== 2 || owner === undefined || repo === undefined) {
+    return { kind: 'unknown' };
+  }
+  if (owner === '' || repo === '') return { kind: 'unknown' };
+
+  return { kind: 'fork', owner, repo };
+}
+
+/**
+ * What this account may do in the repository, as GitHub reports it.
+ *
+ * Null when the field is missing — an older cached payload — and null is
+ * deliberately *not* treated as a restriction anywhere. See
+ * {@link prViewerCanReview}.
+ */
+export function prViewerPermission(node: PullRequestNode): string | null {
+  const repository = node['repository'];
+  return isRecord(repository) ? readString(repository['viewerPermission']) : null;
+}
+
+/**
  * The base commit this pull request is diffed against, or null.
  *
  * Half of what expanding unchanged context needs: a blob is read at a commit,
@@ -106,6 +159,36 @@ export function prPermalink(node: PullRequestNode): string | null {
  */
 export function prViewerIsAuthor(node: PullRequestNode): boolean {
   return node['viewerDidAuthor'] === true;
+}
+
+/**
+ * Whether to offer to open a review at all.
+ *
+ * Two ways to answer no, and they are different kinds of no.
+ *
+ * The first is authorship. GitHub does allow you to open a pending review on
+ * your own pull request and submit it as a comment, and the footer still
+ * handles that case for a review already in progress — but "Start a review" on
+ * your own work is a control offering something nobody wants: the two verdicts
+ * that matter are refused, and what is left is a way to batch notes to
+ * yourself. Writing on your own diff still works; the comments simply post as
+ * they are written.
+ *
+ * The second is access. Anyone with read access to a repository may review a
+ * pull request, so `READ` would be the wrong gate for GitHub in general — but
+ * this extension is driven by a fine-grained token, and such a token can never
+ * grant more than the role it was issued under. A `READ` viewer here therefore
+ * has no way to post the review the button would open, and a pending review
+ * that can never be submitted is worse than no button: every comment queued on
+ * it is invisible until it is, and it never is.
+ *
+ * Anything unrecognized, including the field being absent, means yes. Guessing
+ * no would remove a control the reviewer is entitled to, which is the same rule
+ * {@link prViewerIsAuthor} follows and for the same reason.
+ */
+export function prViewerCanReview(node: PullRequestNode): boolean {
+  if (prViewerIsAuthor(node)) return false;
+  return prViewerPermission(node) !== 'READ';
 }
 
 /**

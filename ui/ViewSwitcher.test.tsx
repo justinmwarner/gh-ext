@@ -10,10 +10,19 @@
  * cannot see; the count is what keeps that from being silent.
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ReviewView, ViewSwitcher } from './ViewSwitcher';
+import { openOptions } from './openOptions';
+
+vi.mock('./openOptions', () => ({ openOptions: vi.fn() }));
+
+const openOptionsMock = openOptions as unknown as Mock;
+
+beforeEach(() => {
+  openOptionsMock.mockReset();
+});
 
 function mount(active: ReviewView = 'files', unresolved = 0) {
   const onSelect = vi.fn();
@@ -127,5 +136,75 @@ describe('ViewSwitcher', () => {
     expect(screen.getByRole('tab', { name: /conversations/i }).textContent).toContain(
       '99+',
     );
+  });
+});
+
+/**
+ * The way out of the rail.
+ *
+ * Two settings now decide what a diff looks like, so the options page stopped
+ * being a once-per-install errand — and until this it was reachable only
+ * through the browser's own extension menu, which is two menus deep and not
+ * somewhere anyone thinks to look.
+ *
+ * Most of what is pinned here is what it must *not* be. A fourth tab would be
+ * one that never becomes selected, controls no panel, and that the arrow keys
+ * would walk into as though it were a view.
+ */
+describe('the options button', () => {
+  const optionsButton = () => screen.getByRole('button', { name: 'Options' });
+
+  it('is in the rail', () => {
+    mount();
+
+    expect(optionsButton()).toBeDefined();
+  });
+
+  it('opens the options page rather than changing the view', async () => {
+    const { onSelect } = mount();
+
+    await userEvent.click(optionsButton());
+
+    expect(openOptionsMock).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('is not a tab', () => {
+    // Structural, not cosmetic: it is outside the `tablist`, so nothing about
+    // it can be mistaken for a fourth view.
+    mount();
+
+    expect(tabNames()).toEqual(['Files', 'Conversations', 'Overview']);
+    expect(
+      within(screen.getByRole('tablist')).queryByRole('button', { name: 'Options' }),
+    ).toBeNull();
+    expect(optionsButton().getAttribute('aria-selected')).toBeNull();
+    expect(optionsButton().getAttribute('aria-controls')).toBeNull();
+  });
+
+  it('is not somewhere the arrow keys can land', async () => {
+    // The tabs wrap, so pressing Down on the last one goes back to the first.
+    // If this were inside the list it would be in that cycle, and the reviewer
+    // would arrow past a control that does not show them anything.
+    const { onSelect } = mount('overview');
+
+    screen.getByRole('tab', { name: 'Overview' }).focus();
+    await userEvent.keyboard('{ArrowDown}');
+
+    expect(onSelect).toHaveBeenCalledWith('files');
+  });
+
+  it('is reachable by keyboard, which the inactive tabs are not', async () => {
+    // Only the active tab is in the tab order — that is what makes Tab reach
+    // the view rather than walking the rail. This is a button and keeps its
+    // own stop, or it would be reachable by pointer alone.
+    mount();
+
+    expect(optionsButton().getAttribute('tabindex')).toBeNull();
+
+    optionsButton().focus();
+    await userEvent.keyboard('{Enter}');
+
+    expect(openOptionsMock).toHaveBeenCalledOnce();
   });
 });

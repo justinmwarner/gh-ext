@@ -18,6 +18,7 @@ import {
   RESOLVE_THREAD,
   START_REVIEW,
   SUBMIT_REVIEW,
+  THREAD_PERMISSIONS,
   UPDATE_COMMENT,
 } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
@@ -154,6 +155,9 @@ function Harness() {
         {session.pending.kind === 'pending' ? String(session.pending.countIsComplete) : ''}
       </p>
       <p data-testid="threads">{session.threads.map((t) => t.id).join(',')}</p>
+      <p data-testid="canresolve">
+        {session.threads.map((t) => `${t.id}=${String(t.viewerCanResolve)}`).join(',')}
+      </p>
       <p data-testid="unpublished">{[...session.unpublished].join(',')}</p>
       <p data-testid="failures">{[...session.failures.values()].join(' | ')}</p>
     </div>
@@ -337,7 +341,14 @@ describe('postThread', () => {
     await userEvent.click(screen.getByRole('button', { name: 'post' }));
 
     await waitFor(() => {
-      expect(documents()).toEqual([START_REVIEW, ADD_THREAD, SUBMIT_REVIEW]);
+      // Four, not three. The fourth asks what may now be done to the thread
+      // the third one published — see `THREAD_PERMISSIONS`.
+      expect(documents()).toEqual([
+        START_REVIEW,
+        ADD_THREAD,
+        SUBMIT_REVIEW,
+        THREAD_PERMISSIONS,
+      ]);
     });
     expect(variablesOf(1)['pullRequestReviewId']).toBe('PRR_transient');
     expect('pullRequestId' in variablesOf(1)).toBe(false);
@@ -356,8 +367,79 @@ describe('postThread', () => {
     await userEvent.click(screen.getByRole('button', { name: 'post' }));
 
     await waitFor(() => {
-      expect(documents()).toHaveLength(3);
+      expect(documents()).toHaveLength(4);
     });
+    expect(screen.getByTestId('mode').textContent).toBe('browse');
+  });
+
+  it('asks again what may be done to the thread it just published', async () => {
+    // The bug: `addPullRequestReviewThread` describes the thread as it is at
+    // that moment — sitting in a review nobody has submitted — and this page
+    // kept that answer after submitting the review. The reviewer posted a
+    // comment and found Resolve greyed out on a conversation plainly there,
+    // until they reloaded.
+    answerByDocument({
+      [THREAD_PERMISSIONS]: {
+        ok: true,
+        data: {
+          data: {
+            nodes: [
+              {
+                id: 'PRRT_new',
+                isResolved: false,
+                viewerCanReply: true,
+                viewerCanResolve: true,
+                viewerCanUnresolve: false,
+              },
+            ],
+          },
+        },
+      },
+    });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    // The thread arrives saying no, because that is what GitHub said about it
+    // while it was unpublished, and ends up saying yes.
+    await waitFor(() => {
+      expect(screen.getByTestId('canresolve').textContent).toContain('PRRT_new=true');
+    });
+    expect(variablesOf(3)).toEqual({ ids: ['PRRT_new'] });
+  });
+
+  it('takes GitHub’s answer rather than assuming the submit earned it', async () => {
+    // Submitting a review does not imply being allowed to resolve: read access
+    // is enough to review a repository and not enough to resolve on it. An
+    // optimistic `true` here would hand that reviewer a button that only 403s.
+    answerByDocument({
+      [THREAD_PERMISSIONS]: {
+        ok: true,
+        data: { data: { nodes: [{ id: 'PRRT_new', viewerCanResolve: false }] } },
+      },
+    });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('threads').textContent).toContain('PRRT_new');
+    });
+    expect(screen.getByTestId('canresolve').textContent).toContain('PRRT_new=false');
+  });
+
+  it('says nothing when the re-read fails, because nothing was lost', async () => {
+    // The comment is posted and the review is in. An error about a request the
+    // reviewer never made would read as the submit having gone wrong.
+    answerByDocument({ [THREAD_PERMISSIONS]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('threads').textContent).toContain('PRRT_new');
+    });
+    expect(screen.getByTestId('failures').textContent).toBe('');
     expect(screen.getByTestId('mode').textContent).toBe('browse');
   });
 
@@ -539,6 +621,50 @@ describe('comments queued on a review the reviewer opened', () => {
       expect(screen.getByTestId('mode').textContent).toBe('browse');
     });
     expect(screen.getByTestId('unpublished').textContent).toBe('');
+  });
+
+  it('re-reads what may be done to them, now that they are real', async () => {
+    // Same bug as the single-comment path, arrived at the long way round: the
+    // threads were described while queued on a review nobody could see, and
+    // submitting makes them ordinary threads without touching anything here.
+    // Without this the reviewer submits a review and cannot resolve any of the
+    // conversations in it until they reload.
+    await start();
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('unpublished').textContent).toContain('PRRT_new');
+    });
+
+    answerByDocument({
+      [THREAD_PERMISSIONS]: {
+        ok: true,
+        data: { data: { nodes: [{ id: 'PRRT_new', viewerCanResolve: true }] } },
+      },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'submit' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('canresolve').textContent).toContain('PRRT_new=true');
+    });
+    // The ids come from the marks, which the submit clears — so they have to be
+    // taken before that happens.
+    expect(variablesOf(documents().indexOf(THREAD_PERMISSIONS))).toEqual({
+      ids: ['PRRT_new'],
+    });
+  });
+
+  it('asks nothing when the review held no threads of its own', async () => {
+    // A review submitted with only a summary, or one resumed from GitHub whose
+    // comments this page never saw. There are no ids to ask about, and a query
+    // with an empty list is a round trip for nothing.
+    await start();
+
+    await userEvent.click(screen.getByRole('button', { name: 'submit' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mode').textContent).toBe('browse');
+    });
+    expect(documents()).not.toContain(THREAD_PERMISSIONS);
   });
 
   it('keeps the marks when the submit fails', async () => {

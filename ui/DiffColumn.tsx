@@ -59,6 +59,11 @@ import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { AnnotationSide } from '@/lib/review/threads';
 import { tailDeficit } from '@/lib/review/columnTail';
 import { type WhitespaceDiff, withoutWhitespaceChanges } from '@/lib/review/whitespace';
+import {
+  type GeneratedRule,
+  NO_ATTRIBUTES,
+  isGenerated,
+} from '@/lib/review/generated';
 import { Composer } from './Composer';
 import { FileBody, hasBodyContent } from './FileBody';
 import { FileCard } from './FileCard';
@@ -69,6 +74,7 @@ import { type BlobRefs, createDiffFilesLoader } from './blobLoader';
 import {
   codeViewItems,
   diffGeneration,
+  fileBody,
   fileDiffFor,
   fileDiffSignature,
   hunkStops,
@@ -178,10 +184,42 @@ export interface DiffColumnProps {
    * handles by drawing no expander rather than one that always fails.
    */
   blobs?: BlobRefs | null;
-  /** Unified or side by side. Not remembered anywhere — see `Shell`. */
+  /** Unified or side by side. From the options page — see `Shell`. */
   diffStyle?: DiffStyle;
+  /**
+   * Read every file through the whitespace rewrite rather than GitHub's patch.
+   *
+   * One flag for the whole column, from the options page. It was a set of
+   * paths and a button on each file header, on the argument that two files in
+   * one pull request ask different questions — one is a reformat, the next is
+   * not. That is still true, and it is not what the reviewer was asking: they
+   * wanted the answer to hold across files and across pull requests, and two
+   * ways to set the same thing is how you stop being able to tell which one is
+   * winning.
+   *
+   * Every card whose body is drawn this way still says so on its face, which
+   * is the guarantee that mattered: nobody reads a shortened diff without
+   * being told it is one.
+   */
+  ignoreWhitespace?: boolean;
+  /** Fold away the diff of a file nobody wrote. From the options page. */
+  hideGenerated?: boolean;
+  /**
+   * What the repository declared about its own generated files.
+   *
+   * Empty when it declared nothing, which is the ordinary case and is why the
+   * patterns exist. Read once per pull request by `useGitAttributes`.
+   */
+  gitAttributes?: readonly GeneratedRule[];
   ref?: Ref<DiffColumnHandle>;
 }
+
+/**
+ * Why a card's body is not being drawn.
+ *
+ * Two rules with one shape, so one control can undo either — see `held`.
+ */
+export type HeldBack = 'generated' | 'whitespace';
 
 // The second type parameter is caret metadata, added in 1.4.0 for the editor
 // this page does not use: no item is ever handed `edit`, and `createEditor` is
@@ -282,11 +320,35 @@ export function DiffColumn({
   onScrollTo,
   jump = null,
   blobs = null,
+  ignoreWhitespace = false,
+  hideGenerated = false,
+  gitAttributes = NO_ATTRIBUTES,
   diffStyle = 'unified',
   ref,
 }: DiffColumnProps) {
   const session = useReviewSession();
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * Cards the reviewer has folded or unfolded by hand.
+   *
+   * A map of overrides rather than a set of the folded, because a card now has
+   * a *default* to override: a file whose diff is being withheld arrives folded.
+   * A set could not tell "the reviewer opened this one" from "nobody has
+   * touched it", and the two have to look different or a folded lockfile would
+   * spring shut again on the next render.
+   */
+  const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  /**
+   * Files the reviewer asked to see in full, in spite of a rule hiding part.
+   *
+   * The escape hatch, and it has to be per file rather than per rule: "show me
+   * this lockfile" is not "stop folding lockfiles", and a reviewer who wants
+   * one of them is not asking to undo their own setting for the other nineteen.
+   *
+   * Unremembered, deliberately. It is a peek at what a rule is holding back, and
+   * a peek that outlived the tab would quietly become a second settings system
+   * — which is the door `Settings` closed when these moved to the options page.
+   */
+  const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
   /**
    * How each file is being compared, for the files the reviewer has moved.
    *
@@ -303,19 +365,6 @@ export function DiffColumn({
    */
   const [chosenModes, setChosenModes] = useState<ReadonlyMap<string, string>>(
     () => new Map(),
-  );
-  /**
-   * The files being read without their whitespace.
-   *
-   * A set of paths rather than a flag, for the same reason `chosenModes` is a
-   * map: two files in one pull request are asking different questions, and one
-   * of them being a reformat says nothing about the next. Sparse and
-   * unremembered — see the note on `diffStyle` in `Shell`, which this is the
-   * sharper half of: a preference that hides lines must not be able to arrive
-   * already on.
-   */
-  const [ignoringWhitespace, setIgnoringWhitespace] = useState<ReadonlySet<string>>(
-    () => new Set(),
   );
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
@@ -353,15 +402,90 @@ export function DiffColumn({
    * `revealed` in this same pass, and an effect would let it build one round
    * of annotations from the dead renderer's answers first.
    */
-  /** The rewrite, per file that asked for one. Nothing else pays for it. */
+  /**
+   * The rewrite, per file, and only while the setting asks for one.
+   *
+   * Files with no text diff are skipped rather than rewritten to nothing. This
+   * did not have to be said when the switch was a button on the card — that
+   * button was only drawn where there was a patch to take the whitespace out
+   * of — but one setting reaches every file in the pull request, and
+   * `withoutWhitespaceChanges('')` is perfectly happy to report that nothing
+   * but whitespace changed. On a PNG that is a card announcing its contents
+   * were shortened.
+   *
+   * Computed for every file the rewrite touches, including one the reviewer has
+   * opened: it is what the rule *says*, and the card needs that to keep offering
+   * the way back. `drawnFiles` is where being opened takes effect.
+   */
   const recomputed = useMemo(() => {
     const built = new Map<string, WhitespaceDiff>();
+    if (!ignoreWhitespace) return built;
     for (const file of files) {
-      if (!ignoringWhitespace.has(file.path)) continue;
-      built.set(file.path, withoutWhitespaceChanges(file.patch));
+      if (fileBody(file).kind !== 'diff') continue;
+      const rewrite = withoutWhitespaceChanges(file.patch);
+      // Only the files it actually shortened. Most files in a pull request have
+      // no whitespace-only change in them, and an entry here is what puts the
+      // caveat on the card — a caveat on all nineteen files is one nobody reads
+      // on the one that needed it.
+      if (!rewrite.changed) continue;
+      built.set(file.path, rewrite);
     }
     return built;
-  }, [files, ignoringWhitespace]);
+  }, [files, ignoreWhitespace]);
+
+  /**
+   * Which files are being read through a rule, and which rule.
+   *
+   * Two rules, one shape. They arrive from different places and mean different
+   * things, but from the card's point of view they are the same situation —
+   * "this body is not what GitHub sent, and here is the word for why" — and
+   * giving them one shape is what lets one control undo either.
+   *
+   * `generated` outranks `whitespace` on a file that is both. It is the more
+   * useful sentence: "nobody wrote this" explains the folding on its own, where
+   * "every change in it was whitespace" invites the reviewer to wonder what a
+   * lockfile is doing reindenting itself.
+   *
+   * Being opened does not clear this. The card goes on wearing the word while
+   * the reviewer reads it, because that word is also the way back.
+   */
+  const flags = useMemo(() => {
+    const built = new Map<string, HeldBack>();
+    for (const file of files) {
+      if (hideGenerated && isGenerated(file.path, gitAttributes)) {
+        built.set(file.path, 'generated');
+      } else if (recomputed.has(file.path)) {
+        built.set(file.path, 'whitespace');
+      }
+    }
+    return built;
+  }, [files, hideGenerated, gitAttributes, recomputed]);
+
+  /**
+   * Folded unless the reviewer said otherwise.
+   *
+   * A generated file, and a file whose every change turned out to be
+   * whitespace, both cost a header's height and nothing more until they are
+   * asked for — which is the whole point: four thousand lines of lockfile
+   * between two files somebody wrote is how a real change gets skimmed past.
+   *
+   * A file the rewrite merely *shortened* is not folded. There is still a diff
+   * in it worth reading, and it is already marked.
+   *
+   * The reviewer's own fold beats the default both ways, so a card they opened
+   * stays open and one they closed stays closed.
+   */
+  const collapsed = useMemo(() => {
+    const built = new Set<string>();
+    for (const file of files) {
+      const byRule =
+        !shown.has(file.path) &&
+        (flags.get(file.path) === 'generated' ||
+          recomputed.get(file.path)?.hunks === 0);
+      if (folds.get(file.path) ?? byRule) built.add(file.path);
+    }
+    return built;
+  }, [files, folds, flags, recomputed, shown]);
 
   /**
    * The list as it is *drawn*, which is the list `files` is not.
@@ -379,10 +503,15 @@ export function DiffColumn({
     // expanded, at a moment nothing on screen had changed.
     if (recomputed.size === 0) return files;
     return files.map((file) => {
+      // A file the reviewer opened is drawn from GitHub's own patch. That is
+      // what the escape hatch has to mean: unfolding a card around a patch that
+      // has already lost lines would show them a shorter diff and call it all
+      // of it.
+      if (shown.has(file.path)) return file;
       const recompute = recomputed.get(file.path);
       return recompute === undefined ? file : { ...file, patch: recompute.patch };
     });
-  }, [files, recomputed]);
+  }, [files, recomputed, shown]);
   const drawnByPath = useMemo(
     () => new Map(drawnFiles.map((file) => [file.path, file])),
     [drawnFiles],
@@ -523,14 +652,6 @@ export function DiffColumn({
     return built;
   }, [files, chosenModes]);
 
-  const toggleWhitespace = useCallback((path: string) => {
-    setIgnoringWhitespace((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(path)) next.add(path);
-      return next;
-    });
-  }, []);
-
   const changeMode = useCallback((path: string, mode: string) => {
     setChosenModes((previous) => {
       const next = new Map(previous);
@@ -552,7 +673,7 @@ export function DiffColumn({
     const built = new Set<string>();
     for (const file of drawnFiles) {
       const listed = layouts.get(file.path)?.listed ?? NO_LISTED;
-      if (hasBodyContent(recomputed.get(file.path) ?? null, listed)) built.add(file.path);
+      if (hasBodyContent(listed)) built.add(file.path);
     }
     return built;
   }, [drawnFiles, layouts, recomputed]);
@@ -595,10 +716,40 @@ export function DiffColumn({
   const scroller = useRef<HTMLDivElement>(null);
   const headers = useRef(new Map<string, HTMLElement>());
 
-  const toggleCollapsed = useCallback((path: string) => {
-    setCollapsed((previous) => {
+  /**
+   * Fold or unfold one card, whatever it was doing before.
+   *
+   * Written against the *effective* state rather than the override, so the
+   * first press on a withheld card opens it rather than recording "fold this
+   * one" on something already folded and appearing to do nothing.
+   */
+  const toggleCollapsed = useCallback(
+    (path: string) => {
+      const open = !collapsed.has(path);
+      setFolds((previous) => new Map(previous).set(path, open));
+    },
+    [collapsed],
+  );
+
+  /**
+   * Show one file as GitHub has it, or put the rule back.
+   *
+   * The one control for both rules. On a generated file it unfolds the card; on
+   * a whitespace one it restores GitHub's patch, which for a file that was
+   * nothing but whitespace also gives it a body again. Either way the fold
+   * override is dropped, because it was recorded against a card that was
+   * describing something else.
+   */
+  const toggleShown = useCallback((path: string) => {
+    setShown((previous) => {
       const next = new Set(previous);
       if (!next.delete(path)) next.add(path);
+      return next;
+    });
+    setFolds((previous) => {
+      if (!previous.has(path)) return previous;
+      const next = new Map(previous);
+      next.delete(path);
       return next;
     });
   }, []);
@@ -874,7 +1025,6 @@ export function DiffColumn({
           <FileBody
             file={file}
             mode={modes.get(file.path) ?? RAW.id}
-            whitespace={recomputed.get(file.path) ?? null}
             unanchored={layouts.get(file.path)?.listed ?? NO_LISTED}
             blobs={blobs}
           />
@@ -1053,7 +1203,9 @@ export function DiffColumn({
                 mode={modes.get(file.path) ?? RAW.id}
                 onChangeMode={changeMode}
                 whitespace={recomputed.get(file.path) ?? null}
-                onToggleWhitespace={toggleWhitespace}
+                held={flags.get(file.path) ?? null}
+                shown={shown.has(file.path)}
+                onToggleShown={toggleShown}
               />
             );
           }}
