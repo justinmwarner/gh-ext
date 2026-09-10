@@ -2,7 +2,7 @@
   "name": "a-better-reviewer",
   "description": "A fast review UI for GitHub pull requests.",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",
