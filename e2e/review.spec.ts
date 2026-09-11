@@ -2469,3 +2469,51 @@ test('the syntax theme is the reviewer\'s, and choosing one lets it colour the d
   // would put a red and a green back on the only rows that carry meaning.
   expect(after.addition.trim()).toBe('');
 });
+
+/**
+ * The error page, against the real worker.
+ *
+ * The only honest check that the diagnosis survives the trip: the refusal is
+ * raised inside the production service worker, classified there, probed there,
+ * and crosses `runtime.sendMessage` — which is JSON, and would quietly flatten
+ * anything in the diagnosis that was not.
+ *
+ * The failure it guards is the one this whole path was built for. A token with
+ * no access to a repository used to arrive here as "Something went wrong" over
+ * `GitHub request failed: 404`, with the button that fixes it hidden.
+ */
+test('names a repository the token cannot see, and offers the way to fix it', async ({
+  page,
+  context,
+  extensionId,
+  api,
+}) => {
+  api.refuseRepository = true;
+
+  await page.goto(reviewUrl(extensionId));
+
+  const main = page.getByRole('main');
+  await expect(main.getByRole('heading', { level: 1 })).toHaveText(
+    /can’t see acme\/widgets/i,
+  );
+
+  // Proof the token itself is accepted, which is what stops someone
+  // regenerating a perfectly good one. It can only come from the probe, so its
+  // presence is the probe having actually run in the worker.
+  await expect(main).toContainText('@fixture-user');
+  expect(api.operations).toContain('Diagnose');
+
+  // The evidence, transcribed rather than summarised.
+  await expect(main.getByRole('heading', { name: /what we saw/i })).toBeVisible();
+  await expect(main).toContainText('Could not resolve to a Repository');
+
+  // Offered on every failure now, and not behind a regular expression over the
+  // error text.
+  const update = main.getByRole('button', { name: /update token/i });
+  await expect(update).toBeVisible();
+
+  const opened = context.waitForEvent('page');
+  await update.click();
+  const options = await opened;
+  await expect(options).toHaveURL(new RegExp(`chrome-extension://${extensionId}/options.html`));
+});

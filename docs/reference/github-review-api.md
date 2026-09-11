@@ -731,3 +731,78 @@ these are **two separate grants**:
 
 A token with only one of them renders a partial check list; a token with
 neither renders none. Neither case is fatal any more, but both are reported.
+
+## 9. Telling one refusal from another
+
+A read can fail for nine different reasons, and GitHub reports several of them
+identically. What separates them is evidence that is on the wire and easy to
+throw away — which is what `lib/github/diagnosis.ts` exists to stop.
+
+### A refused repository is a 404, whatever the reason
+
+A fine-grained token that does not grant a repository gets **exactly** what a
+caller asking for a repository that does not exist gets:
+
+```json
+{ "data": { "repository": null },
+  "errors": [{ "type": "NOT_FOUND",
+               "path": ["repository"],
+               "message": "Could not resolve to a Repository with the name acme/widgets." }] }
+```
+
+A token **awaiting organisation owner approval** gets the same thing again.
+GitHub shows that state as *Pending owner approval* on the token page and gives
+the API no way to see it. So three causes share one response, and no amount of
+reading the message distinguishes them.
+
+REST is the same: `GET /repos/{owner}/{repo}/pulls/{n}` answers `404 Not Found`
+for a repository the token cannot see, rather than 403. This is deliberate on
+GitHub's part — a 403 would confirm the repository exists.
+
+### The probe that does distinguish them
+
+Two questions, one round trip, run only after something has already failed:
+
+```graphql
+query Diagnose($owner: String!, $name: String!) {
+  viewer { login }
+  repository(owner: $owner, name: $name) { id }
+}
+```
+
+| `viewer` | `repository` | What it means |
+|---|---|---|
+| 401 | — | The token is rejected outright: expired or revoked |
+| resolves | null + `NOT_FOUND` | The token works, and this repository is not in its grant |
+| resolves | resolves | The repository **is** reachable, so the original failure was the pull request number or a permission inside it |
+
+The second row is the one worth the round trip. `viewer` resolving proves the
+token is accepted, which is what turns "either the repository does not exist or
+your token cannot see it" into a statement — and stops someone regenerating a
+token that was never the problem.
+
+Note the probe needs `onPartial`: the refusal arrives as `data` **and** `errors`
+together (see section 8), so a client that treats any `errors` array as fatal
+throws on exactly the case the probe exists to identify.
+
+### Headers worth keeping off a failure
+
+Both are on the REST responses and neither is on the GraphQL ones.
+
+| Header | Carries |
+|---|---|
+| `x-github-sso` | `required; url=https://github.com/orgs/{org}/sso?authorization_request=…` — a link straight to the screen that authorises this token for that organisation. The most specific remedy available anywhere in this extension. |
+| `x-accepted-github-permissions` | `pull_requests=read` — the permission the endpoint wanted, in GitHub's own slug. Two do not match their token-page labels: `statuses` is listed as **Commit statuses**, and the mapping lives in `lib/github/permissions.ts`. |
+
+SAML enforcement on GraphQL has no header and puts the URL in the error message
+instead, so both are parsed.
+
+### A transport failure is a bare `TypeError`
+
+`fetch` rejects with `TypeError` and nothing else for offline, DNS failure, a
+proxy, or another extension blocking the request — no `code`, no `cause`, and a
+message that differs per browser (`Failed to fetch`, `NetworkError when
+attempting to fetch`, `Load failed`). It is indistinguishable by type from an
+ordinary programming `TypeError`, so both the type *and* the message are
+checked before calling it a network problem. Getting this wrong tells someone
+their network is down over a bug in the extension.

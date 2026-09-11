@@ -482,11 +482,21 @@ export async function assemblePullRequest(
     // Tested for emptiness on the list, not on the sentence: `describeDenied`
     // answers an empty list with "GitHub reported an error but described
     // none", which quoted back here reads as a second, unrelated failure.
+    // Handed on whole as well as quoted, because the worker diagnoses from
+    // them: a refusal's `type` and `path` are what separate "this token has no
+    // access to the repository" from "it has the repository but not the Pull
+    // requests permission", and neither survives being folded into a sentence.
+    // Stated, not diagnosed. Working out *why* GitHub would not return it is
+    // the worker's job and it has evidence this function does not — so the
+    // advice that used to be here ("check the repository name and the token's
+    // access") is gone. It was a guess, and it is wrong the moment the probe
+    // establishes that the repository name is fine and the token is not.
     const refusals = denials.result();
     throw new ProtocolFailure(
       'not-found',
-      `No pull request ${prKey(pr)} — check the repository name and the token's access.` +
+      `No pull request ${prKey(pr)}.` +
         (refusals.length === 0 ? '' : ` GitHub said: ${describeDenied(refusals)}`),
+      refusals,
     );
   }
 

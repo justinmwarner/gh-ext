@@ -71,6 +71,17 @@ export interface ApiLog {
    */
   deniedPath: (string | number)[] | null;
   /**
+   * Make GitHub refuse the whole pull request, the way it refuses one a token
+   * has no access to.
+   *
+   * `data.repository` null beside a NOT_FOUND error is the exact shape a
+   * fine-grained token that does not grant the repository gets back, and it is
+   * indistinguishable from a repository that does not exist. Reaching the
+   * error page any other way would be testing a different failure. Set it
+   * before opening the page.
+   */
+  refuseRepository: boolean;
+  /**
    * What GitHub says this account may do in the repository.
    *
    * `READ` is the state the page has to be legible in: everything that writes
@@ -102,11 +113,32 @@ const json = (route: Route, body: unknown) =>
 const operationOf = (query: string): string =>
   /(?:query|mutation)\s+(\w+)/.exec(query)?.[1] ?? 'unknown';
 
+/**
+ * GitHub declining to resolve a repository at all.
+ *
+ * Both halves, as GitHub sends them: `repository` null *and* a NOT_FOUND
+ * naming where it was refused. `viewer` still resolves beside it — that
+ * pairing is the whole basis of the diagnosis, because it proves the token is
+ * accepted and this repository is simply not inside its grant.
+ */
+const REPOSITORY_REFUSED = {
+  data: { viewer: { login: 'fixture-user' }, repository: null },
+  errors: [
+    {
+      type: 'NOT_FOUND',
+      message: 'Could not resolve to a Repository with the name acme/widgets.',
+      path: ['repository'],
+    },
+  ],
+};
+
 function graphqlReply(
   operation: string,
   variables: Record<string, unknown>,
   log: ApiLog,
 ): unknown {
+  if (log.refuseRepository) return REPOSITORY_REFUSED;
+
   switch (operation) {
     case 'ViewerPendingReview':
       return {
@@ -314,6 +346,7 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
     urls: [],
     pendingReviewId: null,
     deniedPath: null,
+    refuseRepository: false,
     viewerPermission: 'WRITE',
     gitAttributes: GITATTRIBUTES_TEXT,
   };

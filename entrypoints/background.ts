@@ -37,7 +37,14 @@ import {
   fetchBinaryBlob,
 } from '@/lib/github/binary-blobs';
 import { type BlobResult, BlobCache, fetchBlob } from '@/lib/github/blobs';
-import { AuthError, GitHubClient, RateLimitError } from '@/lib/github/client';
+import {
+  AuthError,
+  GitHubClient,
+  MissingTokenError,
+  RateLimitError,
+} from '@/lib/github/client';
+import { NO_PROBE, type Probe, diagnose, statedDiagnosis } from '@/lib/github/diagnosis';
+import { evidenceOf, worthProbing } from '@/lib/github/evidence';
 import { parseUnifiedDiff } from '@/lib/github/diff';
 import { reviewHash } from '@/lib/github/pr-url';
 import { type OpenReason, openTarget } from '@/lib/review/openTarget';
@@ -83,6 +90,20 @@ interface SenderTab {
 /** The token check the options page's validate button runs. */
 const VIEWER_QUERY = 'query { viewer { login } }';
 
+/**
+ * The two questions asked after a failure that might be about access.
+ *
+ * Deliberately the smallest query that separates the causes: `viewer` proves
+ * the token is accepted and names whose it is, and `repository` resolving or
+ * not says whether this repository is inside its grant. Nothing else is
+ * selected — the point is one cheap round trip on a path that is already
+ * failing, not a second attempt at the read.
+ */
+const DIAGNOSE_QUERY = `query Diagnose($owner: String!, $name: String!) {
+  viewer { login }
+  repository(owner: $owner, name: $name) { id }
+}`;
+
 export default defineBackground({
   type: 'module',
   main() {
@@ -113,7 +134,7 @@ export default defineBackground({
      */
     const authorizedFetch: typeof fetch = async (input, init) => {
       const token = await tokens.getToken();
-      if (!token) throw new AuthError('No GitHub token configured');
+      if (!token) throw new MissingTokenError();
       // Built through Headers so a caller passing Headers or an entry array is
       // not silently dropped by an object spread.
       const headers = new Headers(init?.headers);
@@ -532,6 +553,66 @@ export default defineBackground({
     }
 
     /**
+     * One extra question to GitHub, asked only once something has already
+     * failed.
+     *
+     * This is what turns "either the repository does not exist or your token
+     * cannot see it" into a statement. The two facts it establishes — whether
+     * the token is accepted at all, and whether this repository resolves for
+     * it — between them rule out every access-shaped cause but one.
+     *
+     * Costs a round trip, so it is spent only on failures that could plausibly
+     * be about access (see `worthProbing`), and never on a rate limit, where
+     * the extra request is both useless and the last thing the quota needs.
+     *
+     * Resolves rather than rejects, always. A probe that fails has learned
+     * nothing, which is `NO_PROBE`; it must never replace the original failure
+     * with its own, because the reviewer's problem is the first one.
+     */
+    async function probeAccess(pr: PrRef | null): Promise<Probe> {
+      try {
+        if (pr === null) {
+          const data = await client.graphql<{ viewer: { login: string } | null }>(
+            VIEWER_QUERY,
+            {},
+          );
+          return { ...NO_PROBE, login: data?.viewer?.login ?? null };
+        }
+
+        // `onPartial` is the whole point: a repository this token cannot see
+        // comes back as null *beside* a populated `viewer`, with one NOT_FOUND
+        // in `errors`. Without tolerating that, the probe would throw on
+        // exactly the case it exists to identify.
+        const data = await client.graphql<{
+          viewer: { login: string } | null;
+          repository: { id: string } | null;
+        }>(DIAGNOSE_QUERY, { owner: pr.owner, name: pr.repo }, () => {});
+
+        const login = data?.viewer?.login ?? null;
+        // Only claimed when the token demonstrably worked. A null repository
+        // beside a null viewer means the whole query failed to resolve, which
+        // says nothing about this repository in particular.
+        if (login === null) return NO_PROBE;
+        return {
+          login,
+          repository: data?.repository == null ? 'invisible' : 'visible',
+          tokenRejected: false,
+        };
+      } catch (error) {
+        // Before the `AuthError` it extends. A token cleared between the
+        // original failure and this probe would otherwise be reported as
+        // "GitHub rejected your token" — a sentence about a token that is not
+        // there, which is the exact species of wrong this all exists to end.
+        if (error instanceof MissingTokenError) return NO_PROBE;
+        // GitHub refusing the token outright is itself an answer, and the most
+        // decisive one available.
+        if (error instanceof AuthError) return { ...NO_PROBE, tokenRejected: true };
+        logWarn('the access probe could not run', error);
+        return NO_PROBE;
+      }
+    }
+
+    /**
      * The rate limit seen on the worker's most recent GitHub request.
      *
      * Null after a worker restart, because `GitHubClient` holds it in memory.
@@ -545,6 +626,43 @@ export default defineBackground({
         limit: status.limit,
         resetAt: status.resetAt.getTime(),
       };
+    }
+
+    /**
+     * A caught error, as the whole of what the page will be told.
+     *
+     * The single funnel. `toProtocolError` still decides `kind`, which is what
+     * routes between the setup page, the unlock page and the error page and
+     * must not change shape. Everything this adds is the part that used to be
+     * missing: which failure this actually is, proved where it can be.
+     *
+     * Ordered so nothing is diagnosed twice. A rate limit and a missing token
+     * are already known for certain by the time they reach here, so they are
+     * stated; only what is left is reasoned about, and only what is worth a
+     * round trip is probed.
+     */
+    async function explainFailure(
+      error: unknown,
+      pr: PrRef | null,
+    ): Promise<ProtocolError> {
+      const base = toProtocolError(error);
+
+      // Never touched GitHub, so there is no evidence and nothing to infer.
+      if (base.kind === 'bad-request') return base;
+
+      if (error instanceof RateLimitError) {
+        return { ...base, diagnosis: statedDiagnosis('rate-limited') };
+      }
+      if (error instanceof MissingTokenError) {
+        return { ...base, diagnosis: statedDiagnosis('no-token') };
+      }
+
+      const evidence = evidenceOf(error);
+      const probe = worthProbing(error, evidence) ? await probeAccess(pr) : NO_PROBE;
+      // `pr` is only used to name the repository in the observed lines, so a
+      // request that has no pull request — the options page's token check —
+      // still gets a diagnosis, just without those two sentences.
+      return { ...base, diagnosis: diagnose(pr, evidence, probe) };
     }
 
     const ok = <K extends MessageKind>(data: ResultOf<K>): ResponseOf<K> => ({
@@ -583,7 +701,11 @@ export default defineBackground({
             return ok<'get-rate-limit'>(rateLimit());
         }
       } catch (error) {
-        return { ok: false, error: toProtocolError(error) };
+        // `pr` where the request carried one. Two kinds do not, and for those
+        // the diagnosis is about the token alone rather than about access to
+        // any particular repository.
+        const pr = 'pr' in message ? (message.pr ?? null) : null;
+        return { ok: false, error: await explainFailure(error, pr) };
       }
     }
 
@@ -645,3 +767,4 @@ function toProtocolError(error: unknown): ProtocolError {
     resetAt: null,
   };
 }
+

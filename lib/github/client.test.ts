@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   AuthError,
   GitHubClient,
+  GraphQLError,
   HttpError,
+  MissingTokenError,
   RateLimitError,
   type TokenProvider,
 } from './client';
@@ -233,6 +235,135 @@ describe('GitHubClient error classification', () => {
     const client = new GitHubClient(tokens('t'), fake.impl);
 
     await expect(client.graphql('q', {})).rejects.toThrow('502');
+  });
+});
+
+/**
+ * The status code alone cannot name a remedy, and these three can. Without
+ * them a 403 from a token missing one permission and a 403 from an
+ * organisation enforcing SAML are the same number, and the page can only
+ * apologise — which is exactly what it used to do.
+ */
+describe('what a refused response is asked to give up', () => {
+  const refused = (body: string, init: ResponseInit) =>
+    recordingFetch(() => new Response(body, init));
+
+  it('keeps GitHub’s own sentence off the error body', async () => {
+    const fake = refused(JSON.stringify({ message: 'Not Found' }), { status: 404 });
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = (await client.fetchDiff('o', 'r', 1).catch((e: unknown) => e)) as HttpError;
+
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err.facts.githubMessage).toBe('Not Found');
+  });
+
+  it('keeps the SSO header, which carries the URL that fixes it', async () => {
+    const sso = 'required; url=https://github.com/orgs/acme/sso?authorization_request=A';
+    const fake = refused('{}', { status: 403, headers: { 'x-github-sso': sso } });
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = (await client.fetchDiff('o', 'r', 1).catch((e: unknown) => e)) as HttpError;
+
+    expect(err.facts.sso).toBe(sso);
+  });
+
+  it('keeps the permission GitHub says the endpoint wanted', async () => {
+    const fake = refused('{}', {
+      status: 403,
+      headers: { 'x-accepted-github-permissions': 'pull_requests=read' },
+    });
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = (await client.fetchDiff('o', 'r', 1).catch((e: unknown) => e)) as HttpError;
+
+    expect(err.facts.acceptedPermissions).toBe('pull_requests=read');
+  });
+
+  it('keeps the sentence on a 401 too, where "Bad credentials" and "expired" differ', async () => {
+    const fake = refused(JSON.stringify({ message: 'Bad credentials' }), { status: 401 });
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = (await client.graphql('q', {}).catch((e: unknown) => e)) as AuthError;
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.facts.githubMessage).toBe('Bad credentials');
+  });
+
+  it('survives a body that is not JSON at all', async () => {
+    // An HTML error page from a proxy must not become a second failure on top
+    // of the first.
+    const fake = refused('<html>gateway timeout</html>', { status: 502 });
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = (await client.graphql('q', {}).catch((e: unknown) => e)) as HttpError;
+
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err.facts.githubMessage).toBeNull();
+  });
+
+  it('does not read the body of a response that succeeded', async () => {
+    // The body is the caller's. Consuming it on the success path would empty
+    // the diff before anyone could parse it.
+    const fake = recordingFetch(() => new Response('diff --git a b', { status: 200 }));
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    expect(await client.fetchDiff('o', 'r', 1)).toBe('diff --git a b');
+  });
+
+  it('tells a missing token apart from one GitHub refused', async () => {
+    // Both land on the setup screen, but "you have not connected an account"
+    // and "GitHub has stopped accepting the one you connected" are not the
+    // same sentence — and the only thing separating them used to be the
+    // literal text of the message.
+    const fake = recordingFetch(() => jsonResponse({ data: {} }));
+    const absent = await new GitHubClient(tokens(null), fake.impl)
+      .graphql('q', {})
+      .catch((e: unknown) => e);
+
+    const rejecting = recordingFetch(() => new Response('{}', { status: 401 }));
+    const refused401 = await new GitHubClient(tokens('t'), rejecting.impl)
+      .graphql('q', {})
+      .catch((e: unknown) => e);
+
+    expect(absent).toBeInstanceOf(MissingTokenError);
+    expect(refused401).toBeInstanceOf(AuthError);
+    expect(refused401).not.toBeInstanceOf(MissingTokenError);
+  });
+});
+
+describe('a GraphQL response that resolved nothing', () => {
+  it('keeps the refusals rather than flattening them into a sentence', async () => {
+    // The `type` and `path` on each refusal are what name a permission.
+    // Reduced to a string they could only be recovered by matching the text
+    // back out of it, which is what `normalizeErrors` exists to stop.
+    const fake = recordingFetch(() =>
+      jsonResponse({
+        data: null,
+        errors: [
+          {
+            message: 'Resource not accessible by personal access token',
+            type: 'FORBIDDEN',
+            path: ['repository', 'pullRequest', 'files'],
+          },
+        ],
+      }),
+    );
+    const client = new GitHubClient(tokens('t'), fake.impl);
+
+    const err = (await client.graphql('q', {}).catch((e: unknown) => e)) as GraphQLError;
+
+    expect(err).toBeInstanceOf(GraphQLError);
+    expect(err.denied).toEqual([
+      {
+        message: 'Resource not accessible by personal access token',
+        type: 'FORBIDDEN',
+        path: 'repository.pullRequest.files',
+        count: 1,
+      },
+    ]);
+    // Still an Error with a readable message, for everything that only wants one.
+    expect(err.message).toContain('Resource not accessible');
   });
 });
 

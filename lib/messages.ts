@@ -15,12 +15,15 @@
 import type { BinaryBlobResult } from './github/binary-blobs';
 import type { BlobResult } from './github/blobs';
 import type { ParsedDiffFile } from './github/diff';
+import type { Diagnosis } from './github/diagnosis';
 import type { DeniedField } from './github/graphql-errors';
 import type { FallbackDiffFile } from './github/files-fallback';
 import type { PrCommit, ReviewThread } from './github/types';
 import type { OpenReason } from './review/openTarget';
 
 export type { OpenReason };
+/** Re-exported so the UI reads the whole failure shape from one module. */
+export type { Diagnosis };
 
 /** A pull request's coordinates. The unit of work for the whole protocol. */
 export interface PrRef {
@@ -341,6 +344,22 @@ export interface ProtocolError {
    * `rate-limit`, and null even then when GitHub sent no usable reset header.
    */
   resetAt: number | null;
+  /**
+   * What went wrong, worked out from the evidence rather than guessed at from
+   * the sentence above.
+   *
+   * `kind` stays what it always was — the coarse routing that picks between the
+   * setup page, the unlock page and the error page — because widening it would
+   * churn every switch that reads it. This carries the specifics that routing
+   * never needed and the words on screen always did: which of several
+   * identical-looking 404s this is, whether we proved it or inferred it, which
+   * permission to change, and what we actually saw.
+   *
+   * Optional because not every failure passes through the classifier. A
+   * malformed message never reaches GitHub at all, and inventing a diagnosis
+   * for it would be the same fabrication this field exists to end.
+   */
+  diagnosis?: Diagnosis;
 }
 
 /**
@@ -355,6 +374,15 @@ export class ProtocolFailure extends Error {
   constructor(
     readonly protocolKind: ProtocolErrorKind,
     message: string,
+    /**
+     * The refusals behind it, when GitHub gave any.
+     *
+     * A `not-found` raised because `repository.pullRequest` came back null is
+     * usually GitHub declining the whole subtree, and the `type` and `path` on
+     * those refusals are what name the permission. They used to be folded into
+     * the message and could not be recovered from it.
+     */
+    readonly denied: readonly DeniedField[] = [],
   ) {
     super(message);
   }

@@ -1617,6 +1617,46 @@ button.scope-showing:hover {
   color: var(--danger-fg);
 }
 
+/* The evidence behind a diagnosis.
+
+   Visible rather than folded into a disclosure. Every explanation on this page
+   is an inference and some of them are wrong, and a reviewer who can read what
+   we actually saw can get past a wrong one — so hiding it behind a summary
+   would be hiding the only part guaranteed to be true. Set below the prose in
+   weight, not in colour: it has to stay legible enough to copy into a message
+   to whoever administers the organisation. */
+.fullpage .evidence {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+.fullpage .evidence h2 {
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+.fullpage .evidence ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.fullpage .evidence li {
+  margin-bottom: 0.25rem;
+  font-size: 13px;
+  color: var(--fg-default);
+}
+
+.fullpage .evidence li:last-child {
+  margin-bottom: 0;
+}
+
 .fullpage-actions {
   display: flex;
   gap: var(--gap);

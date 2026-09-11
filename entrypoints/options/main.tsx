@@ -20,6 +20,7 @@ import {
   type MessageKind,
   type MessageOf,
   type Ok,
+  type ProtocolError,
   type RateLimitSnapshot,
   type ResponseOf,
   isErr,
@@ -38,10 +39,30 @@ import {
   THEME_FOLLOWS_PAGE,
 } from '@/lib/compare/themes';
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
+import { summarizeDiagnosis } from '@/ui/diagnosisSummary';
 import { browser } from 'wxt/browser';
 // Before the stylesheet, not after: everything in it refers to these by name.
 import '@/ui/tokens.css';
 import './style.css';
+
+/**
+ * A refused token check, in the line under the button.
+ *
+ * It used to be `${kind}: ${message}`, which answered an expired token with
+ * `unknown: GitHub request failed: 404` — a sentence that names neither the
+ * problem nor the remedy, and reads as a bug in the extension rather than a
+ * fact about the token.
+ *
+ * GitHub's own words are kept on the end whenever they add something the
+ * summary does not already say, because they are the only part specific to
+ * what actually happened.
+ */
+function explainRefusal(error: ProtocolError): string {
+  const summary = error.diagnosis ? summarizeDiagnosis(error.diagnosis) : null;
+  if (summary === null) return error.message;
+  const said = error.diagnosis?.observed.find((line) => line.startsWith('GitHub said'));
+  return said === undefined ? summary : `${summary} ${said}`;
+}
 
 const tokens = new ChromeTokenProvider();
 
@@ -486,7 +507,7 @@ function App() {
       setResult(
         response.ok
           ? { tone: 'good', text: `Authenticated as ${response.data.login}.` }
-          : { tone: 'bad', text: `${response.error.kind}: ${response.error.message}` },
+          : { tone: 'bad', text: explainRefusal(response.error) },
       );
       await refreshRateLimit();
     } finally {
