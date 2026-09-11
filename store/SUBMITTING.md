@@ -137,7 +137,8 @@ npm test && npm run test:e2e     # don't ship a red build
 npm run zip:store
 ```
 
-This produces `.output/store/a-better-reviewer-<version>-chrome.zip` (~2.3 MB).
+This produces `.output/store/a-better-reviewer-<version>-chrome.zip` (~3.8 MB
+since Mermaid joined the bundle; it was ~2.3 MB before).
 The store build has its own output directory so it can never be mistaken for
 the unpacked build that `test:e2e` loads.
 

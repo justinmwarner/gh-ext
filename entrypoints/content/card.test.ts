@@ -13,10 +13,10 @@ import { CARD_HOST_ID, type CardHandle, githubColorScheme, mountCard } from './c
 
 let mounted: CardHandle | null = null;
 
-const open = (collapsed = false) => {
+const open = (collapsed = false, themeId = '') => {
   const onOpen = vi.fn();
   const onCollapsedChange = vi.fn();
-  mounted = mountCard(document, { collapsed, onOpen, onCollapsedChange });
+  mounted = mountCard(document, { collapsed, themeId, onOpen, onCollapsedChange });
   return { card: mounted, onOpen, onCollapsedChange };
 };
 
@@ -245,7 +245,38 @@ describe('githubColorScheme', () => {
 
   it('can be changed after the reviewer switches theme', () => {
     const { card } = open();
-    card.setColorScheme('dark');
+    card.applyTheme('', 'dark');
     expect(card.host.style.colorScheme).toBe('dark');
+  });
+});
+
+describe('the chosen theme', () => {
+  it('dresses the host at mount rather than a frame later', () => {
+    const { card } = open(false, 'dracula');
+    expect(card.host.style.getPropertyValue('--canvas-default')).toBe('#282a36');
+    expect(card.host.style.colorScheme).toBe('dark');
+  });
+
+  it('outranks whatever GitHub is set to', () => {
+    document.documentElement.dataset.colorMode = 'light';
+    const { card } = open(false, 'dracula');
+    expect(card.host.style.colorScheme).toBe('dark');
+  });
+
+  // The regression the single `applyTheme` exists to prevent: GitHub's own
+  // theme toggle fires a mutation, and the handler must not use it to undo a
+  // theme the reviewer chose.
+  it('survives GitHub changing its own colour mode', () => {
+    const { card } = open(false, 'dracula');
+    card.applyTheme('dracula', 'light');
+    expect(card.host.style.getPropertyValue('--canvas-default')).toBe('#282a36');
+    expect(card.host.style.colorScheme).toBe('dark');
+  });
+
+  it('is taken back off when the reviewer returns to matching the page', () => {
+    const { card } = open(false, 'dracula');
+    card.applyTheme('', 'light');
+    expect(card.host.style.getPropertyValue('--canvas-default')).toBe('');
+    expect(card.host.style.colorScheme).toBe('light');
   });
 });

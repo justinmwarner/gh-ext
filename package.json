@@ -2,7 +2,7 @@
   "name": "a-better-reviewer",
   "description": "A fast review UI for GitHub pull requests.",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -21,6 +21,7 @@
     "test:e2e": "wxt build && playwright test",
     "test:e2e:only": "playwright test",
     "icons": "node scripts/make-icons.mjs",
+    "palettes": "node scripts/make-palettes.mjs",
     "screenshots": "wxt build && playwright test --config playwright.screenshots.config.ts",
     "shots:card": "wxt build && playwright test --config playwright.screenshots.config.ts card.shot",
     "promo": "playwright test --config playwright.screenshots.config.ts promo.shot",
@@ -39,6 +40,7 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
+    "@pierre/theming": "1.0.1",
     "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.3",

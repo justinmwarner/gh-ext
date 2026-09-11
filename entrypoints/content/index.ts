@@ -40,6 +40,7 @@ import { type Message, type PrRef, type Response, isErr, message } from '@/lib/m
 import { CARD_COLLAPSED_KEY, autoOpenAvailable } from '@/lib/settings';
 import {
   followLoggingSetting,
+  onSettingsChanged,
   readCardCollapsed,
   readSettings,
   writeCardCollapsed,
@@ -94,6 +95,26 @@ export default defineContentScript({
       log('could not read the collapsed state', error);
       return false;
     });
+
+    /**
+     * The reviewer's theme, read before the first mount for the same reason.
+     *
+     * A card that paints in GitHub's palette and turns Dracula a frame later
+     * is worse here than it would be on the review page: this one appears
+     * in the corner of a page the reviewer is already reading, so the flash
+     * has their attention rather than landing on a loading screen.
+     *
+     * A second storage read on top of `followLoggingSetting`'s, and worth it
+     * for that. Both are local reads that resolve in about a millisecond, and
+     * threading one settings object through that adapter would make it an
+     * adapter for two unrelated things.
+     */
+    let themeId = await readSettings()
+      .then((settings) => settings.diffTheme)
+      .catch((error: unknown) => {
+        log('could not read the theme', error);
+        return '';
+      });
 
     /**
      * Send a request and get the reply, or null if it could not be sent.
@@ -211,6 +232,7 @@ export default defineContentScript({
         card?.destroy();
         card = mountCard(document, {
           collapsed,
+          themeId,
           onOpen: () => {
             // Read the URL now rather than closing over the ref this card was
             // built for: GitHub soft-navigates between pull requests, and the
@@ -273,11 +295,25 @@ export default defineContentScript({
     };
     browser.storage.onChanged.addListener(onCollapsedChanged);
 
+    /**
+     * Follow the theme the reviewer picks on the options page, without a reload.
+     *
+     * The options page is a tab of its own, so every github.com tab open at
+     * the time would otherwise keep the old palette until it next navigated —
+     * and the one thing a reviewer does immediately after choosing a theme is
+     * go and look at it.
+     */
+    const stopWatchingSettings = onSettingsChanged((settings) => {
+      if (settings.diffTheme === themeId) return;
+      themeId = settings.diffTheme;
+      guard('theme', () => card?.applyTheme(themeId, githubColorScheme(document)));
+    });
+
     // Narrow on purpose: one attribute on one element. Its predecessor watched
     // every mutation under `<body>` to keep a button wedged in GitHub's header,
     // which the card no longer needs.
     const theme = new MutationObserver(() => {
-      guard('theme', () => card?.setColorScheme(githubColorScheme(document)));
+      guard('theme', () => card?.applyTheme(themeId, githubColorScheme(document)));
     });
     theme.observe(document.documentElement, {
       attributes: true,
@@ -291,6 +327,7 @@ export default defineContentScript({
       // the one listener that would otherwise outlive the teardown the rest of
       // this file keeps carefully.
       browser.storage.onChanged.removeListener(onCollapsedChanged);
+      stopWatchingSettings();
       card?.destroy();
       card = null;
     });

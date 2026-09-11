@@ -24,6 +24,28 @@
  * resolves to the light half. Every surface that imports this sets it: the two
  * pages on `:root`, the card as an inline style on its host element, which is
  * in the outer tree and therefore beats the `:host` rule inside.
+ *
+ * ## What overrides this
+ *
+ * Everything below is the *default*, and the default is the only thing here
+ * with measured contrast ratios behind it. A reviewer who chooses a syntax
+ * theme replaces every value in this rule with one derived from that theme:
+ * `ui/chromeTheme.ts` writes them as inline custom properties on the element
+ * that owns this scope — `<html>` on the two pages, the host element on the
+ * card — and an inline declaration beats both selectors above.
+ *
+ * Three consequences worth knowing while editing this file:
+ *
+ * - **Every name in this rule is part of an interface.** `lib/theme/tokens.ts`
+ *   lists them and the generated table stores them positionally. Adding a token
+ *   here without adding it there gives it no themed value, so it keeps its
+ *   Primer pair while the page around it turns into somebody's Dracula.
+ * - **A literal colour elsewhere no longer just drifts, it defects.** It used
+ *   to be that a hex in a stylesheet was a duplicate of a value here. Now it is
+ *   a colour that cannot follow the reviewer's theme at all.
+ * - **Both halves still matter.** `color-scheme` is pinned to the chosen
+ *   theme's own mode, so anything still written as `light-dark()` at least
+ *   resolves to the half that mode expects.
  */
 
 :root,
@@ -36,6 +58,10 @@
   /* One step off the page. Secondary buttons at rest, inline `code`, grouped
      rows. */
   --canvas-subtle: light-dark(#f6f8fa, #212830);
+  /* Sunken rather than layered: darker than the page in *both* modes, which is
+     what makes the scope bar and the view-tab rail read as a channel cut into
+     the page rather than as a panel sitting on it. */
+  --canvas-inset: light-dark(#f6f8fa, #010409);
   /* Menus and popovers. Lighter than the page in dark mode on purpose — a dark
      surface with a dark shadow under it reads as a hole rather than as a thing
      above the page. */
@@ -55,6 +81,25 @@
      Icon strokes and disabled labels, never body copy. */
   --fg-subtle: light-dark(#8c959f, #6e7681);
 
+  /* ---------------------------------------------- text on a coloured fill */
+
+  /* One per fill, not one for all of them, and the six are not redundant.
+     A fill and its label are a single decision, and the right answer differs
+     per fill once a theme is involved: white reads on GitHub Light's red and
+     measures 2.8:1 on its green. Six tokens is what lets a chosen theme keep
+     every fill colour exactly as its author wrote it and still have a legible
+     badge — `lib/theme/derive.ts` picks each label against its own fill.
+
+     All white by default except amber, which is the same one-off this file
+     already carried: white clears 4.5:1 on the light amber and reaches only
+     2.52:1 on the dark one, so the dark half inverts to the page colour. */
+  --on-accent: #ffffff;
+  --on-success: #ffffff;
+  --on-danger: #ffffff;
+  --on-attention: light-dark(#ffffff, #0d1117);
+  --on-neutral: #ffffff;
+  --on-done: #ffffff;
+
   /* --------------------------------------------------------------- borders */
 
   --border-default: light-dark(#d1d9e0, #3d444d);
@@ -62,15 +107,36 @@
      the transparency checkerboard behind an image diff. */
   --border-muted: light-dark(#eef1f4, #2d333b);
 
+  /* --------------------------------------------------------------- neutral */
+
+  /* A grey fill, which is a different thing from grey text: the draft badge,
+     and nothing else so far. Within a shade of --fg-muted, which is why a theme
+     derives it from that rather than hunting for a key no theme states. */
+  --neutral-emphasis: light-dark(#59636e, #6e7781);
+
   /* ---------------------------------------------------------------- accent */
 
   /* The only blue, and the only thing that means "interaction": links, the
      focus outline, `accent-color` for native controls, and the modified tint
      inside the diff. A second blue is prohibited. */
   --accent-fg: light-dark(#0969da, #4493f8);
+  /* The same role, drawn on an already-tinted panel rather than on the page,
+     and so stepped away from it: darker in light mode, lighter in dark. The
+     three tinted families each need one of these and each used to write it as
+     a literal pair at the point of use. */
+  --accent-fg-tinted: light-dark(#0550ae, #79c0ff);
+  /* Fill weight. Carries --on-accent. */
+  --accent-emphasis: light-dark(#0969da, #316dca);
+  --accent-emphasis-hover: light-dark(#0860c8, #3a78d4);
+  /* The edge of an accent-tinted panel. */
+  --accent-border: light-dark(#b6d7ff, #1f4b7d);
   /* A tint behind a whole row or chip, not a text colour. Three surfaces used
      to spell this out with three different dark halves. */
   --accent-subtle-bg: light-dark(#ddf4ff, #121d2f);
+  --accent-subtle-hover: light-dark(#c6e9ff, #17304d);
+  /* Stronger than a tint and still not a fill: the selected row in the file
+     tree, which has to hold its own against the hover state next to it. */
+  --accent-muted-bg: light-dark(#dbe9ff, #253143);
 
   /* ------------------------------------------------------------ status: ok */
 
@@ -78,14 +144,25 @@
      Also pushed into Pierre, whose own #0dbe4e measures 2.47:1 on white and is
      unreadable at the 12px the diff counts are drawn at. */
   --success-fg: light-dark(#1a7f37, #3fb950);
-  /* Fill-weight green: the primary button, the open badge. */
+  /* Fill-weight green: the primary button, the open badge. Carries
+     --on-success. */
   --success-emphasis: light-dark(#1f883d, #238636);
+  --success-emphasis-hover: light-dark(#1a7f37, #29903b);
+  /* The primary button's own edge, which is not --border-default: a green
+     control outlined in grey reads as a grey control someone painted. */
+  --success-border: light-dark(#1f883d, #2f6f42);
   --success-subtle-bg: light-dark(#e6ffec, #12261e);
 
   /* --------------------------------------------------------- status: wrong */
 
   --danger-fg: light-dark(#cf222e, #f85149);
+  /* On a tinted panel rather than on the page. See --accent-fg-tinted. */
+  --danger-fg-tinted: light-dark(#a40e26, #ff8182);
+  /* Fill weight: the closed badge. Carries --on-danger. */
+  --danger-emphasis: light-dark(#cf222e, #da3633);
+  --danger-border: light-dark(#ffcecb, #6e2529);
   --danger-subtle-bg: light-dark(#ffebe9, #25171c);
+  --danger-subtle-hover: light-dark(#ffe3e0, #3a1c1e);
 
   /* ------------------------------------------------------- status: waiting */
 
@@ -96,8 +173,20 @@
   --attention-fg: light-dark(#9a6700, #d29922);
   --attention-fg-tinted: light-dark(#7d4e00, #e3b341);
   --attention-border: light-dark(#d4a72c, #d29922);
+  /* A quieter amber edge, for a chip rather than a panel. */
+  --attention-border-muted: light-dark(#f0d58c, #6b4b12);
   /* The amber panel tint. Six surfaces reached for #fff8c5 and wrote six
      different dark counterparts under it, so the one signal that was supposed
      to read the same everywhere read the same only in light mode. */
   --attention-subtle-bg: light-dark(#fff8c5, #2a2213);
+  --attention-subtle-hover: light-dark(#fdf0a3, #3a301b);
+
+  /* ---------------------------------------------------------- status: done */
+
+  /* Purple, and it means merged and renamed — a thing that is finished rather
+     than a thing that went well or badly. Text weight and fill weight, the
+     latter carrying --on-done. It appears on exactly one badge and one tree
+     status, which is the whole licence this colour has. */
+  --done-fg: light-dark(#8250df, #a371f7);
+  --done-emphasis: light-dark(#8250df, #8957e5);
 }

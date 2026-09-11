@@ -20,6 +20,7 @@
  * exactly this: `:root` matches on the two extension pages, `:host` matches
  * here, and neither selector does any harm in the other place.
  */
+import { applyChromeTheme } from '@/ui/chromeTheme';
 import TOKENS from '@/ui/tokens.css?raw';
 
 /**
@@ -38,6 +39,16 @@ export const CARD_HOST_ID = 'a-better-reviewer-card';
 export interface CardOptions {
   /** Whether to come up collapsed. Read from storage before the first mount. */
   collapsed: boolean;
+  /**
+   * The reviewer's chosen theme, or the empty string for GitHub's palette.
+   *
+   * Passed at mount rather than set afterwards, and that is the whole reason
+   * the content script reads settings before its first `sync`. This card
+   * appears on someone else's page: painting it in Primer and recolouring it a
+   * frame later is a flash of the wrong extension, in the corner of a page the
+   * reviewer is already reading.
+   */
+  themeId: string;
   /** The reviewer pressed the button. */
   onOpen(): void;
   /** The reviewer collapsed or expanded the card, and it should be remembered. */
@@ -50,8 +61,17 @@ export interface CardHandle {
   setCollapsed(collapsed: boolean): void;
   /** Show a short failure under the button, or clear it with null. */
   setStatus(text: string | null): void;
-  /** Follow GitHub's theme after the reviewer changes it mid-session. */
-  setColorScheme(scheme: string): void;
+  /**
+   * Repaint after either half of "what colour is this" changes underneath it.
+   *
+   * One method for two events, because they answer one question and the answer
+   * depends on both: a chosen theme decides the card's colours outright, and
+   * GitHub's own `data-color-mode` decides them only while no theme is chosen.
+   * Two setters would have let the second overwrite the first, which is a card
+   * that reverts to GitHub's palette the moment the reviewer toggles GitHub's
+   * theme.
+   */
+  applyTheme(themeId: string, restScheme: string): void;
   destroy(): void;
 }
 
@@ -209,11 +229,17 @@ const STYLES = `
     position: relative;
     border: 1px solid transparent;
     background:
-      linear-gradient(
-          160deg,
-          light-dark(#ffffff, #1b222c),
-          light-dark(#f3f6fa, #10161e)
-        )
+      /* Raised falling to sunken, which is the sweep written as what it means.
+         It was a pair of literals — #ffffff to #f3f6fa light, #1b222c to
+         #10161e dark — and the thing both halves had in common is that the top
+         left is the lit corner and the bottom right is not.
+
+         Overlay and inset are the only two tokens that keep that direction in
+         both modes, and they were the second attempt here. Canvas Default to
+         Canvas Subtle looks like the obvious pair and inverts in dark: subtle
+         is *lighter* than the page there, so the card lit its bottom right
+         corner and the border's lit corner had nothing under it. */
+      linear-gradient(160deg, var(--canvas-overlay), var(--canvas-inset))
         padding-box,
       /* Lit at the top-left and neutral the rest of the way round. A border
          coloured all the way round reads as a status — green means something
@@ -398,13 +424,21 @@ const STYLES = `
     padding: 9px 18px;
     font-weight: 600;
     border-radius: 999px;
-    color: #ffffff;
+    color: var(--on-success);
     /* The top stop is the success-emphasis token, not a lighter green, because
-       the label is white at 14px/600 — not large text, so it answers to 4.5:1,
-       and it sits across the whole band rather than at the bottom of it. The
-       previous #2ea043 measured 3.37:1 against white; this measures 4.52:1
-       light and 4.63:1 dark at the top edge, 5.08:1 and 5.86:1 at the bottom. */
-    background: linear-gradient(180deg, var(--success-emphasis), light-dark(#1a7f37, #187433));
+       the label is not large text and so answers to 4.5:1 across the whole
+       band rather than at the bottom of it. The previous #2ea043 measured
+       3.37:1 against white; the default measures 4.52:1 light and 4.63:1 dark
+       at the top edge, 5.08:1 and 5.86:1 at the bottom.
+
+       Under a chosen theme both stops are that theme's green and the label is
+       whichever of white and the page colour reads on it — which is the whole
+       reason --on-success exists rather than a hard white here. */
+    background: linear-gradient(
+      180deg,
+      var(--success-emphasis),
+      var(--success-emphasis-hover)
+    );
     border-color: light-dark(rgba(31, 35, 40, 0.16), rgba(230, 237, 243, 0.12));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.22),
@@ -579,7 +613,10 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
   // Above GitHub's own dialogs and sticky headers. This is the ceiling, and the
   // card is the only thing this extension puts on the page.
   host.style.zIndex = '2147483647';
-  host.style.colorScheme = githubColorScheme(doc);
+  // Also inline, and for a second reason on top of the one above: the sheet
+  // below inlines `ui/tokens.css`, whose `:host` rule declares every token, and
+  // an inline property on the host is what outranks it from the outer tree.
+  applyChromeTheme(host, options.themeId, githubColorScheme(doc));
 
   const root = host.attachShadow({ mode: 'open' });
 
@@ -692,8 +729,8 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
     root,
     setCollapsed,
     setStatus,
-    setColorScheme: (scheme: string) => {
-      host.style.colorScheme = scheme;
+    applyTheme: (themeId: string, restScheme: string) => {
+      applyChromeTheme(host, themeId, restScheme);
     },
     destroy: () => host.remove(),
   };

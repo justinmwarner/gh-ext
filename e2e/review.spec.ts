@@ -2619,7 +2619,7 @@ test('the syntax theme is the reviewer\'s, and choosing one lets it colour the d
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
-  await options.getByLabel(/syntax colours/i).selectOption('github-light-high-contrast');
+  await options.locator('#diffTheme').selectOption('github-light-high-contrast');
   await options.close();
 
   // Polled on the colours rather than on the attribute, and that distinction is
@@ -2639,6 +2639,64 @@ test('the syntax theme is the reviewer\'s, and choosing one lets it colour the d
   // the half that matters for the colour-vision themes: leaving the override on
   // would put a red and a green back on the only rows that carry meaning.
   expect(after.addition.trim()).toBe('');
+});
+
+test('a chosen theme reaches the page around the diff, and can be taken back off', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The companion to the test above, and it needs a real browser for a
+  // different reason: the palette is applied as inline custom properties over
+  // a `light-dark()` default, and only a browser resolves `light-dark()`.
+  // jsdom reports the declaration, not the colour.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const chrome = () =>
+    page.evaluate(() => {
+      const root = document.documentElement;
+      const computed = getComputedStyle(root);
+      return {
+        canvas: computed.getPropertyValue('--canvas-default').trim(),
+        scheme: computed.colorScheme,
+        // The value that actually reaches a pixel, rather than the token it
+        // came from. A token can be set and still be overridden downstream.
+        body: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+
+  await expect.poll(async () => (await chrome()).body).toBe('rgb(255, 255, 255)');
+  const before = await chrome();
+  // Primer's pair, unresolved by any choice: the page follows the OS.
+  expect(before.scheme).toBe('light dark');
+
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.locator('#diffTheme').selectOption('dracula');
+
+  // Dracula's own editor background, and the whole point of the feature: the
+  // reviewer chose a dark theme on a light machine and got a dark page.
+  await expect.poll(async () => (await chrome()).body).toBe('rgb(40, 42, 54)');
+  const themed = await chrome();
+  expect(themed.canvas).toBe('#282a36');
+  expect(themed.scheme).toBe('dark');
+
+  // The options page is the other half of 'everywhere', and it is the screen
+  // the reviewer is standing on while they choose.
+  await expect
+    .poll(async () => options.evaluate(() => getComputedStyle(document.body).backgroundColor))
+    .toBe('rgb(40, 42, 54)');
+
+  // Back to the default, which has to be a real removal rather than a second
+  // palette that happens to hold Primer's values — otherwise a later change to
+  // `ui/tokens.css` would never reach anyone who had ever chosen a theme.
+  await options.locator('#diffTheme').selectOption('');
+  await expect.poll(async () => (await chrome()).body).toBe('rgb(255, 255, 255)');
+  const reset = await chrome();
+  expect(reset.scheme).toBe('light dark');
+  await options.close();
 });
 
 /**

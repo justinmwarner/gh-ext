@@ -78,13 +78,21 @@ that something went wrong.
 
 ## Design Principles
 
-**1. Native, not novel.** The extension deliberately wears GitHub's palette so
-there is zero visual context switch between the pull request page and the review
-page. A reviewer moving from one to the other should not have to re-orient. This
-is a strategic choice, not a side effect of the Pierre components: identity comes
-from speed and behaviour, not from colour. New surfaces adopt the same palette.
-The injected card is the one licensed exception, because it has to read as not
-part of GitHub while sitting inside GitHub.
+**1. Native by default, and the reviewer's after that.** The extension wears
+GitHub's palette out of the box so there is zero visual context switch between
+the pull request page and the review page. A reviewer moving from one to the
+other should not have to re-orient. This is a strategic choice, not a side effect
+of the Pierre components: identity comes from speed and behaviour, not from
+colour. New surfaces adopt the same palette, and the injected card is the one
+licensed exception, because it has to read as not part of GitHub while sitting
+inside GitHub.
+
+What this principle is *not* is a claim on the reviewer. Choosing one of the
+seventy-five themes recolours the whole product — the diff, the page around it,
+the options page and the card — because a reviewer who has asked for Solarized
+has told us which seam they care about, and it is not the one with github.com.
+The default matters because most people never change it; it does not get to
+overrule the people who do. See the Themed Palettes section of DESIGN.md.
 
 **2. Do less, completely.** A short list of actions, each finished properly,
 beats a long list each done to eighty percent. Every feature already present
@@ -106,7 +114,10 @@ degrading quietly is worse than degrading loudly.
 page are one thing and should be indistinguishable in materials: same palette,
 same type, same radii, same motion timings, same words for the same concepts. A
 reviewer arriving at the options page from a dark review page should not notice
-a seam.
+a seam. This binds the theme setting too, and it is why the setting reaches all
+three rather than the review page alone: a themed review page beside a Primer
+options page would be precisely the seam this principle forbids, reached by a
+button on the review page itself.
 
 ## Accessibility & Inclusion
 
@@ -115,6 +126,16 @@ Target: **WCAG 2.2 AA**.
 - **Contrast.** Body text at 4.5:1 minimum, large text at 3:1. This is already
   treated as a real constraint rather than a checkbox: Pierre's own addition
   green measures 2.47:1 on white and is overridden for that reason.
+  *This is a guarantee about the default.* A reviewer who chooses one of the
+  seventy-five themes gets that theme's colours as its author wrote them, and
+  some authors write low-contrast chrome. The alternative — quietly rewriting a
+  theme until it measured well — would be a worse failure, because it would
+  hand the four colour-vision-deficiency themes back the distinction they exist
+  to remove. So the default is the accessible one, it is what a fresh install
+  gets, and the options page says plainly that it is the setting to stay on if
+  the ratios are a requirement rather than a preference. The one thing the
+  derivation does adapt is the text *on* a coloured fill, which it can do
+  without altering the fill; DESIGN.md sets out that line.
 - **Full keyboard operability, no exceptions.** Keyboard navigation is a headline
   feature, so a keyboard gap is a product bug rather than an accessibility
   footnote. Every interactive element reachable, every dialog escapable, no

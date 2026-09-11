@@ -20,8 +20,21 @@ ours" is the wrong instinct here.
 - **Colours live in `ui/tokens.css` and nowhere else.** All three surfaces read
   it: the review and options pages import it, and the injected card imports it
   with `?raw` and inlines the text into its shadow root, which is why the file
-  declares `:root, :host`. A literal hex elsewhere is a one-off that needs a
-  comment saying why, or a mistake.
+  declares `:root, :host`. A literal hex elsewhere is a mistake, and a test says
+  so — `ui/tokens.test.tsx` scans both stylesheets and the card, with exactly one
+  documented exception.
+- **That file is the default, not the palette.** Choosing one of the seventy-five
+  themes overwrites every token on all three surfaces with values derived from
+  it. Three consequences when editing:
+  - A token added to `ui/tokens.css` must also be added to `lib/theme/tokens.ts`,
+    and `npm run palettes` re-run. Otherwise it keeps its Primer pair while the
+    page around it turns. The same test catches this.
+  - `lib/theme/palettes.ts` is **generated**. Regenerate it, do not edit it.
+    `lib/theme/palettes.test.ts` fails when it has fallen behind
+    `lib/theme/derive.ts`.
+  - Contrast ratios quoted in DESIGN.md are claims about the default only. A
+    chosen theme is drawn as its author wrote it — that is deliberate and
+    PRODUCT.md explains why.
 - **`lib/` is pure.** No DOM, no `chrome.*`, no network. Two documented
   adapters are excepted: `token-provider.ts` and `settings-store.ts`. This
   boundary is why most of the logic tests in milliseconds under Node.

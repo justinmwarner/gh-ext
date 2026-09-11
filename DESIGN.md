@@ -160,9 +160,20 @@ it is a decision to introduce a seam.
 written down.** All three surfaces consume it: the review page and the options
 page import it as a stylesheet, and the card imports it with `?raw` and inlines
 the same text into its shadow root, which is why the file declares `:root, :host`
-rather than `:root`. A literal hex anywhere else is either a one-off used once
-or twice, or a mistake. Before this existed the palette was written out three
-times and had already drifted in two places, which is the argument for it.
+rather than `:root`. A literal hex anywhere else is a mistake. Before this
+existed the palette was written out three times and had already drifted in two
+places, which was the original argument for it; the stronger argument arrived
+later, when the tokens became the mechanism by which a reviewer's chosen theme
+reaches the whole product rather than only the code inside a diff.
+
+**All of the above describes the default.** It is the default because it is
+right for someone who has not asked for anything else, and the seamlessness
+argument is a real one. But it stopped being the *only* answer the moment this
+extension offered seventy-five syntax themes and then drew them inside a page
+that stayed GitHub-white. Choosing a theme now replaces every token on all three
+surfaces. The section on [Themed Palettes](#themed-palettes) sets out what is
+derived, what is taken verbatim, and the two things this system is still allowed
+to repair.
 
 The density is that of a tool used under load. The workhorse size is 12px, not
 14px. Controls are 28px tall, not 40px. Padding is measured in 4px and 6px
@@ -174,8 +185,8 @@ though it is trying to be comprehensive.
 
 **Key Characteristics:**
 
-- Dual-theme by default, driven entirely by `color-scheme: light dark` and `light-dark()`. There is no theme toggle and no theme context.
-- GitHub Primer palette, hard-coded and matched deliberately.
+- Dual-theme by default, driven entirely by `color-scheme: light dark` and `light-dark()`. There is no theme toggle and no theme context — one setting names a theme, and a palette derived from it is written over the tokens.
+- GitHub Primer palette by default, hard-coded and matched deliberately; any of seventy-five themes on request, across all three surfaces.
 - System font stack only. Zero web fonts, zero network requests for type.
 - Dense: 11/12/13px carry the interface; 14px is body prose.
 - Flat by default. Three shadows exist and all three mean "this floats".
@@ -189,6 +200,13 @@ and both halves are given, light first. The names below are Primer's own role
 names because the name is the constraint: these are matched values, not authored
 ones.
 
+**This section describes the default, and only the default.** A reviewer who
+chooses a syntax theme replaces every value below with one derived from that
+theme, on all three surfaces at once — the review page, the options page and the
+injected card. The names survive; the values do not. Read
+[Themed Palettes](#themed-palettes) at the end of this section before assuming
+any measurement here still holds, and before adding a token.
+
 ### Primary
 
 - **Primer Accent Foreground** (`#0969da` / `#4493f8`): The only interaction colour. Links, the `:focus-visible` outline, `accent-color` for native checkboxes and search fields, and the "modified" tint pushed into Pierre's diff renderer. It is the answer to "can I click this" and to "where am I", and it is used for nothing else. Set as `accent-color` on `:root` specifically so the user agent does not introduce a fifth blue.
@@ -198,13 +216,42 @@ ones.
 ### Secondary
 
 - **Primer Danger Foreground** (`#cf222e` / `#f85149`): Deletions, failed checks, error results, the warning panel. Also pushed into Pierre as `--diffs-deletion-color-override`.
-- **Primer Attention Foreground** (`#9a6700` / `#d29922`): Pending and in-progress only. Checks that have not finished, work that is not yet resolved. Never a warning about the user's own action. Amber has three roles and they are not interchangeable: this one stands on the page, **Attention Foreground, Tinted** (`#7d4e00` / `#e3b341`) sits on an already-tinted panel and so has to be darker, and **Attention Border** (`#d4a72c` / `#d29922`) is a border. There was a fourth, `#bf8700`, on exactly one inset stripe; it has been retired into this one, whose dark half was already identical to it.
-- **Primer Done Emphasis** (`#8250df` / `#8957e5`): Merged state, and nothing else. It appears on exactly one badge.
+- **Primer Attention Foreground** (`#9a6700` / `#d29922`): Pending and in-progress only. Checks that have not finished, work that is not yet resolved. Never a warning about the user's own action. Amber has four roles and they are not interchangeable: this one stands on the page, **Attention Foreground, Tinted** (`#7d4e00` / `#e3b341`) sits on an already-tinted panel and so has to be darker, **Attention Border** (`#d4a72c` / `#d29922`) edges a panel, and **Attention Border Muted** (`#f0d58c` / `#6b4b12`) edges a chip sitting on the tint. There was a fifth, `#bf8700`, on exactly one inset stripe; it has been retired into the first, whose dark half was already identical to it.
+- **Primer Done Emphasis** (`#8250df` / `#8957e5`): Merged state, and nothing else. It appears on exactly one badge. **Done Foreground** (`#8250df` / `#a371f7`) is its text-weight twin, on the tree's "renamed" status and nowhere else. Purple means *finished*, as distinct from went-well or went-badly, which is the whole of its licence.
+
+### Tints, edges and hovers
+
+Each of the four coloured families — accent, success, danger, attention — carries
+the same small set of derived roles, and they used to be written as literal pairs
+at each point of use. Naming them is what lets a chosen theme reach them.
+
+- **Subtle Background**: the family's colour as a panel tint. `--accent-subtle-bg` (`#ddf4ff` / `#121d2f`), `--success-subtle-bg` (`#e6ffec` / `#12261e`), `--danger-subtle-bg` (`#ffebe9` / `#25171c`), `--attention-subtle-bg` (`#fff8c5` / `#2a2213`).
+- **Subtle Hover**: that tint with the cursor on it. One step, not a new colour.
+- **Border**: the edge of such a panel. `--accent-border` (`#b6d7ff` / `#1f4b7d`), `--danger-border` (`#ffcecb` / `#6e2529`), `--success-border` (`#1f883d` / `#2f6f42`) — the last is the primary button's own edge, because a green control outlined in Border Default reads as a grey control somebody painted.
+- **Foreground, Tinted**: the family's text colour when it is standing on its own tint rather than on the page, and therefore stepped away from the page. `--accent-fg-tinted` (`#0550ae` / `#79c0ff`), `--danger-fg-tinted` (`#a40e26` / `#ff8182`).
+- **Emphasis** and **Emphasis Hover**: fill weight, for a badge or a pressed control. `--accent-emphasis` (`#0969da` / `#316dca`), `--danger-emphasis` (`#cf222e` / `#da3633`), `--neutral-emphasis` (`#59636e` / `#6e7781`).
+- **Accent Muted Background** (`#dbe9ff` / `#253143`): stronger than a tint, still not a fill. The selected row in the file tree and the active row in the search palette — both of which have to win against the row above and below rather than only against the panel.
+
+### Text on a coloured fill
+
+Six tokens — `--on-accent`, `--on-success`, `--on-danger`, `--on-attention`,
+`--on-neutral`, `--on-done` — where a single white would nearly do. All are
+`#ffffff` except `--on-attention`, which is `#ffffff` / `#0d1117`: white clears
+4.5:1 on the light amber and reaches only 2.52:1 on the dark one, so the dark
+half inverts to the page colour.
+
+The other five look redundant and are not. A fill and the text on it are one
+decision, and under a chosen theme the right answer differs per fill: white reads
+on GitHub Light's red and measures 2.8:1 on its green, where black measures
+7.5:1. Six tokens is what lets a theme's fills be used exactly as their author
+wrote them and still leave every badge legible — the derivation picks each label
+against its own fill rather than darkening anybody's green.
 
 ### Neutral
 
 - **Primer Canvas Default** (`#ffffff` / `#0d1117`): The page. Also assigned to `diffs-container` as `--diffs-bg` from the outer tree, because the shadow sheet's own `:host` declares that slot and an inherited value would lose to it. Left alone, three different backgrounds meet at the seams.
 - **Primer Canvas Subtle** (`#f6f8fa` / `#212830`): Resting fill for secondary buttons, inline `code`, and grouped rows. The first step of layering.
+- **Primer Canvas Inset** (`#f6f8fa` / `#010409`): Sunken rather than layered — *darker* than the page in both modes, which is what makes the scope bar and the view-tab rail read as a channel cut into the page rather than a panel resting on it. The opposite direction from Canvas Overlay, and the pair of them is the whole of this system's depth.
 - **Primer Canvas Overlay** (`#ffffff` / `#151b23`): Menus and popovers only. In dark mode it is deliberately *lighter* than the page, which is what makes an overlay read as above rather than as a hole.
 - **Primer Foreground Default** (`#1f2328` / `#e6edf3`): All body and control text.
 - **Primer Foreground Muted** (`#59636e` / `#9198a1`): The most-used colour in the system, at 63 declarations. Timestamps, secondary counts, hints under settings, path prefixes. Measured 6.11:1 light and 6.50:1 dark on Canvas Default. **Nothing quieter than this is permitted for text**, which is the rule that keeps this system out of the usual failure mode of light grey body copy.
@@ -215,11 +262,24 @@ ones.
 
 ### Named Rules
 
-**The Matched Value Rule.** Every colour in this system exists in GitHub Primer
-at the same role name. Introducing a colour that Primer does not have requires a
-reason that survives the question "what happens at the seam when a reviewer
-looks at both pages in the same minute". There are two standing exceptions, both
-on the injected card, and both are documented in Components.
+**The Matched Value Rule.** Every colour in *the default palette* exists in
+GitHub Primer at the same role name. Introducing a colour that Primer does not
+have requires a reason that survives the question "what happens at the seam when
+a reviewer looks at both pages in the same minute". There are two standing
+exceptions, both on the injected card, and both are documented in Components.
+
+The qualifier is new and it is load-bearing. The rule constrains what this
+system *authors*; it does not constrain what a reviewer *chooses*. See
+[Themed Palettes](#themed-palettes).
+
+**The Named Colour Rule.** A colour literal outside `ui/tokens.css` is a defect,
+not a style violation. It used to be merely a duplicate of a value that already
+had a name, and duplicates drift. Now it is a colour that *cannot follow the
+reviewer's theme* — a patch of Primer left behind on a page that has become
+somebody's Nord. `ui/tokens.test.tsx` enforces this across the review
+stylesheet, the options stylesheet and the card, with exactly one allowed
+exception: the `#000000` plate behind an image diff's difference blend, which is
+an operand of `mix-blend-mode` rather than a surface.
 
 **The One Blue Rule.** `#0969da` / `#4493f8` is the only blue. It means
 interaction. A second blue for information, for headings, or for a link that is
@@ -234,12 +294,85 @@ duplicate a Pierre value into page CSS: two copies drift.
 
 ### Named Rules
 
-**The Reviewer Owns The Code Colours Rule.** Everything in section 2 is this
-system's to decide. The syntax colours *inside* a diff are not: they are a
-setting, drawn from seventy-five themes the build already carries, and the four
-built for colour vision deficiency lead the list. Nothing here may override a
-theme the reviewer has chosen, and that includes the addition and deletion
-colours this page is otherwise entitled to push into Pierre.
+**The Reviewer Owns The Colours Rule.** Everything in section 2 is this system's
+to decide *by default*, and the reviewer's to replace. It used to stop at the
+diff's edge — the syntax colours inside a diff were a setting and the page
+around them was not. That was a seam down the middle of one screen, and a worse
+one than the seam with github.com the Primer palette exists to avoid, because a
+reviewer sees both halves of it at once. Choosing a theme now recolours the
+diff, the page around it, the options page and the injected card. Nothing here
+may override a theme the reviewer has chosen, and that includes the addition and
+deletion colours this page is otherwise entitled to push into Pierre.
+
+<a id="themed-palettes"></a>
+
+### Themed Palettes
+
+The reviewer's choice is a theme id. Everything else is derived from it.
+
+**The default is not a theme.** Left on "Match the page", no derivation runs at
+all: `ui/tokens.css` keeps the hand-matched Primer pairs above, with the
+measured ratios they were chosen for. That split is the whole design. The
+default ships accessible; a theme the reviewer went and chose is rendered as its
+author wrote it.
+
+**The token names are the interface.** `lib/theme/tokens.ts` lists every name in
+`ui/tokens.css`, in an order the generated table depends on positionally.
+`ui/tokens.test.tsx` fails if the two lists disagree — a token declared in the
+stylesheet and missing from the list keeps its Primer pair while everything
+around it turns, which is the failure this feature exists to remove.
+
+**Three kinds of derived token**, and it is worth knowing which is which when
+reading `lib/theme/derive.ts`:
+
+- **Stated.** The theme has a workbench key for it, and it is taken.
+- **Chained.** Several keys might carry it. The chains are ordered by how often
+  themes actually declare each key, measured across all seventy-five rather than
+  guessed, and every chain ends somewhere that cannot fail. `terminal.ansiBlue`
+  sits ahead of `focusBorder` in the accent chain because a focus ring is often
+  a muted neutral — Solarized Light's is a tan — while a theme's ansi blue is
+  the blue its author would name if asked.
+- **Stepped.** No theme states it: a hover, a tint, a panel edge. Derived by
+  moving a stated colour a fixed distance toward the page or away from it.
+  "Away from the page" is darker on a light theme and lighter on a dark one,
+  which is the single rule that lets one derivation serve both halves of the
+  list.
+
+**Two repairs, and no more.** A stated value is declined only when it is not so
+much a colour as a missing one:
+
+- A `list.hoverBackground` equal to the surface under it, or one that would
+  erase the row text. `@pierre/theming` does this itself.
+- A `panel.border` that is either invisible against the page or is plainly the
+  theme's accent wearing a border's name. `--border-default` rules sixty
+  declarations here where it rules one divider in an editor, and Dracula's
+  `#BD93F9` would draw every hairline on the page in a bright purple that also
+  collides with what this system uses to mean "merged". The accepted band is
+  1.15:1 to 4:1 against the page, set against the list rather than picked.
+
+Nothing else is adjusted. In particular **a theme's fills are never darkened to
+make their labels fit** — the label moves instead, which is what the six `--on-*`
+tokens are for.
+
+**Contrast is a default-only guarantee.** Every ratio quoted in section 2 is
+measured, and every one of them is a statement about "Match the page". A palette
+derived from seventy-five community themes cannot carry the same promise, and
+pretending otherwise by quietly rewriting an author's colours would be the worse
+failure. The options page says this in as many words, and points a reviewer who
+needs the guarantee back at the default.
+
+**`color-scheme` travels with the palette.** A chosen theme pins it to the mode
+that theme was built for, so choosing a dark theme gives a dark page on a
+machine set to light — what an editor does. It is also the safety net: anything
+still written as `light-dark()` at least resolves to the half the chosen theme
+expects, so a straggler is off-palette rather than a white panel in a black page.
+
+**The table is generated.** `npm run palettes` derives all seventy-five palettes
+and writes `lib/theme/palettes.ts`; `lib/theme/palettes.test.ts` re-derives them
+and fails if the committed table has fallen behind. It is baked rather than
+resolved at runtime because the content script has to paint the card in the
+reviewer's colours on the first frame, on someone else's page, without making
+seventy-five theme files web-accessible to github.com.
 
 ## 3. Typography
 
@@ -366,7 +499,7 @@ inside GitHub, which is the opposite of every other surface here.
 - **Bloom:** A radial gradient in from the corners rather than a wash over the surface, so the card is still white in light mode and still near-black in dark. Lit, not tinted.
 - **CTA:** Full pill, `9px 18px`, 600 weight, white on a top-to-bottom green gradient (Success Emphasis to `#1a7f37` / `#187433`) with a 1px inset white highlight. Its gradient runs vertically while the card's runs from a corner, so the two do not fight. Hover lifts 1px and deepens its shadow; active returns to 0 and dims, because a button that only ever rises has no bottom to it. **The top stop is not free.** The label is white at 14px/600, which is not large text, so it answers to 4.5:1 across the whole band and not just at the bottom. This started at `#2ea043`, which is 3.37:1 against white; Success Emphasis measures 4.52:1 light and 4.63:1 dark at the top edge. The hover used to add `filter: brightness(1.07)` and that is gone for the same reason: it took the top of the band to 4.02:1, so the button was least readable exactly while being read.
 - **Collapse:** The pill and the card are one material at two sizes, so collapsing reads as the same object folding up rather than a swap for a second component.
-- **Theme:** Follows `data-color-mode` on GitHub's `<html>`, not the OS, because a reviewer who has pinned GitHub to dark should not get a light card on it.
+- **Theme:** Follows `data-color-mode` on GitHub's `<html>`, not the OS, because a reviewer who has pinned GitHub to dark should not get a light card on it. A chosen theme outranks both: the card wears the reviewer's palette even here, on someone else's page. That is a deliberate narrowing of the seamlessness argument — the card is already licensed to read as not-part-of-GitHub, and a reviewer who has themed the product has said which seam they care about. It is applied at mount rather than a frame later, which is why the content script reads settings before its first sync: a card that paints in Primer and turns Dracula on the next frame is a flash in the corner of a page somebody is already reading. The mark keeps its own colours throughout; it is a logo.
 
 ### Motion
 
@@ -395,6 +528,8 @@ is suppressed under `@media (prefers-reduced-motion: reduce)`.
 
 - **Do** write every colour as a `light-dark()` pair from the token list in section 2. Both halves, always. A single-value colour is a bug in one of the two themes.
 - **Do** name the Primer role the value came from when adding a token, so the next reader knows it is matched rather than chosen.
+- **Do** add a new token to `lib/theme/tokens.ts` in the same change that adds it to `ui/tokens.css`, and re-run `npm run palettes`. A token that exists in only one of the two is a control that stays Primer while the page around it turns. `ui/tokens.test.tsx` will tell you, but it is cheaper to remember.
+- **Do** pair a coloured fill with its own `--on-*` label rather than a white. White is right for every fill in the default and wrong for some theme's green.
 - **Do** override Pierre's colours through the fallback slot (`--diffs-light-bg`) or by targeting the host element from the outer tree. Setting `--diffs-bg` does nothing: `:host` declares it and wins.
 - **Do** separate surfaces with a 1px Primer Border Default line or a step to Canvas Subtle. Reach for a shadow only when the element genuinely floats.
 - **Do** carry status in a word first. "Checks failed" with red text, never red text alone. The most common colour vision deficiency makes red and green the two worst colours to encode a diff's primary signal in.
@@ -406,12 +541,13 @@ is suppressed under `@media (prefers-reduced-motion: reduce)`.
 
 ### Don't:
 
-- **Don't** introduce a colour GitHub Primer does not have. See The Matched Value Rule.
+- **Don't** introduce a colour GitHub Primer does not have *into the default palette*. See The Matched Value Rule. What a reviewer's chosen theme puts on the page is not this rule's business.
+- **Don't** "fix" a theme's colours in the derivation. Two repairs are licensed and named in Themed Palettes; a third needs the same standard — that the stated value is a missing colour rather than an ugly one. Darkening somebody's green so a white label fits is exactly the move the six `--on-*` tokens exist to avoid.
 - **Don't** add a second blue. Accent Foreground means interaction and nothing else means interaction.
 - **Don't** load a web font. The system stack is the choice, not the fallback.
 - **Don't** use a coloured side stripe above 1px, by any technique. The options page warning panel and the review page's `.notice` both carried a 4px `border-left-width` and both now use their whole 1px border. One remains: the scope bar's lost/failed state draws `box-shadow: inset 4px 0 0`, which avoids the 4px layout shift a real border would cause when something goes wrong mid-row. It is a known exception, not a precedent. Use a full 1px border, a background tint, or a leading icon.
-- **Don't** add a fourth amber. There are three named roles in section 2 and a fourth has already been retired once; pick one of the three, or give the new one a role name and a reason.
-- **Don't** write a literal colour outside `ui/tokens.css`. If the value is used three times it is a token; if it is used once it needs a comment saying why it is not.
+- **Don't** add a fifth amber. There are four named roles in section 2 and one has already been retired into another; pick one of the four, or give the new one a role name and a reason.
+- **Don't** write a literal colour outside `ui/tokens.css`, at all. This is no longer a matter of avoiding duplicates — a literal cannot follow the reviewer's theme, so it is a patch of Primer left on a themed page. See The Named Colour Rule, which is enforced by a test.
 - **Don't** build the visual language of a tool that is being sold: no gradient hero, no metric tiles, no purple-to-blue accent, no illustrated empty states, no product tour. PRODUCT.md names "a SaaS-looking developer tool" as an anti-reference.
 - **Don't** write chatty or cute copy. No emoji in interface text, no exclamation marks, no "Oops! Something went wrong." Say what failed and what to do.
 - **Don't** nest cards, and don't reach for a card grid where a list of rows would do. This interface is rows.

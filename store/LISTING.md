@@ -40,18 +40,35 @@ Open a pull request and a small card appears with "Start a Better Review". Click
 
 WHAT IT DOES
 
-• Comments, with reply and resolve
+• Comments, with reply and resolve — and editing or deleting your own
 • The full pending-review flow — queue comments, then submit them together
 • Approve and request changes
 • Status checks, including GitHub Actions runs and older commit statuses
 • Keyboard navigation throughout
-• Per-file viewed state, so you can track your way through a large diff
+• Per-file viewed state, so you can track your way through a large diff, and a file folds away once you tick it
 • Drafts that survive a failed post, so nothing you typed is lost
 • Multi-line comments and suggestion authoring
 • Noise filtering and diff search
 • Expand unchanged context around a hunk
 • Scope the diff to one commit, a range of commits, or "changes since my last review"
+• A notice when new commits land on the branch while you are reading
+• Side by side or unified, and an option to stop counting whitespace-only changes
+• Fold away the diffs of generated files — lockfiles, minified bundles, vendored trees — obeying linguist-generated in .gitattributes
 • Light and dark, following your system
+
+MORE THAN LINE DIFFS
+
+Some files are not read as lines, so they are not shown as lines. Each of these sits behind a switch on the file's own card, with the plain diff always one press away.
+
+• Markdown rendered, with the changes marked inside the prose rather than beside it — and Mermaid diagrams drawn
+• Images side by side, as an onion skin, under a swipe, or by difference
+• Jupyter notebooks by cell, or by their outputs
+• CSV and TSV as a table, with the changed rows on their own
+• JSON, JSONC, YAML and TOML compared by structure, so a reformat or a reordered key stops reading as a change
+
+READABLE, INCLUDING WHEN THE DEFAULT IS NOT
+
+Seventy-five themes, chosen in Options, and a theme dresses the whole extension rather than only the code — the diff, the page around it, the options page and the card on github.com. The list leads with four palettes built for colour vision deficiency, and includes high-contrast pairs. This exists because Pierre's default palette measures 2.14:1 against a white page in places — below what any text needs, and well below what code read character by character deserves. Left alone, the extension wears GitHub's own colours and follows your system between light and dark; that default is the setting whose contrast has been measured throughout.
 
 YOUR CHOICE OF WHERE IT OPENS
 
@@ -99,7 +116,7 @@ A Better Reviewer provides an alternative interface for reviewing GitHub pull re
 **`storage`**
 
 ```
-Stores the user's GitHub personal access token so they do not have to re-enter it. The user may optionally protect it with a passphrase, in which case only the encrypted form is stored. Also stores unsent comment drafts so a failed network request does not lose the user's typing, and which files the user has marked as viewed so they can track progress through a large diff. All of this is local to the user's browser; none of it is transmitted anywhere.
+Stores the user's GitHub personal access token so they do not have to re-enter it. The user may optionally protect it with a passphrase, in which case only the encrypted form is stored. Also stores unsent comment drafts, so a failed network request does not lose the user's typing; the user's own preferences, such as where a review opens, whether the diff is shown side by side, and which syntax theme it is drawn in; and a short-lived cache of the pull request data already fetched from GitHub, including which files the user has marked as viewed, so returning to a review does not re-download it. The cache is held in session storage and is discarded when the browser closes or the token changes. All of this is local to the user's browser; none of it is transmitted anywhere.
 ```
 
 **Host permission — `https://api.github.com/*`**
@@ -178,6 +195,7 @@ In `store/screenshots/`, all 1280×800, regenerated with `npm run screenshots`:
 | `02-review-dark.png` | The same in dark mode |
 | `03-options.png` | The Options page and its token walkthrough |
 | `04-conversations.png` | The Conversations view, including outdated and file-level threads |
+| `05-rendered-markdown.png` | A Markdown file as a rendered diff, with a Mermaid diagram drawn |
 
 Upload at least one; the store allows up to five. `01` should be first, since it
 is the one shown largest.

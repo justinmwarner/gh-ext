@@ -42,6 +42,7 @@ import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
 import { TopBar } from './TopBar';
 import { type ReviewView, ViewSwitcher, viewId, viewTabId } from './ViewSwitcher';
+import { applyChromeTheme } from './chromeTheme';
 import { type CurrentFile, NO_FILE, fromCommand, fromScroll, fromTree } from './currentFile';
 import { pullRequestUrl } from './githubUrl';
 import type { BlobRefs } from './blobLoader';
@@ -144,22 +145,38 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const diffStyle: DiffStyle = settings.splitView ? 'split' : 'unified';
 
   /**
-   * Tell the stylesheet to stop overriding Pierre's addition and deletion
-   * colours, because the reviewer has chosen a theme and those are its job now.
+   * Hand the whole page over to the chosen theme, or hand it back.
    *
-   * On `<html>` rather than on the shell, because the rule it gates sits on
-   * `:root` alongside the rest of the Pierre slots — those have to be declared
-   * where the custom properties inherit from, which is the document element.
+   * Two things at once, and they are the same decision seen from either side of
+   * the diff's edge.
    *
-   * The stylesheet carries the reasoning. In one line: the themes most worth
-   * choosing are the ones built for colour vision deficiency, and keeping a
-   * Primer red and a Primer green on the added and removed lines would undo
-   * exactly the thing they were chosen to do.
+   * The attribute tells the stylesheet to stop overriding Pierre's addition and
+   * deletion colours, because the reviewer has chosen a theme and those are its
+   * job now. The stylesheet carries the long version; in one line, the themes
+   * most worth choosing are the ones built for colour vision deficiency, and
+   * keeping a Primer red and a Primer green on the added and removed lines
+   * would undo exactly the thing they were chosen to do.
+   *
+   * `applyChromeTheme` extends that same concession to everything *outside* the
+   * diff. Recolouring the code and leaving the page around it in GitHub's white
+   * was a seam down the middle of one screen — and a worse one than the seam
+   * with github.com that the Primer palette exists to avoid, because a reviewer
+   * sees both halves of it at once.
+   *
+   * Both on `<html>`: the attribute because the rule it gates sits on `:root`
+   * alongside the rest of the Pierre slots, and the palette because `:root` is
+   * where `ui/tokens.css` declares the tokens and therefore the only element an
+   * inline property can outrank them on.
+   *
+   * There is a frame of default palette before this runs — settings arrive from
+   * `storage.local`, which is asynchronous, and no synchronous way to read them
+   * exists. It lands on the loading state rather than on a drawn diff.
    */
   useEffect(() => {
     const root = document.documentElement;
     if (settings.diffTheme === '') root.removeAttribute('data-syntax-theme');
     else root.setAttribute('data-syntax-theme', settings.diffTheme);
+    applyChromeTheme(root, settings.diffTheme);
   }, [settings.diffTheme]);
   /**
    * What the repository declares about its own generated files.

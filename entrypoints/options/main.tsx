@@ -41,6 +41,7 @@ import {
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
 import { summarizeDiagnosis } from '@/ui/diagnosisSummary';
 import { browser } from 'wxt/browser';
+import { applyChromeTheme } from '@/ui/chromeTheme';
 // Before the stylesheet, not after: everything in it refers to these by name.
 import '@/ui/tokens.css';
 import './style.css';
@@ -171,6 +172,25 @@ function Preferences() {
       // The defaults are what the worker would use anyway.
       .catch(() => setSettings({ ...DEFAULT_SETTINGS }));
   }, []);
+
+  /**
+   * Wear the chosen theme on this page too, as soon as it is chosen.
+   *
+   * Two things, one line. The first is consistency: PRODUCT.md's fifth
+   * principle says the card, the review page and this page are one thing and
+   * a reviewer arriving here from a dark review page should not notice a
+   * seam. A themed review page and a Primer options page is that seam, and
+   * this is the screen the button on the review page leads to.
+   *
+   * The second is that it makes the select below its own preview. Seventy-five
+   * names in a list say very little about what any of them looks like; the
+   * page repainting under the cursor says all of it, and costs nothing extra
+   * because the palette is already in the bundle.
+   */
+  useEffect(() => {
+    if (settings === null) return;
+    applyChromeTheme(document.documentElement, settings.diffTheme);
+  }, [settings?.diffTheme]);
 
   const update = useCallback(
     (patch: Partial<Settings>) => {
@@ -322,7 +342,7 @@ function Preferences() {
             four that answer colour vision deficiency first — they are the
             reason this setting exists rather than a curiosity in it. */}
         <label className="field" htmlFor="diffTheme">
-          Syntax colours
+          Theme
           <select
             id="diffTheme"
             value={settings.diffTheme}
@@ -354,9 +374,11 @@ function Preferences() {
             </optgroup>
           </select>
           <span className="hint">
-            Only the code inside a diff, not the page around it. Left on{' '}
-            <strong>Match the page</strong> the diff follows your system between
-            light and dark; choosing a theme means that one theme in both.
+            The code inside a diff <strong>and the extension around it</strong>,
+            this page included. Left on <strong>Match the page</strong> the
+            extension wears GitHub&rsquo;s own palette and follows your system
+            between light and dark; choosing a theme means that one theme
+            everywhere, in the mode it was built for.
             {' '}Every theme is already in the extension, so picking one costs no
             download.
             <br />
@@ -365,6 +387,12 @@ function Preferences() {
             two <strong>high contrast</strong> entries go the other way, and the
             group at the top redraws additions and deletions so they do not rely
             on telling red from green.
+            <br />
+            One caveat, and it is the honest one: a theme is drawn as its
+            author wrote it. <strong>Match the page</strong> is the only
+            setting here whose contrast has been measured throughout, so if
+            you need that guarantee rather than a preference, it is the one to
+            stay on.
           </span>
         </label>
       </section>

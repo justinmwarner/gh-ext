@@ -15,12 +15,20 @@ survive a failed post, multi-line comments, suggestion authoring, noise
 filtering, diff search, expand-unchanged-context, and scoping the diff to one
 commit, a range of commits, or "changes since my last review".
 
-The diff's syntax colours are yours to pick: seventy-five themes, all already in
-the extension so choosing one downloads nothing. Two of them are high contrast
-and four are built for colour vision deficiency — those redraw additions and
-deletions so that telling them apart does not mean telling red from green, and
-choosing one also stops this extension repainting those lines in its own red and
-green.
+The colours are yours to pick: seventy-five themes, all already in the extension
+so choosing one downloads nothing. A theme dresses the whole product, not just
+the code — the diff, the page around it, the options page and the card on
+github.com — and it pins light or dark to the mode it was built for, the way an
+editor does. Two of the themes are high contrast and four are built for colour
+vision deficiency; those redraw additions and deletions so that telling them
+apart does not mean telling red from green, and choosing one also stops this
+extension repainting those lines in its own red and green.
+
+Left alone, the extension wears GitHub's own palette and follows your system
+between light and dark, so there is no seam between the pull request page and
+the review page. That default is also the only setting whose contrast has been
+measured throughout: a chosen theme is drawn as its author wrote it, which is
+the point of choosing one.
 
 Anything it does not do hands off to GitHub through an **Open in GitHub**
 escape hatch.
