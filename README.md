@@ -226,4 +226,13 @@ how to validate a mutation without performing one.
 - The bundle carries an unreachable Shiki WebAssembly chunk. It is dead weight
   in the output, not on the main thread — the default highlighter is the
   JavaScript regex engine and nothing selects the WASM path.
+- Mermaid is the largest thing here by a wide margin: it adds about 5 MB to the
+  packaged extension. None of it is in the review page's own bundle — it is
+  fetched, from the extension's own package, the first time a reviewer opens a
+  `.md` file with a diagram in it, and Mermaid splits again internally so a
+  flowchart does not load the Gantt renderer. A review that touches no diagram
+  pays nothing at runtime; the download is paid once, at install.
+- A drawn diagram picks its palette when the renderer first loads, so switching
+  the operating system between light and dark mid-review leaves diagrams
+  already on screen in the old one until the page is reloaded.
 - github.com only. GitHub Enterprise is a base-URL abstraction away.

@@ -2384,12 +2384,25 @@ test('a rendered Markdown diff marks the prose and executes none of it', async (
 
   // The word that changed is marked in place, which is the whole point of a
   // rendered *diff* rather than a rendered preview.
-  await expect(card.locator('.markdown-rendered ins')).toContainText('structured');
-  await expect(card.locator('.markdown-rendered del')).toContainText('plain');
+  //
+  // Scoped to the prose. The document also carries a Mermaid diagram whose
+  // source changed, and its marks are inside a `<pre>` — a different claim,
+  // asserted by the diagram test below.
+  await expect(card.locator('.markdown-rendered p ins')).toContainText('structured');
+  await expect(card.locator('.markdown-rendered p del')).toContainText('plain');
 
   // Nothing that can fetch, run, or navigate survived into the document.
+  //
+  // The image assertion is by `src`, not by tag, and the distinction is the
+  // whole rule rather than a loosening of it. `FORBIDDEN_TAGS` strips every
+  // `<img>` the pull request wrote, whatever it points at — the payload's own
+  // `<img src="x" onerror=…>` is in the fixture to prove it. The only images
+  // that can be here are the ones this page built itself for the Mermaid
+  // diagrams, and those hold a `data:` URL, which is not a request. What was
+  // ever being defended is "no fetch to anywhere from a `.md` file", and
+  // counting by `src` says that where counting by tag only stood in for it.
   const rendered = card.locator('.markdown-rendered');
-  await expect(rendered.locator('img')).toHaveCount(0);
+  await expect(rendered.locator('img:not([src^="data:"])')).toHaveCount(0);
   await expect(rendered.locator('script')).toHaveCount(0);
   await expect(rendered.locator('iframe')).toHaveCount(0);
   await expect(rendered.locator('[onerror]')).toHaveCount(0);
@@ -2399,6 +2412,71 @@ test('a rendered Markdown diff marks the prose and executes none of it', async (
   expect(await page.evaluate(() => (globalThis as { __pwned?: boolean }).__pwned)).toBe(
     undefined,
   );
+});
+
+/**
+ * Mermaid, in a real browser, on the production build.
+ *
+ * The only honest check there is. Mermaid measures text with `getBBox` and
+ * `getComputedTextLength`, neither of which jsdom implements, so every unit
+ * test of this draws through a mock — which says nothing about whether the
+ * real renderer loads its chunk inside an MV3 extension page, or whether
+ * anything comes out of it. Both are settled here.
+ */
+test('a Mermaid diagram in a .md file is drawn rather than left as its source', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+  const card = fileBody(page, MARKDOWN_FILE);
+  await expect(card.locator('.markdown-rendered')).toBeVisible();
+
+  // Both diagrams drawn. The chunk is lazy, so this is also the assertion
+  // that it is fetchable from the packaged extension at all.
+  const drawn = card.locator('.md-diagram img');
+  await expect(drawn).toHaveCount(2);
+
+  // Into an image holding a `data:` URL — never inlined as SVG into an origin
+  // that holds a GitHub token. See the note in `ui/markdownHtml.ts`.
+  await expect(drawn.first()).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
+  await expect(card.locator('.markdown-rendered svg')).toHaveCount(0);
+
+  /** The SVG behind one of the drawn images. */
+  const sourceOf = (index: number): Promise<string> =>
+    drawn.nth(index).evaluate((node) => {
+      const { src } = node as HTMLImageElement;
+      return atob(src.slice(src.indexOf(',') + 1));
+    });
+
+  // A real drawing rather than an empty frame: the labels from the source
+  // came through.
+  const first = await sourceOf(0);
+  expect(first).toContain('<svg');
+  expect(first).toContain('Render');
+
+  // The unchanged diagram folds its source away, because the source is then
+  // the picture written out longhand.
+  await expect(card.locator('pre.md-diagram-drawn')).toHaveCount(1);
+
+  // The changed one keeps it, because a drawn diagram carries no marks and
+  // the old version is not on screen — the marked-up source below it is the
+  // only place the change is visible.
+  const kept = card.locator('pre.md-diagram-source');
+  await expect(kept).toHaveCount(1);
+  await expect(kept.locator('ins')).toContainText('Accept');
+  await expect(kept.locator('del')).toContainText('Reject');
+
+  // And it is the *new* version that was drawn. The block holds both sides
+  // interleaved by then, so reconstructing this one is the whole job of
+  // `mermaidBlocks.ts`.
+  const second = await sourceOf(1);
+  expect(second).toContain('Accept');
+  expect(second).not.toContain('Reject');
 });
 
 test('the syntax theme is the reviewer\'s, and choosing one lets it colour the diff', async ({

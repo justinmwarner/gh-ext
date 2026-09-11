@@ -178,30 +178,46 @@ export const MARKDOWN_FILE = 'docs/readme.md';
  * through `innerHTML` — so the obvious assertion passes there whether or not
  * anything is sanitising. A real browser will do both, which is the only place
  * the question can actually be asked.
+ *
+ * It also carries two Mermaid diagrams, for the same reason. Mermaid measures
+ * text with `getBBox` and `getComputedTextLength`, neither of which jsdom
+ * implements, so a unit test can only assert against a mocked renderer.
+ * Whether the real one loads its chunk and draws anything inside an MV3
+ * extension page is a question only a real browser answers.
  */
+const markdownDoc = (word: string, decision: string): string =>
+  [
+    '# Review notes',
+    '',
+    `The parser handles **${word}** input.`,
+    '',
+    '<img src=\"x\" onerror=\"globalThis.__pwned = true\">',
+    '<script>globalThis.__pwned = true</script>',
+    '',
+    '[a link](javascript:globalThis.__pwned=true)',
+    '',
+    // Unchanged between the two sides, so the card should draw it and fold
+    // the source away — the common case, and the one where a reviewer
+    // would otherwise be reading `graph TD` in a rendered document.
+    '```mermaid',
+    'graph TD',
+    '  A[Parse] --> B[Render]',
+    '```',
+    '',
+    // Changed, so the card should draw the *new* version and keep the
+    // marked-up source under it. That source is the only place the change
+    // is visible: a drawn diagram carries no marks, and the old version is
+    // not on screen to compare it against.
+    '```mermaid',
+    'graph LR',
+    `  Input --> ${decision}`,
+    '```',
+    '',
+  ].join('\n')
+
 export const MARKDOWN_TEXT: Record<'base' | 'head', string> = {
-  base: [
-    '# Review notes',
-    '',
-    'The parser handles **plain** input.',
-    '',
-    '<img src=\"x\" onerror=\"globalThis.__pwned = true\">',
-    '<script>globalThis.__pwned = true</script>',
-    '',
-    '[a link](javascript:globalThis.__pwned=true)',
-    '',
-  ].join('\n'),
-  head: [
-    '# Review notes',
-    '',
-    'The parser handles **structured** input.',
-    '',
-    '<img src=\"x\" onerror=\"globalThis.__pwned = true\">',
-    '<script>globalThis.__pwned = true</script>',
-    '',
-    '[a link](javascript:globalThis.__pwned=true)',
-    '',
-  ].join('\n'),
+  base: markdownDoc('plain', 'Reject'),
+  head: markdownDoc('structured', 'Accept'),
 };
 
 /**

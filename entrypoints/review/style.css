@@ -3374,6 +3374,70 @@ button.scope-showing:hover {
   background: none;
 }
 
+/* ------------------------------------------------------ Mermaid diagrams */
+
+/*
+ * A drawn diagram, in an `<img>` holding a `data:` URL.
+ *
+ * An image rather than inline SVG, for the reason `markdownHtml.ts` gives at
+ * length: a diagram's source is markup a pull request wrote, and markup a
+ * pull request wrote renders through `<img>` — where the browser treats it as
+ * a secure static document — and is never inlined into an origin holding a
+ * GitHub token.
+ *
+ * `height: auto` is doing real work. The element carries width and height
+ * attributes read off the diagram's `viewBox`, so it reserves the right space
+ * before the image decodes and the card does not jump; the rule then lets it
+ * scale down against the card's width while keeping that ratio.
+ */
+.md-diagram {
+  margin: 8px 0;
+}
+
+.md-diagram img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/*
+ * What the picture cannot say.
+ *
+ * A rendered diagram carries no `<ins>` or `<del>`, and the old version is
+ * not on screen to compare it against — so for a diagram whose source
+ * changed, the marked-up source below is the only place the change is
+ * visible. This is the sentence that sends the reader there.
+ */
+.md-diagram figcaption {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* Nothing moved inside it, so the source is the picture written out longhand
+   and the picture is the better copy. Hidden rather than removed: it is still
+   the document, and a future reader looking for where the text went should
+   find it in the DOM. */
+.md-diagram-drawn {
+  display: none;
+}
+
+/* It changed, so the source stays — quieter than an ordinary code block,
+   because it is now the footnote to the diagram above it rather than the
+   thing being read. */
+.md-diagram-source {
+  font-size: 0.85em;
+}
+
+/* A diagram Mermaid would not draw. Almost always a syntax error in the pull
+   request's own source, which is a thing to say in a sentence above the
+   source rather than a reason to show nothing. */
+.md-diagram-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
 .markdown-rendered table {
   border-collapse: collapse;
 }
