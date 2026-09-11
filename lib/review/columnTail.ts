@@ -24,11 +24,14 @@
  * | an image | 126 → 70 | 107 → 67 |
  *
  * Two things are left, and neither is a header this file can do anything about.
- * A card with a mode switcher is 70px rather than 44 — the switcher is a second
- * row, and it stays in the header because a collapsed card still has to offer
- * it. And a plain text card lurches by ~57px with a header that is *exactly*
- * the metric, which is the library's own line-height estimate rather than
- * anything of ours; it was there before any of this and is untouched by it.
+ * An *expanded* card with a mode switcher is 70px rather than 44 — the
+ * switcher is a second row. It used to be 70px folded as well, on the
+ * reasoning that a folded card still has to offer the switcher; it does not,
+ * and `FileCard` now folds the switcher away with the body it changes, so a
+ * folded card is back to the metric exactly. And a plain text card lurches by
+ * ~57px with a header that is *exactly* the metric, which is the library's own
+ * line-height estimate rather than anything of ours; it was there before any
+ * of this and is untouched by it.
  *
  * So this is what is left of the workaround. With it removed entirely the last
  * card of the fixture settles 311px down a 628px scrollport — readable, which
@@ -57,6 +60,12 @@
  * card, and a count of rich cards is the only signal available before anything
  * has rendered — so this is that arithmetic spread over the term that can
  * actually be counted.
+ *
+ * The count is of rich cards, not of *expanded* rich cards, and since files
+ * marked viewed now open folded that will usually over-provision. Deliberately
+ * left that way, for the reason below: a fold is one press from being undone,
+ * so an estimate that assumed folded would come up short the moment a reviewer
+ * opened a screenshot back up.
  *
  * Deliberately at the top of the range rather than the middle. Slack costs a
  * little empty space below the last card, which nobody notices; a shortfall
@@ -94,9 +103,9 @@ export function tailDeficit(richCards: number): number {
  * `CodeView` models every header at 44px and never measures it, so a header
  * taller than that is scroll range the viewer does not know it owes — see
  * above. 44 is the head row: the name, the counts, the controls, the viewed
- * box. 70 is that plus the mode switcher's row, which stays in the header
- * because a collapsed card still has to offer it. This is 72, which is those
- * two plus a couple of pixels of rounding and nothing else.
+ * box. 70 is that plus the mode switcher's row, on a card that is open. This
+ * is 72, which is those two plus a couple of pixels of rounding and nothing
+ * else.
  *
  * It is a budget rather than a description, and it is checked in a browser
  * because jsdom performs no layout and would report every one of these as zero.

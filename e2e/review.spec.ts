@@ -2316,6 +2316,99 @@ test('the last card can still be read when the column is full of rich ones', asy
  * file. This is what keeps it empty. It cannot be asserted anywhere but a
  * browser: jsdom performs no layout and reports every one of these as zero.
  */
+/**
+ * Marking a file viewed folds it, and folding it takes the switcher with it.
+ *
+ * In a browser because the two halves that matter are layout: a folded card
+ * has to actually stop drawing a body, and folding the mode switcher away is
+ * what takes a card's header from 70px back to the 44px `CodeView` assumes it
+ * to be. jsdom performs no layout and would report every height as zero.
+ */
+test('a file marked viewed folds away, switcher and all', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // A rich card, because it is the one that used to refuse to fold at all —
+  // its comparison lived in the header — and the one whose switcher is the
+  // second header row.
+  await page.locator(`[data-path="${TABLE_FILE}"]`).click();
+  const card = page.locator(`[data-file-card="${TABLE_FILE}"]`);
+  await expect(card).toBeVisible();
+  const switcher = card.getByRole('group', { name: new RegExp(`Compare ${TABLE_FILE}`) });
+  await expect(switcher).toBeVisible();
+  await expect(page.locator(`[data-file-body="${TABLE_FILE}"]`)).toBeVisible();
+
+  const open = (await card.boundingBox())?.height ?? 0;
+
+  await card.getByRole('checkbox', { name: new RegExp(TABLE_FILE) }).check();
+
+  // The body goes, the switcher goes with it, and the card is shorter for it.
+  await expect(page.locator(`[data-file-body="${TABLE_FILE}"]`)).toHaveCount(0);
+  await expect(switcher).toHaveCount(0);
+  const folded = (await card.boundingBox())?.height ?? 0;
+  expect(folded).toBeLessThan(open);
+  // Back to the one row `CodeView` models every header as.
+  expect(folded).toBeLessThanOrEqual(HEADER_BUDGET);
+
+  // And the way back is still on the card, or the fold would be a trap.
+  await card.getByRole('button', { name: /expand/i }).click();
+  await expect(switcher).toBeVisible();
+  await expect(page.locator(`[data-file-body="${TABLE_FILE}"]`)).toBeVisible();
+
+  expect(api.operations).toContain('MarkViewed');
+});
+
+test('a file that was already viewed opens folded on the next load', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  // The reload half of the same claim, and the only honest way to ask it: the
+  // mark is made through the UI, kept by the fake the way GitHub keeps it, and
+  // read back on a fresh page — which also proves the worker drops its cached
+  // copy of the pull request when the reviewer changes it.
+  //
+  // `MARKDOWN_FILE` rather than the table above, and not by preference:
+  // `IMAGE_FILE` and `TABLE_FILE` are deliberately absent from the pull
+  // request's own file list — see `FILES` — so they have no `viewerViewedState`
+  // to come back as anything. This one is in the list *and* is a rich card,
+  // so the switcher is in the question too.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+  const first = page.locator(`[data-file-card="${MARKDOWN_FILE}"]`);
+  await expect(first).toBeVisible();
+  await first.getByRole('checkbox', { name: new RegExp(MARKDOWN_FILE) }).check();
+  await expect.poll(() => api.viewedPaths.has(MARKDOWN_FILE)).toBe(true);
+
+  await page.reload();
+  await expect(page.locator('.shell')).toBeVisible();
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+
+  const card = page.locator(`[data-file-card="${MARKDOWN_FILE}"]`);
+  await expect(card).toBeVisible();
+  // Folded, with no body and no switcher, without the reviewer touching it.
+  await expect(card.getByRole('button', { name: /expand/i })).toBeVisible();
+  await expect(page.locator(`[data-file-body="${MARKDOWN_FILE}"]`)).toHaveCount(0);
+  await expect(
+    card.getByRole('group', { name: new RegExp(`Compare ${MARKDOWN_FILE}`) }),
+  ).toHaveCount(0);
+  expect((await card.boundingBox())?.height ?? 0).toBeLessThanOrEqual(HEADER_BUDGET);
+
+  // A file they have not finished with is untouched by any of this.
+  await page.locator('[data-path="src/app.ts"]').click();
+  await expect(
+    page.locator('[data-file-card="src/app.ts"]').getByRole('button', {
+      name: /collapse/i,
+    }),
+  ).toBeVisible();
+});
+
 test('no card header is taller than the height the viewer assumes', async ({
   context,
   extensionId,

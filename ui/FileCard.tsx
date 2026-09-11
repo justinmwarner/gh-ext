@@ -21,7 +21,7 @@
  */
 
 import { useId } from 'react';
-import { RAW, modesForFile } from '@/lib/compare/modes';
+import { modesForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
 import {
   type WhitespaceDiff,
@@ -30,7 +30,6 @@ import {
 } from '@/lib/review/whitespace';
 import type { HeldBack } from './DiffColumn';
 import { ModeSwitcher } from './ModeSwitcher';
-import { fileBody } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession, viewedKey } from './reviewSession';
 
@@ -186,18 +185,19 @@ export function FileCard({
 }: FileCardProps) {
   const flag = flagFor(held, whitespace, shown);
   const flagId = useId();
-  const body = fileBody(file);
-  const raw = mode === RAW.id;
-  /** There is a text diff here, rather than a binary or a rich comparison. */
-  const textDiff = raw && body.kind === 'diff';
-  // Nothing to collapse: the card is already only its header, and a toggle that
-  // reveals an empty rectangle is a lie about there being more to see. A card in
-  // a rich mode is in exactly that state — its body is the comparison below,
-  // and the collapse toggle would be pointing at nothing. So is a file whose
-  // every change was whitespace, unless the reviewer has asked to see it, in
-  // which case GitHub's own patch is back and there is something under there.
+  // Nothing to collapse: the card is already only its header, and a toggle
+  // that reveals an empty rectangle is a lie about there being more to see. A
+  // file whose every change was whitespace is in exactly that state, unless
+  // the reviewer has asked to see it, in which case GitHub's own patch is back
+  // and there is something under there.
+  //
+  // A rich card used to be excluded here on the same reasoning, and no longer
+  // is: its comparison was in the header then and is a measured annotation
+  // now, so there really is something below to fold away. Marking a screenshot
+  // viewed has to fold it like anything else, and a card that folds with no
+  // way back is worse than one that never folds.
   const emptied = whitespace?.hunks === 0 && !shown;
-  const collapsible = textDiff && !emptied;
+  const collapsible = !emptied;
   const modes = modesForFile(file);
 
   return (
@@ -284,13 +284,27 @@ export function FileCard({
         <ViewedCheckbox path={file.path} state={file.viewedState} />
       </div>
 
-      <ModeSwitcher
-        path={file.path}
-        modes={modes}
-        current={mode}
-        onChange={onChangeMode}
-      />
+      {/* Folded away with the body it changes.
 
+          It used to stay, on the reasoning that a folded card still has to
+          offer it — but the choice is about what the body shows, and offering
+          it over a card with no body on screen is a control whose whole effect
+          is hidden. Marking a file viewed folds it now, so leaving the
+          switcher up would put a row of buttons under every file the reviewer
+          has finished with, which is most of them by the end of a review.
+          It comes back with the body, on the press that asked for it.
+
+          It also takes the card's header from 70px to the 44px `CodeView`
+          assumes — see `lib/review/columnTail.ts`, which is where that
+          number's consequences are written down. */}
+      {!collapsed && (
+        <ModeSwitcher
+          path={file.path}
+          modes={modes}
+          current={mode}
+          onChange={onChangeMode}
+        />
+      )}
     </div>
   );
 }

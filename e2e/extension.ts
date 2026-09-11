@@ -61,6 +61,18 @@ export interface ApiLog {
    */
   pendingReviewId: string | null;
   /**
+   * The files this reviewer has marked viewed, as GitHub would remember them.
+   *
+   * A mutation this fake actually *keeps*, which most of them are not. It has
+   * to: a file marked viewed opens folded on the next load, and the whole
+   * claim of that sentence is the next load — a fake that answered the mark
+   * with an ok and then served the file as unviewed again could only ever
+   * test the half that happens without a round trip.
+   *
+   * Seed it before opening the page to arrive with files already read.
+   */
+  viewedPaths: Set<string>;
+  /**
    * A permission the token is refused on the pull request query.
    *
    * The one shape of GitHub reply nothing else here produces: `data` and
@@ -161,6 +173,17 @@ function graphqlReply(
       const node = {
         ...PULL_REQUEST_NODE,
         repository: { viewerPermission: log.viewerPermission },
+        // Read back off the marks this fake has kept, so a reload sees what
+        // the reviewer actually ticked rather than the fixture's opening
+        // position. `viewedPaths` says why that matters.
+        files: {
+          ...PULL_REQUEST_NODE.files,
+          nodes: PULL_REQUEST_NODE.files.nodes.map((entry) =>
+            log.viewedPaths.has(entry.path)
+              ? { ...entry, viewerViewedState: 'VIEWED' }
+              : entry,
+          ),
+        },
       };
       if (log.deniedPath === null) {
         return { data: { repository: { pullRequest: node } } };
@@ -318,8 +341,12 @@ function graphqlReply(
       };
 
     case 'MarkViewed':
-    case 'UnmarkViewed':
+    case 'UnmarkViewed': {
+      const path = String(variables['path'] ?? '');
+      if (operation === 'MarkViewed') log.viewedPaths.add(path);
+      else log.viewedPaths.delete(path);
       return { data: { [operation]: { pullRequest: { id: PULL_REQUEST_NODE.id } } } };
+    }
 
     case 'ResolveThread':
     case 'UnresolveThread':
@@ -345,6 +372,7 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
     variables: [],
     urls: [],
     pendingReviewId: null,
+    viewedPaths: new Set<string>(),
     deniedPath: null,
     refuseRepository: false,
     viewerPermission: 'WRITE',

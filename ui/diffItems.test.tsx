@@ -181,14 +181,18 @@ describe('codeViewItems', () => {
     expect(item.collapsed).toBe(false);
   });
 
-  it('ignores the reviewer’s collapse on a file that has no diff to show', () => {
-    // There is nothing to collapse, and collapsing would take away the one
-    // thing the card has: a collapsed item hosts no annotation, so the sentence
-    // explaining the absent diff would go with it.
+  it('honours the reviewer’s collapse on a file that has no text diff', () => {
+    // It used to refuse, because a collapsed item hosts no annotation and the
+    // sentence explaining the absent diff would go with it. That is now the
+    // point rather than the objection: folding a card is how a file the
+    // reviewer has finished with gets out of the way, and a card that refused
+    // to fold would be the one file in a viewed review still taking up room.
     const binary = file({ path: 'logo.png', isBinary: true, patch: '' });
     const items = codeViewItems([binary], new Set(['logo.png']));
 
-    expect(items[0]?.collapsed).toBe(false);
+    expect(items[0]?.collapsed).toBe(true);
+    // And its body goes with it, which is the whole of what folding does here.
+    expect(items[0]?.annotations ?? []).toEqual([]);
   });
 
   it('still produces an item for a file whose patch never arrived', () => {

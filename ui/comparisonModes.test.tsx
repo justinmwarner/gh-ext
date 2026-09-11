@@ -502,15 +502,21 @@ describe('the file the reviewer is on', () => {
     expect(item.fileDiff.hunks).toHaveLength(0);
   });
 
-  it('does not offer to collapse a card whose body is a comparison', () => {
+  it('offers to collapse a card whose body is a comparison', () => {
+    // It did not, once, and the reasoning was sound at the time: the
+    // comparison was in the card's header, where folding could not reach it,
+    // so the toggle would have pointed at nothing. The comparison is a
+    // measured annotation now and folding takes it away like any other body —
+    // which it has to, because marking a file viewed folds it and a
+    // spreadsheet is a file like the rest of them.
     mount([file({ path: 'data/rows.csv' })]);
 
     expect(
-      within(card('data/rows.csv')).queryByRole('button', { name: /Collapse|Expand/ }),
-    ).toBeNull();
+      within(card('data/rows.csv')).getByRole('button', { name: /Collapse/ }),
+    ).toBeTruthy();
   });
 
-  it('offers the collapse toggle back once the card is showing raw', async () => {
+  it('offers the collapse toggle on a card showing raw too', async () => {
     const user = userEvent.setup();
     mount([file({ path: 'data/rows.csv' })]);
 
@@ -519,6 +525,28 @@ describe('the file the reviewer is on', () => {
     expect(
       within(card('data/rows.csv')).getByRole('button', { name: /Collapse/ }),
     ).toBeTruthy();
+  });
+
+  it('folds the switcher away with the body it changes', async () => {
+    // The switcher used to stay up on a folded card, on the reasoning that a
+    // folded card still has to offer it. It does not: the choice is about
+    // what the body shows, and with most of a finished review folded the page
+    // would carry a row of dead buttons under every file.
+    const user = userEvent.setup();
+    mount([file({ path: 'data/rows.csv' })]);
+    expect(switcher('data/rows.csv')).toBeTruthy();
+
+    await user.click(
+      within(card('data/rows.csv')).getByRole('button', { name: /Collapse/ }),
+    );
+
+    expect(document.querySelector('[aria-label="Compare data/rows.csv as"]')).toBeNull();
+
+    // And it comes back with the body, on the press that asked for it.
+    await user.click(
+      within(card('data/rows.csv')).getByRole('button', { name: /Expand/ }),
+    );
+    expect(switcher('data/rows.csv')).toBeTruthy();
   });
 });
 

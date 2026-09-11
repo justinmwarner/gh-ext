@@ -433,7 +433,13 @@ export function codeViewItems(
   return files.map((file) => {
     const mode = modes.get(file.path) ?? RAW.id;
     const rich = !showsTextDiff(file, mode);
-    const collapsed = rich ? false : collapsedPaths.has(file.path);
+    // Every card folds, including the rich ones. A rich card used to be
+    // forced open because its comparison lived in the header, where folding
+    // could not reach it and the toggle would have pointed at nothing. The
+    // comparison is a measured annotation now, so `body` below takes it away
+    // like any other — and a reviewer who marks a screenshot viewed means the
+    // same thing by it as one who marks a source file viewed.
+    const collapsed = collapsedPaths.has(file.path);
     const threads = annotationsByPath.get(file.path);
     // Nowhere to put it: a collapsed item is sized at its header region and
     // renders no annotation host at all. Collapsed goes on meaning header only.

@@ -10,9 +10,14 @@
  * undo the first.
  *
  * **It remembers nothing.** This page persists no interface state anywhere —
- * not the rail width, not which files are collapsed — and a mode that survived
- * a reload would be the one exception, silently deciding what the reviewer sees
- * on a file they have never opened.
+ * not the rail width, not a fold the reviewer made by hand — and a mode that
+ * survived a reload would be the one exception, silently deciding what the
+ * reviewer sees on a file they have never opened.
+ *
+ * A file marked viewed does open folded across a reload, and that is not a
+ * counter-example: nothing about it is stored here. It is read off GitHub's
+ * own viewed state, the same state the checkbox beside this draws itself
+ * from, which is also why unticking the box on github.com unfolds it here.
  *
  * **Plain buttons, each its own tab stop.** A roving-tabindex radio group would
  * be one stop per file rather than one per mode, which is tidier to tab

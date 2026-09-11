@@ -368,10 +368,132 @@ describe('DiffColumn', () => {
     expect(collapsed.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('offers no collapse toggle for a file with nothing to collapse', () => {
+  it('folds a file the moment it is marked viewed', () => {
+    // The point of the checkbox: a file you have finished with stops taking up
+    // the column. Driven through the box rather than the fold toggle, because
+    // the keyboard and the file tree tick it too and all three have to fold.
+    mount([file({ path: 'src/app.ts', viewedState: 'UNVIEWED' })]);
+    expect(
+      within(card('src/app.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(within(card('src/app.ts')).getByRole('checkbox'));
+    });
+
+    expect(
+      within(card('src/app.ts')).getByRole('button', { name: /expand/i }),
+    ).toBeTruthy();
+  });
+
+  it('folds it even after the reviewer had opened it by hand', () => {
+    // The case that makes this an action rather than only a rule. Opening a
+    // file is how you come to have read it, so the reviewer has almost always
+    // recorded a fold override on the very card they are about to tick — and
+    // an override that outlived the tick would fold everything except the
+    // files they actually looked at.
+    mount([
+      file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts'), viewedState: 'UNVIEWED' }),
+    ]);
+    const toggle = () =>
+      within(card('src/app.ts')).getByRole('button', { name: /collapse|expand/i });
+
+    // Fold and unfold by hand, leaving an explicit "open" override behind.
+    act(() => fireEvent.click(toggle()));
+    act(() => fireEvent.click(toggle()));
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+
+    act(() => {
+      fireEvent.click(within(card('src/app.ts')).getByRole('checkbox'));
+    });
+
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens it again when the mark is taken back', () => {
+    mount([file({ path: 'src/app.ts', viewedState: 'VIEWED' })]);
+
+    act(() => {
+      fireEvent.click(within(card('src/app.ts')).getByRole('checkbox'));
+    });
+
+    expect(
+      within(card('src/app.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+  });
+
+  it('opens a review with the files already marked viewed folded away', () => {
+    // What a reload looks like. Not a persisted interface preference — this
+    // page keeps none — but GitHub's own viewed state, read the same way the
+    // checkbox reads it.
+    mount([
+      file({ path: 'read.ts', viewedState: 'VIEWED' }),
+      file({ path: 'todo.ts', viewedState: 'UNVIEWED' }),
+      // Marked viewed and then changed underneath the reviewer. That is work
+      // to do again, not work finished, so it opens.
+      file({ path: 'moved.ts', viewedState: 'DISMISSED' }),
+    ]);
+
+    expect(
+      within(card('read.ts')).getByRole('button', { name: /expand/i }),
+    ).toBeTruthy();
+    expect(
+      within(card('todo.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+    expect(
+      within(card('moved.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+  });
+
+  it('leaves a viewed file open once the reviewer has opened it', () => {
+    // The fold is a default, not a lock. Nothing re-folds it until the mark
+    // itself moves again.
+    mount([file({ path: 'read.ts', viewedState: 'VIEWED' })]);
+
+    act(() => {
+      fireEvent.click(within(card('read.ts')).getByRole('button', { name: /expand/i }));
+    });
+
+    expect(
+      within(card('read.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+  });
+
+  it('will not fold a file out from under a comment that has not been sent', () => {
+    // An entry in `posting` is writing that is on GitHub nowhere, and if the
+    // post fails the alert saying so is drawn on this card. Folding it because
+    // the reviewer ticked the box on the way past would hide a failure they
+    // have no other way to hear about.
+    requestMock.mockReturnValue(new Promise(() => {}));
+    mount(
+      [file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })],
+      {},
+      [],
+      <Poster line={2} />,
+    );
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'post off-hunk' }));
+    });
+    act(() => {
+      fireEvent.click(within(card('src/app.ts')).getByRole('checkbox'));
+    });
+
+    expect(
+      within(card('src/app.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+    expect(screen.getByText('Written before the diff moved.')).toBeDefined();
+  });
+
+  it('offers a collapse toggle even on a card whose body is one sentence', () => {
+    // A binary with no comparison to offer still has a body — the sentence
+    // saying why there is no diff — and it is a file like any other: marking
+    // it viewed folds it, so it needs the way back.
     mount([file({ path: 'build/app.wasm', isBinary: true, patch: '' })]);
 
-    expect(within(card('build/app.wasm')).queryByRole('button')).toBeNull();
+    expect(
+      within(card('build/app.wasm')).getByRole('button', { name: /Collapse/ }),
+    ).toBeTruthy();
   });
 
   it('warns when the file list came from the files endpoint', () => {

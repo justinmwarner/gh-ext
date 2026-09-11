@@ -54,6 +54,7 @@ import type {
   SelectedLineRange,
 } from '@pierre/diffs';
 import { RAW, resolveModeForFile } from '@/lib/compare/modes';
+import type { FileViewedState } from '@/lib/github/types';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnchorableSides } from '@/lib/review/diffScope';
 import type { AnnotationSide } from '@/lib/review/threads';
@@ -514,30 +515,97 @@ export function DiffColumn({
   }, [files, hideGenerated, gitAttributes, recomputed]);
 
   /**
+   * The viewed state each card is actually in.
+   *
+   * The payload's value with this session's own changes over the top, which is
+   * the same two-layer read `ViewedCheckbox` does — and it has to be the same
+   * one, or a file would fold on a reload and not when it was ticked.
+   */
+  const viewedNow = useMemo(() => {
+    const built = new Map<string, FileViewedState>();
+    for (const file of files) {
+      built.set(file.path, session.viewed.get(file.path) ?? file.viewedState);
+    }
+    return built;
+  }, [files, session.viewed]);
+
+  /**
+   * A file the reviewer has just ticked or unticked answers to the rule again.
+   *
+   * Without this, marking a file viewed would fold every card except the ones
+   * the reviewer had opened by hand — which is most of the ones they are about
+   * to tick, because opening a file is how you come to have read it. The
+   * override is dropped rather than overwritten, so unticking puts the card
+   * back to whatever the rules say rather than to whatever it happened to be
+   * doing when it was ticked.
+   *
+   * During render rather than in an effect. The fold is read in this same
+   * pass, and an effect would paint one frame of the card open before folding
+   * it — a flinch on the one control whose whole job is to get a finished file
+   * out of the way.
+   */
+  const lastViewed = useRef(viewedNow);
+  if (lastViewed.current !== viewedNow) {
+    const previous = lastViewed.current;
+    lastViewed.current = viewedNow;
+    const moved = [...viewedNow]
+      .filter(([path, state]) => previous.get(path) !== state)
+      .map(([path]) => path);
+    if (moved.length > 0) {
+      setFolds((current) => {
+        if (!moved.some((path) => current.has(path))) return current;
+        const next = new Map(current);
+        for (const path of moved) next.delete(path);
+        return next;
+      });
+    }
+  }
+
+  /**
    * Folded unless the reviewer said otherwise.
+   *
+   * Three rules fold a card, and they are the same idea three times: this is
+   * not what the reviewer is here to read.
    *
    * A generated file, and a file whose every change turned out to be
    * whitespace, both cost a header's height and nothing more until they are
-   * asked for — which is the whole point: four thousand lines of lockfile
-   * between two files somebody wrote is how a real change gets skimmed past.
+   * asked for — four thousand lines of lockfile between two files somebody
+   * wrote is how a real change gets skimmed past.
+   *
+   * A file marked viewed is the third, and it is the one that also fires
+   * mid-review: ticking the box folds the card on the spot, and a reload finds
+   * it folded because GitHub remembers the tick. It is not a persisted
+   * interface preference — nothing here persists one, see `ModeSwitcher` — it
+   * is read off the same state the checkbox draws itself from.
    *
    * A file the rewrite merely *shortened* is not folded. There is still a diff
    * in it worth reading, and it is already marked.
    *
-   * The reviewer's own fold beats the default both ways, so a card they opened
-   * stays open and one they closed stays closed.
+   * **A file with a comment still in flight is not folded either**, and that
+   * exception is not symmetry. An entry in `posting` is writing that is on
+   * GitHub nowhere; if the post fails, the alert saying so is drawn on that
+   * card. Folding it because the reviewer ticked the box on their way past
+   * would hide a failure they have no other way to hear about. The fold is
+   * only withheld — an explicit press still folds it, because that is a
+   * decision rather than a side effect.
+   *
+   * The reviewer's own fold beats every default both ways, so a card they
+   * opened stays open and one they closed stays closed.
    */
   const collapsed = useMemo(() => {
     const built = new Set<string>();
     for (const file of files) {
+      const unsent = session.posting.some((entry) => entry.path === file.path);
       const byRule =
-        !shown.has(file.path) &&
-        (flags.get(file.path) === 'generated' ||
-          recomputed.get(file.path)?.hunks === 0);
+        !unsent &&
+        (viewedNow.get(file.path) === 'VIEWED' ||
+          (!shown.has(file.path) &&
+            (flags.get(file.path) === 'generated' ||
+              recomputed.get(file.path)?.hunks === 0)));
       if (folds.get(file.path) ?? byRule) built.add(file.path);
     }
     return built;
-  }, [files, folds, flags, recomputed, shown]);
+  }, [files, folds, flags, recomputed, shown, viewedNow, session.posting]);
 
   /**
    * The list as it is *drawn*, which is the list `files` is not.
