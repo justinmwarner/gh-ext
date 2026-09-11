@@ -227,12 +227,25 @@ function ReplyBox({ thread }: { thread: ReviewThread }) {
   const inFlight = session.sending.has(thread.id);
   const empty = body.trim() === '';
 
+  /**
+   * Send the reply and empty the box in the same breath.
+   *
+   * Cleared on the press rather than on the answer, which is the same trade
+   * the composer makes: the reply is already drawn above as a "Sending…"
+   * comment, so a box still holding the identical text underneath it is the
+   * words on screen twice for the length of a round trip.
+   *
+   * Nothing is thrown away by doing it early. A refused reply is put straight
+   * back — and only into a box the reviewer has not since typed into, because
+   * overwriting live text to restore an old draft is a worse mistake than the
+   * one this is recovering from. The thread's own error sits beside it.
+   */
   const send = () => {
     if (empty || inFlight) return;
-    void session.reply(thread.id, body).then((posted) => {
-      // Only clear on success. Throwing away what someone wrote because
-      // the network blinked is not a recoverable mistake.
-      if (posted) setBody('');
+    const sent = body;
+    setBody('');
+    void session.reply(thread.id, sent).then((posted) => {
+      if (!posted) setBody((current) => (current === '' ? sent : current));
     });
   };
 

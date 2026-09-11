@@ -68,6 +68,15 @@ function answersPublish(reviewId = 'PRR_transient') {
   );
 }
 
+/** A promise this test decides when to settle, for asserting on mid-flight. */
+function deferred<T>() {
+  let settle: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, settle };
+}
+
 /** Which call carried ADD_THREAD. The publish path puts START_REVIEW ahead of it. */
 const threadCall = (): number =>
   requestMock.mock.calls.findIndex((call) => call[0]?.document !== START_REVIEW);
@@ -181,17 +190,46 @@ describe('Composer', () => {
 
   it('keeps the draft when the post fails', async () => {
     // The rule the whole draft store exists for: a failed mutation must never
-    // discard what someone typed.
+    // discard what someone typed. The box no longer waits around to be the
+    // thing that holds it — the draft on disk and the entry in `posting` do —
+    // but the writing has to survive either way.
     requestMock.mockResolvedValue(FAILURE);
-    const { store, onClose } = mount();
+    const { store } = mount();
 
     await userEvent.type(box(), 'a comment worth keeping');
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
 
-    await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
+    await waitFor(() => expect(requestMock).toHaveBeenCalled());
     expect(await store.get(KEY)).toBe('a comment worth keeping');
-    expect(box().value).toBe('a comment worth keeping');
-    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes on the press rather than on the reply', async () => {
+    // The bug this whole path was rewritten for. Publishing one comment is
+    // three round trips and the thread arrives from the second, so a box that
+    // waited for the third sat on screen beside the finished comment showing
+    // the same words — and then re-laid the row out again when it closed.
+    const { promise, settle } = deferred<unknown>();
+    requestMock.mockReturnValue(promise);
+    const { onClose } = mount();
+
+    await userEvent.type(box(), 'a comment');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+
+    // Nothing has answered, and the composer has gone anyway.
+    expect(onClose).toHaveBeenCalled();
+    settle(FAILURE);
+  });
+
+  it('offers Comment rather than a spinner, because there is nothing to wait for', async () => {
+    const { promise, settle } = deferred<unknown>();
+    requestMock.mockReturnValue(promise);
+    mount();
+
+    await userEvent.type(box(), 'a comment');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+
+    expect(screen.queryByRole('button', { name: /posting/i })).toBeNull();
+    settle(FAILURE);
   });
 
   it('clears the draft only after the post succeeds', async () => {

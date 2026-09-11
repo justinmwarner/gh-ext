@@ -64,9 +64,11 @@ import {
   NO_ATTRIBUTES,
   isGenerated,
 } from '@/lib/review/generated';
+import { type PostingComment, postsOnPath } from '@/lib/review/posting';
 import { Composer } from './Composer';
 import { FileBody, hasBodyContent } from './FileBody';
 import { FileCard } from './FileCard';
+import { PostingCard } from './PostingCard';
 import { ThreadCard } from './ThreadCard';
 import { type ComposerTarget, composerFor } from './composerAnchor';
 import { type CardTop, type CurrentFile, shouldScrollDiff, topmostFile } from './currentFile';
@@ -81,12 +83,14 @@ import {
   showsTextDiff,
 } from './diffItems';
 import type { ReviewFile } from './reviewFiles';
-import { NEW_THREAD, useReviewSession } from './reviewSession';
+import { useReviewSession } from './reviewSession';
 import {
   type AnnotationMetadata,
   type ComposerMetadata,
   type FileThreadLayout,
   type ListedThread,
+  type PostingMetadata,
+  type RenderedLines,
   type ThreadMetadata,
   isRenderedLine,
   layoutThreads,
@@ -316,6 +320,9 @@ const NO_ANNOTATIONS: DiffLineAnnotation<AnnotationMetadata>[] = [];
 /** One empty list, so a card with no listed threads never gets a new array. */
 const NO_LISTED: readonly ListedThread[] = [];
 const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: NO_LISTED };
+
+/** Shared, so a file with no comment in flight allocates nothing for one. */
+const NO_POSTING: readonly PostingComment[] = [];
 
 /**
  * The two questions only the renderer can answer about a hydrated diff.
@@ -660,25 +667,119 @@ export function DiffColumn({
     // outside or the memo would never be asked the question again.
   }, [files, drawnByPath, session.byPath, expansion, sidesKey]);
 
+  /**
+   * Annotation metadata for the comments in flight, kept alive the same way
+   * the threads' is.
+   *
+   * Keyed by the entry's id rather than by the entry, so a post that fails —
+   * which rewrites the entry to carry the reason — does not read to Pierre as
+   * a different annotation and rebuild the row. The card is already re-rendering
+   * to show the error; the row it sits in should not move.
+   */
+  const postingMetadata = useRef(new Map<string, PostingMetadata>());
+
+  /**
+   * Where each comment in flight is drawn, and which cannot be drawn in place.
+   *
+   * The same three gates `layoutThreads` applies to a thread, for the same
+   * reason and with the same consequence for getting it wrong: Pierre discards
+   * an annotation outside a rendered hunk in silence, and a failed post that
+   * is silently discarded is the reviewer's own writing gone with no message
+   * anywhere. Anything that cannot be anchored is listed in the file's body
+   * instead — see `FileBody`.
+   *
+   * Nearly always the first branch. An entry is created from a composer that
+   * was open on a visible line moments earlier; it takes changing the diff on
+   * screen while a post is in flight, or while a failed one is still sitting
+   * there, to reach the second.
+   *
+   * Kept out of the `layouts` memo above deliberately. That one is cached per
+   * file on a signature, and folding a short-lived entry into it would make
+   * every post invalidate a thread layout that had not moved.
+   */
+  const postings = useMemo(() => {
+    const built = new Map<
+      string,
+      {
+        annotations: DiffLineAnnotation<AnnotationMetadata>[];
+        listed: PostingComment[];
+      }
+    >();
+    if (session.posting.length === 0) return built;
+
+    for (const file of files) {
+      const entries = postsOnPath(session.posting, file.path);
+      if (entries.length === 0) continue;
+
+      const lines = renderedLines(fileDiffFor(file));
+      const open = revealed.current.get(file.path);
+      const drawnFile = drawnByPath.get(file.path);
+      const drawn =
+        drawnFile !== undefined && drawnFile !== file
+          ? renderedLines(fileDiffFor(drawnFile))
+          : null;
+
+      const annotations: DiffLineAnnotation<AnnotationMetadata>[] = [];
+      const listed: PostingComment[] = [];
+
+      for (const entry of entries) {
+        const side = entry.anchor.side === 'LEFT' ? 'deletions' : 'additions';
+        const { line } = entry.anchor;
+        // Expanded context counts, exactly as it does for a thread: those rows
+        // are on screen and no hunk header says so.
+        const shown = (at: RenderedLines): boolean =>
+          isRenderedLine(at, side, line) ||
+          (side === 'additions' && (open?.has(line) ?? false));
+
+        if (!sides[side] || !shown(lines) || (drawn !== null && !shown(drawn))) {
+          listed.push(entry);
+          continue;
+        }
+
+        let memoized = postingMetadata.current.get(entry.id);
+        if (memoized === undefined) {
+          memoized = { kind: 'posting', postId: entry.id };
+          postingMetadata.current.set(entry.id, memoized);
+        }
+        annotations.push({ side, lineNumber: line, metadata: memoized });
+      }
+
+      built.set(file.path, { annotations, listed });
+    }
+    return built;
+    // `expansion` for the same reason as above: hydration rewrites the parsed
+    // diff in place, so only a provoked render asks this question again.
+  }, [files, drawnByPath, session.posting, expansion, sidesKey]);
+
   const annotationsByPath = useMemo(() => {
     const built = new Map<string, DiffLineAnnotation<AnnotationMetadata>[]>();
     for (const [path, layout] of layouts) {
+      const inFlight = postings.get(path)?.annotations ?? NO_ANNOTATIONS;
+      const composing = composer !== null && composer.path === path;
+      // The untouched array whenever there is nothing to add to it. A fresh
+      // one for a file that did not move re-versions the item and re-renders
+      // the whole card.
       built.set(
         path,
-        composer !== null && composer.path === path
-          ? [
+        inFlight.length === 0 && !composing
+          ? layout.annotations
+          : [
               ...layout.annotations,
-              {
-                side: composer.side,
-                lineNumber: composer.lineNumber,
-                metadata: composerMetadata.current,
-              },
-            ]
-          : layout.annotations,
+              ...inFlight,
+              ...(composing
+                ? [
+                    {
+                      side: composer.side,
+                      lineNumber: composer.lineNumber,
+                      metadata: composerMetadata.current,
+                    },
+                  ]
+                : []),
+            ],
       );
     }
     return built;
-  }, [layouts, composer]);
+  }, [layouts, postings, composer]);
 
   /**
    * The mode every file is actually in, resolved rather than stored.
@@ -718,10 +819,11 @@ export function DiffColumn({
     const built = new Set<string>();
     for (const file of drawnFiles) {
       const listed = layouts.get(file.path)?.listed ?? NO_LISTED;
-      if (hasBodyContent(listed)) built.add(file.path);
+      const unplaceable = postings.get(file.path)?.listed ?? NO_POSTING;
+      if (hasBodyContent(listed, unplaceable)) built.add(file.path);
     }
     return built;
-  }, [drawnFiles, layouts, recomputed]);
+  }, [drawnFiles, layouts, postings, recomputed]);
 
   const items = useMemo(
     () => codeViewItems(drawnFiles, collapsed, annotationsByPath, modes, withBody),
@@ -813,7 +915,6 @@ export function DiffColumn({
    */
   const openComposer = useRef((path: string, range: SelectedLineRange) => {});
   openComposer.current = (path, range) => {
-    session.clearFailure(NEW_THREAD);
     const target = composerFor(path, range, sides);
     if (target === null) {
       // Nothing on screen to attach even the explanation to. Saying so here is
@@ -830,9 +931,8 @@ export function DiffColumn({
   };
 
   const closeComposer = useCallback(() => {
-    session.clearFailure(NEW_THREAD);
     setComposer(null);
-  }, [session]);
+  }, []);
 
   /**
    * Hunk navigation, as an index into every hunk in the column.
@@ -1065,6 +1165,7 @@ export function DiffColumn({
     ) => {
       const meta = annotation.metadata;
       if (meta.kind === 'thread') return <ThreadCard threadId={meta.threadId} />;
+      if (meta.kind === 'posting') return <PostingCard postId={meta.postId} />;
       // Which file this is comes from the item rather than from the metadata,
       // so one frozen `{ kind: 'body' }` can be shared by every card.
       if (meta.kind === 'body') {
@@ -1075,6 +1176,7 @@ export function DiffColumn({
             file={file}
             mode={modes.get(file.path) ?? RAW.id}
             unanchored={layouts.get(file.path)?.listed ?? NO_LISTED}
+            posting={postings.get(file.path)?.listed ?? NO_POSTING}
             blobs={blobs}
           />
         );
@@ -1090,7 +1192,17 @@ export function DiffColumn({
         />
       );
     },
-    [composer, composerLines, closeComposer, byPath, modes, recomputed, layouts, blobs],
+    [
+      composer,
+      composerLines,
+      closeComposer,
+      byPath,
+      modes,
+      recomputed,
+      layouts,
+      postings,
+      blobs,
+    ],
   );
 
   /**

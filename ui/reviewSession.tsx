@@ -47,14 +47,19 @@ import type {
   ReviewThread,
 } from '@/lib/github/types';
 import { type JsonValue, type PrRef, type PullRequestNode, message } from '@/lib/messages';
-import type { DraftStore } from '@/lib/review/drafts';
+import { type DraftLocation, type DraftStore } from '@/lib/review/drafts';
 import { type PendingReviewState, initialState, reduce } from '@/lib/review/pending-review';
+import {
+  type PostingComment,
+  beginPost,
+  dropPost,
+  failPost,
+  nextPostId,
+  retryPost,
+} from '@/lib/review/posting';
 import type { CommentAnchor } from '@/lib/review/selection';
 import { request } from './background';
 import { draftStore } from './draftStore';
-
-/** The failure key for a comment that has no thread to hang off yet. */
-export const NEW_THREAD = 'new-thread';
 
 /**
  * Failure keys for the review itself.
@@ -124,6 +129,21 @@ export interface NewThreadInput {
   anchor: CommentAnchor;
 }
 
+/**
+ * What happened to one comment, reported rather than written to state.
+ *
+ * The two paths that write a comment used to fail against a page-level key of
+ * their own, which was fine while a composer was still on screen to show it.
+ * It is not fine now: the box closes on the press, so the message belongs on
+ * the entry in `posting` — and only the caller knows which entry that is. So
+ * they say what happened and `postThread` decides where it goes.
+ *
+ * `ok` is not "published" — see `publishThread`, which reports success for a
+ * comment that reached GitHub but is sitting on a review it could not submit.
+ * The comment exists either way, which is the question this answers.
+ */
+type PostOutcome = { ok: true } | { ok: false; message: string };
+
 export interface ReviewSessionValue {
   /** The pull request's node id — what a review is opened against. */
   prId: string;
@@ -143,12 +163,27 @@ export interface ReviewSessionValue {
   unpublished: ReadonlySet<string>;
   drafts: DraftStore;
   /**
-   * Keyed by thread id, by `NEW_THREAD` for the composer, by `REVIEW_START` /
-   * `REVIEW_SUBMIT` for the review itself, and by `viewedKey(path)`.
+   * Keyed by thread id, by `REVIEW_START` / `REVIEW_SUBMIT` for the review
+   * itself, by `commentKey(id)` and by `viewedKey(path)`.
+   *
+   * A new comment is not in here. It is posted optimistically, so by the time
+   * it can fail its composer has closed and a page-level message would have
+   * nowhere to appear and nothing to identify which of the reviewer's three
+   * comments it was about. Its reason goes on the entry in `posting`, which
+   * is drawn on the line the comment was written on.
    */
   failures: ReadonlyMap<string, string>;
   /** Reply bodies still in flight, keyed by thread id. */
   sending: ReadonlyMap<string, string>;
+  /**
+   * New comments on their way to GitHub, and the ones that did not get there.
+   *
+   * The optimistic half of posting a comment. An entry appears the instant the
+   * reviewer presses the button and is replaced by the real thread in the same
+   * render that adds it, so the line never holds both. An entry with an
+   * `error` is a comment that exists nowhere else — see `lib/review/posting.ts`.
+   */
+  posting: readonly PostingComment[];
   /**
    * Viewed states this session has changed, keyed by path.
    *
@@ -195,7 +230,29 @@ export interface ReviewSessionValue {
    * seen from.
    */
   deleteComment(commentId: string): Promise<boolean>;
+  /**
+   * Write a new comment, optimistically.
+   *
+   * Returns as soon as the entry is on screen rather than when GitHub has it,
+   * and the caller is expected not to wait: the composer closes on the press.
+   * The promise is still there, resolving to whether it landed, because the
+   * tests assert on the settled state and a retry needs something to await.
+   *
+   * Nothing is lost by not waiting. Until GitHub answers, the comment is an
+   * entry in {@link ReviewSessionValue.posting} drawn on its own line; if the
+   * post fails the entry stays there, holding the words, with the reason on it
+   * and a retry beside it.
+   */
   postThread(input: NewThreadInput): Promise<boolean>;
+  /** Send a failed comment again. Does nothing to one already in flight. */
+  retryPost(postId: string): Promise<boolean>;
+  /**
+   * Throw away a comment that could not be posted, and its saved draft.
+   *
+   * The only thing on this page that deliberately destroys the reviewer's own
+   * writing, so it is never called except from a control they pressed.
+   */
+  discardPost(postId: string): void;
   /** Open a PENDING review for later comments to attach to. */
   startReview(): Promise<boolean>;
   /** Submit the pending review. False leaves it pending, untouched. */
@@ -420,6 +477,7 @@ export function ReviewSessionProvider({
     () => new Map(),
   );
   const [sending, setSending] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [posting, setPosting] = useState<readonly PostingComment[]>(() => []);
   const [viewed, setViewedStates] = useState<ReadonlyMap<string, FileViewedState>>(
     () => new Map(),
   );
@@ -511,6 +569,8 @@ export function ReviewSessionProvider({
   commentingNow.current = commentInFlight;
   const queuedNow = useRef(queued);
   queuedNow.current = queued;
+  const postingNow = useRef(posting);
+  postingNow.current = posting;
   const unpublishedNow = useRef(unpublished);
   unpublishedNow.current = unpublished;
 
@@ -1002,10 +1062,22 @@ export function ReviewSessionProvider({
     [mutate],
   );
 
+  /**
+   * Adopt the thread GitHub just made, and retire the entry standing in for it.
+   *
+   * Both in one call, and that is the whole point of the call existing. React
+   * batches the two updates into a single commit, so the annotation array for
+   * that file changes exactly once and the row swaps the optimistic card for
+   * the real one in place. Done as two steps a round trip apart — which is
+   * what this used to be — the line holds the finished comment *and* the thing
+   * that was standing in for it, showing the same words twice, and then
+   * re-lays out a second time when the stand-in goes.
+   */
   const takeThread = useCallback(
-    (data: JsonValue): ReviewThread | null => {
+    (data: JsonValue, postId: string): ReviewThread | null => {
       const created = readThread(field(data, 'addPullRequestReviewThread', 'thread'));
       if (created !== null) setLive((list) => [...list, created]);
+      setPosting((list) => dropPost(list, postId));
       return created;
     },
     [],
@@ -1013,22 +1085,25 @@ export function ReviewSessionProvider({
 
   /** Add one comment to the review the reviewer opened. It stays unposted. */
   const queueThread = useCallback(
-    async (reviewId: string, input: NewThreadInput): Promise<boolean> => {
+    async (
+      reviewId: string,
+      input: NewThreadInput,
+      postId: string,
+    ): Promise<PostOutcome> => {
       const added = await addThread(reviewId, input);
       if (!added.ok) {
-        fail(NEW_THREAD, `Posting this comment failed: ${added.error.message}`);
-        return false;
+        return { ok: false, message: `Posting this comment failed: ${added.error.message}` };
       }
 
-      const created = takeThread(added.data.data);
+      const created = takeThread(added.data.data, postId);
       if (created !== null) {
         markUnpublished(created.id);
         markQueued(created.comments.nodes.map((comment) => comment.id));
       }
       dispatch({ type: 'comment-added' });
-      return true;
+      return { ok: true };
     },
-    [addThread, fail, markQueued, markUnpublished, takeThread],
+    [addThread, markQueued, markUnpublished, takeThread],
   );
 
   /**
@@ -1058,16 +1133,16 @@ export function ReviewSessionProvider({
    *   footer — which is now on screen, and is where the review gets submitted.
    */
   const publishThread = useCallback(
-    async (input: NewThreadInput): Promise<boolean> => {
+    async (input: NewThreadInput, postId: string): Promise<PostOutcome> => {
       const opened = await openOrJoinReview();
       if (!opened.ok) {
-        fail(
-          NEW_THREAD,
-          opened.kind === 'refused'
-            ? `Posting this comment failed: ${opened.message}`
-            : `Posting this comment failed. ${NO_REVIEW_ID}`,
-        );
-        return false;
+        return {
+          ok: false,
+          message:
+            opened.kind === 'refused'
+              ? `Posting this comment failed: ${opened.message}`
+              : `Posting this comment failed. ${NO_REVIEW_ID}`,
+        };
       }
       const { reviewId } = opened;
 
@@ -1086,8 +1161,8 @@ export function ReviewSessionProvider({
        */
       if (opened.joined) {
         dispatch({ type: 'review-resumed', reviewId, commentCount: 0 });
-        const queued = await queueThread(reviewId, input);
-        if (queued) {
+        const queued = await queueThread(reviewId, input, postId);
+        if (queued.ok) {
           fail(
             REVIEW_SUBMIT,
             'You already had a review open on GitHub, so this comment was ' +
@@ -1101,14 +1176,14 @@ export function ReviewSessionProvider({
       const added = await addThread(reviewId, input);
       if (!added.ok) {
         dispatch({ type: 'review-started', reviewId });
-        fail(
-          NEW_THREAD,
-          `Posting this comment failed: ${added.error.message} A review was ` +
+        return {
+          ok: false,
+          message:
+            `Posting this comment failed: ${added.error.message} A review was ` +
             'opened to hold it and is still open — submit or discard it below.',
-        );
-        return false;
+        };
       }
-      const created = takeThread(added.data.data);
+      const created = takeThread(added.data.data, postId);
 
       const submitted = await mutate(SUBMIT_REVIEW, {
         pullRequestReviewId: reviewId,
@@ -1126,7 +1201,13 @@ export function ReviewSessionProvider({
           `Your comment was saved but has not been posted: ${submitted.error.message} ` +
             'It is queued on a pending review — submit that review below to post it.',
         );
-        return true;
+        // Success, on purpose. The comment reached GitHub — `takeThread` has
+        // already put the real thread on the line — so reporting a failure
+        // here would leave the entry in `posting` holding a second copy of
+        // words that are now on the pull request, offering to send them again.
+        // The thing that went wrong is the review, and it is said on the
+        // footer, which the `review-started` above has just put on screen.
+        return { ok: true };
       }
 
       // The review this thread was written into existed for the two round
@@ -1135,7 +1216,7 @@ export function ReviewSessionProvider({
       // an unsubmitted review. Without this the reviewer posts a comment and
       // finds Resolve greyed out on it until they reload.
       if (created !== null) await republish([created.id]);
-      return true;
+      return { ok: true };
     },
     [
       addThread,
@@ -1150,15 +1231,113 @@ export function ReviewSessionProvider({
     ],
   );
 
+  /**
+   * Where a comment's draft lives, for the one copy that outlives this page.
+   *
+   * The composer writes the draft before handing the comment over and no
+   * longer waits around to clear it, so clearing it is this file's job now.
+   * Built from the same three fields the composer used, which is what makes
+   * the two agree — see `draftKey`.
+   */
+  const draftFor = useCallback(
+    ({ path, anchor }: NewThreadInput): DraftLocation => ({
+      prId,
+      path,
+      line: anchor.line,
+      side: anchor.side,
+    }),
+    [prId],
+  );
+
+  /**
+   * Send one entry from `posting`, and record what happened to it.
+   *
+   * Shared by the first attempt and every retry, so a retry cannot drift from
+   * the thing it is retrying. The entry is the argument rather than the id
+   * because the caller has just put it there and reading it back out of state
+   * would be reading a render-old copy.
+   */
+  const sendPost = useCallback(
+    async (postId: string, input: NewThreadInput): Promise<boolean> => {
+      const state = pendingNow.current;
+      let outcome: PostOutcome;
+      try {
+        outcome =
+          state.kind === 'pending'
+            ? await queueThread(state.reviewId, input, postId)
+            : await publishThread(input, postId);
+      } catch (error: unknown) {
+        // Nothing below this is allowed to throw past here. The composer has
+        // closed, so an escaping error would leave the entry saying "Sending…"
+        // for the rest of the session with no retry, no discard and no
+        // explanation — the words on screen and unreachable. A thrown error is
+        // a failed post like any other; it just has to say less about why.
+        outcome = {
+          ok: false,
+          message:
+            'Posting this comment failed before GitHub could answer: ' +
+            `${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+
+      if (!outcome.ok) {
+        // The entry stays, holding the words, and so does the draft on disk.
+        // Between them the comment survives a failed post, a closed tab and a
+        // restarted browser, which is what principle 4 asks for.
+        setPosting((list) => failPost(list, postId, outcome.message));
+        return false;
+      }
+
+      // GitHub has the comment, so the draft is a second copy of something
+      // already posted. Left behind, it would seed the next composer opened on
+      // that line with a comment the reviewer already made.
+      void drafts.clear(draftFor(input)).catch(() => undefined);
+      return true;
+    },
+    [draftFor, drafts, publishThread, queueThread],
+  );
+
   const postThread = useCallback(
     (input: NewThreadInput): Promise<boolean> => {
-      clearFailure(NEW_THREAD);
-      const state = pendingNow.current;
-      return state.kind === 'pending'
-        ? queueThread(state.reviewId, input)
-        : publishThread(input);
+      // Before the first `await` in `sendPost`, so the entry is on screen in
+      // the same commit as the press that made it. This is the whole of
+      // "optimistic": the caller closes its composer without waiting, and the
+      // words it was holding are already drawn on the line underneath it.
+      const postId = nextPostId();
+      setPosting((list) => beginPost(list, postId, input));
+      return sendPost(postId, input);
     },
-    [clearFailure, publishThread, queueThread],
+    [sendPost],
+  );
+
+  const retryPostById = useCallback(
+    (postId: string): Promise<boolean> => {
+      const entry = postingNow.current.find((candidate) => candidate.id === postId);
+      // Only a failed entry can be retried. A second press while one is in
+      // flight would post the comment twice, which is the one mistake a retry
+      // button is uniquely able to make.
+      if (entry === undefined || entry.error === null) return Promise.resolve(false);
+
+      setPosting((list) => retryPost(list, postId));
+      return sendPost(postId, entry);
+    },
+    [sendPost],
+  );
+
+  const discardPost = useCallback(
+    (postId: string): void => {
+      const entry = postingNow.current.find((candidate) => candidate.id === postId);
+      // In flight is not discardable. The request is already out and GitHub
+      // may well accept it, so taking the entry away would hide a comment
+      // that is about to be on the pull request.
+      if (entry === undefined || entry.error === null) return;
+
+      setPosting((list) => dropPost(list, postId));
+      // The saved copy goes too, or the next composer on that line would open
+      // holding the comment the reviewer just threw away.
+      void drafts.clear(draftFor(entry)).catch(() => undefined);
+    },
+    [draftFor, drafts],
   );
 
   /**
@@ -1381,6 +1560,7 @@ export function ReviewSessionProvider({
       drafts,
       failures,
       sending,
+      posting,
       viewed,
       viewedInFlight,
       resolveInFlight,
@@ -1391,6 +1571,8 @@ export function ReviewSessionProvider({
       editComment,
       deleteComment,
       postThread,
+      retryPost: retryPostById,
+      discardPost,
       startReview,
       submitReview,
       discardReview,
@@ -1408,6 +1590,7 @@ export function ReviewSessionProvider({
       drafts,
       failures,
       sending,
+      posting,
       viewed,
       viewedInFlight,
       resolveInFlight,
@@ -1418,6 +1601,8 @@ export function ReviewSessionProvider({
       editComment,
       deleteComment,
       postThread,
+      retryPostById,
+      discardPost,
       startReview,
       submitReview,
       discardReview,

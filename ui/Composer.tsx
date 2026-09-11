@@ -18,13 +18,20 @@
  * The draft is written on a pause and again immediately before posting, and is
  * cleared only once GitHub has the comment. A failed mutation must never
  * discard what someone typed.
+ *
+ * **The post is not awaited.** This box closes on the press and the comment
+ * appears on the line in its place, because publishing one is three round
+ * trips and sometimes four and nobody should watch them. `session.postThread`
+ * owns everything after that, including clearing the draft — it is the half
+ * that learns whether GitHub took the comment, and it keeps the words on
+ * screen if it did not.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import type { DraftLocation } from '@/lib/review/drafts';
 import type { CommentAnchor } from '@/lib/review/selection';
 import type { ComposerRejection } from './composerAnchor';
-import { NEW_THREAD, useReviewSession } from './reviewSession';
+import { useReviewSession } from './reviewSession';
 import { useShortcutTarget } from './shortcutTargets';
 import { suggestionBlock } from './suggestion';
 
@@ -72,9 +79,6 @@ export function Composer({
 }: ComposerProps) {
   const session = useReviewSession();
   const [body, setBody] = useState('');
-  const [posting, setPosting] = useState(false);
-  const failure = session.failures.get(NEW_THREAD);
-
   const location: DraftLocation | null =
     anchor === null
       ? null
@@ -117,37 +121,36 @@ export function Composer({
   const empty = body.trim() === '';
   const usable = anchor !== null && rejection === null && location !== null;
 
-  const submit = async (): Promise<void> => {
+  /**
+   * Hand the comment over and get out of the way.
+   *
+   * Nothing is awaited, and that is the change this whole box exists around.
+   * Publishing a single comment is three round trips and often four, and this
+   * used to sit on "Posting…" through all of them — with the finished thread
+   * arriving from the *second*, so the line held the comment and the composer
+   * showing the same words at the same time, and then re-laid out again when
+   * the box finally closed.
+   *
+   * `postThread` puts the comment on the line before it awaits anything, so
+   * closing here is not a guess about what GitHub will say. If the post fails,
+   * the entry it left behind keeps the words, carries the reason, and offers
+   * to send them again — see `PostingCard`. There is nothing left for this
+   * component to report, which is why there is no longer a `posting` state.
+   */
+  const submit = (): void => {
     // `usable` is a boolean rather than a type predicate, so the two nulls are
     // named again here — for the compiler, and for anyone reading this alone.
-    if (empty || posting || rejection !== null || anchor === null || location === null) {
-      return;
-    }
-    setPosting(true);
-    try {
-      // Written before the request, so a failure anywhere after this point
-      // still leaves the text on disk. Saving is a convenience and posting is
-      // the job, so a storage failure is swallowed rather than allowed to
-      // cancel the post — extension storage has a quota, and hitting it must
-      // not cost the reviewer the comment they just wrote.
-      await save(location, body);
-      const posted = await session.postThread({ path, body, anchor });
-      if (!posted) return;
-      await clear(location);
-      onClose();
-    } finally {
-      // In a `finally` because anything thrown above escapes into a `void`
-      // call with nobody to catch it, and the button would stay on "Posting…"
-      // for good — with Cancel, which discards the text, the only way out.
-      setPosting(false);
-    }
-  };
+    if (empty || rejection !== null || anchor === null || location === null) return;
 
-  /** Draft bookkeeping, which is never worth failing a post over. */
-  const save = (at: DraftLocation, text: string): Promise<void> =>
-    session.drafts.save(at, text).catch(() => undefined);
-  const clear = (at: DraftLocation): Promise<void> =>
-    session.drafts.clear(at).catch(() => undefined);
+    // Written before the request, and no longer cleared here. A draft is the
+    // copy that survives the tab closing, so it is the session — which knows
+    // whether GitHub took the comment — that decides when it may go.
+    // Deliberately not awaited either: extension storage has a quota, and
+    // hitting it must not cost the reviewer the comment they just wrote.
+    void session.drafts.save(location, body).catch(() => undefined);
+    void session.postThread({ path, body, anchor });
+    onClose();
+  };
 
   /**
    * `Mod+Enter` posts this comment.
@@ -159,11 +162,7 @@ export function Composer({
    */
   useShortcutTarget(
     'submit-comment',
-    usable && !empty && !posting
-      ? () => {
-          void submit();
-        }
-      : null,
+    usable && !empty ? submit : null,
   );
 
   if (anchor === null || rejection !== null) {
@@ -201,12 +200,6 @@ export function Composer({
         onChange={(event) => setBody(event.target.value)}
       />
 
-      {failure !== undefined && (
-        <p role="alert" className="composer-error">
-          {failure}
-        </p>
-      )}
-
       <div className="composer-actions">
         <button
           type="button"
@@ -234,12 +227,10 @@ export function Composer({
         <button
           type="button"
           className="button primary composer-post"
-          disabled={empty || posting}
-          onClick={() => {
-            void submit();
-          }}
+          disabled={empty}
+          onClick={submit}
         >
-          {posting ? 'Posting…' : queued ? 'Add to review' : 'Comment'}
+          {queued ? 'Add to review' : 'Comment'}
         </button>
       </div>
     </section>

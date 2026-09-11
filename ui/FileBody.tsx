@@ -20,8 +20,10 @@
  */
 
 import { RAW } from '@/lib/compare/modes';
+import type { PostingComment } from '@/lib/review/posting';
 import { type WhitespaceDiff, whitespaceNotice } from '@/lib/review/whitespace';
 import type { BlobRefs } from './blobLoader';
+import { PostingCard } from './PostingCard';
 import { RichCompare } from './RichCompare';
 import { UnanchoredThreads } from './UnanchoredThreads';
 import { fileBody } from './diffItems';
@@ -34,11 +36,21 @@ export interface FileBodyProps {
   mode: string;
   /** Threads on this file that the diff cannot draw. */
   unanchored: readonly ListedThread[];
+  /**
+   * Comments in flight on this file whose line the diff cannot draw either.
+   *
+   * The rare half of an optimistic post: the reviewer changed what is on
+   * screen while one was in the air, or while a failed one was still waiting
+   * to be dealt with. The entry holds writing that is on GitHub nowhere, so
+   * losing it off the bottom of a hunk is the worst outcome available — this
+   * is the same safety net `UnanchoredThreads` is, for the same reason.
+   */
+  posting: readonly PostingComment[];
   /** The two commits a rich comparison reads whole files from. */
   blobs: BlobRefs | null;
 }
 
-export function FileBody({ file, mode, unanchored, blobs }: FileBodyProps) {
+export function FileBody({ file, mode, unanchored, posting, blobs }: FileBodyProps) {
   const body = fileBody(file);
   const raw = mode === RAW.id;
 
@@ -56,6 +68,20 @@ export function FileBody({ file, mode, unanchored, blobs }: FileBodyProps) {
 
       <RichCompare file={file} mode={mode} refs={blobs} />
 
+      {posting.length > 0 && (
+        <ul className="unplaceable-posting" data-unplaceable-posting={file.path}>
+          {posting.map((entry) => (
+            <li key={entry.id}>
+              <p className="unanchored-reason">
+                {`This comment was written on line ${entry.anchor.line}, which the ` +
+                  'diff on screen is not showing. It is here so it is not lost.'}
+              </p>
+              <PostingCard postId={entry.id} />
+            </li>
+          ))}
+        </ul>
+      )}
+
       <UnanchoredThreads path={file.path} threads={unanchored} />
     </div>
   );
@@ -72,11 +98,18 @@ export function FileBody({ file, mode, unanchored, blobs }: FileBodyProps) {
  * A rich comparison is not asked about here: it always has a body, and the
  * column knows that from the mode without consulting this.
  *
- * One condition rather than two, since the whitespace caveat moved onto the
+ * The whitespace caveat is not one of the conditions, since it moved onto the
  * header: with the setting on for the whole pull request, that used to mean
  * every text file in it grew an annotation, which is precisely the strip of
  * chrome this predicate exists to avoid.
+ *
+ * A comment in flight that could not be anchored is the second condition, and
+ * it is the one that must never be forgotten: without it the body is left off
+ * the card entirely and the entry is drawn nowhere at all.
  */
-export function hasBodyContent(unanchored: readonly ListedThread[]): boolean {
-  return unanchored.length > 0;
+export function hasBodyContent(
+  unanchored: readonly ListedThread[],
+  posting: readonly PostingComment[] = [],
+): boolean {
+  return unanchored.length > 0 || posting.length > 0;
 }

@@ -1865,7 +1865,60 @@ button.scope-showing:hover {
 }
 
 .thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 8px;
+}
+
+/* -------------------------------------------------- a comment in flight */
+
+/*
+ * The card standing in for a comment between the press and GitHub's answer.
+ *
+ * Deliberately the same shape as a real thread — `.thread` above does the
+ * border, the radius and the background — because the real one replaces it in
+ * place. A card that changed size when the server answered would put back the
+ * re-layout the optimistic post exists to remove, one step further along.
+ *
+ * So the only difference while it is in flight is `.comment-sending`'s
+ * opacity, which the reply box has used for the same purpose for as long as
+ * there has been one.
+ */
+.thread-posting {
+  border-style: dashed;
+}
+
+/*
+ * Failed, and now the only copy of the comment on screen.
+ *
+ * Solid and in the danger colour, because this is no longer a transient state
+ * that will resolve itself: it is writing that is on GitHub nowhere and needs
+ * the reviewer to do something. The alert inside it carries the reason; this
+ * is what makes the card findable while scrolling past.
+ */
+.thread-posting-failed {
+  border-style: solid;
+  border-color: var(--danger-fg);
+}
+
+/* Back to full strength once it has stopped sending. The dimming means "not
+   there yet"; on a failed card it would mean "not important". */
+.thread-posting-failed .comment-sending {
+  opacity: 1;
+}
+
+/*
+ * A comment in flight on a line this diff is not drawing.
+ *
+ * The rare case, and the one that must not be dropped: the reviewer changed
+ * what is on screen while a post was in the air. Same treatment as the
+ * unanchored threads directly below it, because it is the same safety net.
+ */
+.unplaceable-posting {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
 .thread-reply {

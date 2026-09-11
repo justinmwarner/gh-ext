@@ -49,6 +49,24 @@ export interface ComposerMetadata {
 }
 
 /**
+ * A comment that has been written and is on its way, anchored where it was
+ * written.
+ *
+ * Its own kind rather than a synthetic `ReviewThread`, and the distinction is
+ * worth the extra case. A thread id is what Resolve, Reply, Edit and Delete
+ * are sent with, and this comment has no thread and no id GitHub would
+ * recognise; folding it in would put four controls on the card that can only
+ * fail, and would let it into `orderedThreads`, the Conversations view and the
+ * keyboard's `n` — three more places that would then have to know it is not
+ * really there.
+ */
+export interface PostingMetadata {
+  kind: 'posting';
+  /** This session's own id for the entry. See `lib/review/posting.ts`. */
+  postId: string;
+}
+
+/**
  * The card's own body: the comparison, its notices, and the threads the diff
  * cannot show.
  *
@@ -67,7 +85,11 @@ export interface BodyMetadata {
   kind: 'body';
 }
 
-export type AnnotationMetadata = ThreadMetadata | ComposerMetadata | BodyMetadata;
+export type AnnotationMetadata =
+  | ThreadMetadata
+  | ComposerMetadata
+  | BodyMetadata
+  | PostingMetadata;
 
 export type ListedReason =
   | 'outdated'

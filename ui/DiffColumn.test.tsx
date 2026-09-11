@@ -14,10 +14,12 @@
  * the demotion would be dead weight rather than a safeguard.
  */
 
+import type { ReactNode } from 'react';
 import { type CodeViewItem, parsePatchFiles } from '@pierre/diffs';
 import { CodeView } from '@pierre/diffs/react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ADD_THREAD, START_REVIEW } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { parseGitAttributes } from '@/lib/review/generated';
@@ -40,7 +42,7 @@ import {
 } from './pierreDom.fixture';
 import { pullRequestNode, reviewThread } from './prPayload.fixture';
 import type { ReviewFile } from './reviewFiles';
-import { ReviewSessionProvider } from './reviewSession';
+import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 
 vi.mock('./background', () => ({ request: vi.fn() }));
 
@@ -100,10 +102,35 @@ const UNIFIED = { source: 'unified', truncated: false } as const;
 
 const PR_REF = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 
+/**
+ * Writes a comment straight through the session, bypassing the gutter.
+ *
+ * The gutter can only start a comment on a line that is on screen, which is
+ * exactly the case the unplaceable path is not about.
+ */
+function Poster({ line }: { line: number }) {
+  const session = useReviewSession();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void session.postThread({
+          path: 'src/app.ts',
+          body: 'Written before the diff moved.',
+          anchor: { line, side: 'RIGHT' },
+        });
+      }}
+    >
+      post off-hunk
+    </button>
+  );
+}
+
 function mount(
   files: readonly ReviewFile[],
   props: Record<string, unknown> = {},
   threads: readonly ReviewThread[] = [],
+  extra: ReactNode = null,
 ) {
   const onScrollTo = vi.fn<(path: string) => void>();
   const view = render(
@@ -121,6 +148,7 @@ function mount(
         onScrollTo={onScrollTo}
         {...props}
       />
+      {extra}
     </ReviewSessionProvider>,
   );
   return { ...view, onScrollTo };
@@ -156,6 +184,15 @@ const section = (path: string): HTMLElement => {
   if (found == null) throw new Error(`no unanchored section rendered for ${path}`);
   return found;
 };
+
+/** A promise this test decides when to settle, for asserting on mid-flight. */
+function deferred<T>() {
+  let settle: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, settle };
+}
 
 const untilDrawn = (path: string) =>
   waitFor(() => {
@@ -807,6 +844,128 @@ describe('starting a comment from the gutter', () => {
     await waitFor(() => {
       expect(annotationIsVisible('src/app.ts', 'additions', 2)).toBe(true);
     });
+  });
+
+  it('replaces the composer with the comment, rather than showing both', async () => {
+    // The bug. Publishing one comment is three round trips; the thread arrives
+    // from the second, and the composer used to stay open until the third —
+    // so for two round trips the line held the finished comment *and* the box
+    // still showing the same words, and then re-laid out when the box closed.
+    requestMock.mockReturnValue(new Promise(() => {}));
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickGutterUtility('src/app.ts', 2, 'additions');
+    });
+    const box = await screen.findByRole('textbox', { name: /comment on src\/app\.ts/i });
+
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'This allocates once per row.' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    });
+
+    // Gone on the press, with nothing answered.
+    expect(
+      screen.queryByRole('textbox', { name: /comment on src\/app\.ts/i }),
+    ).toBeNull();
+    // And the comment is on the line the composer was on, drawn where Pierre
+    // will actually show it.
+    expect(document.querySelectorAll('[data-posting]')).toHaveLength(1);
+    expect(screen.getByText('This allocates once per row.')).toBeDefined();
+    await waitFor(() => {
+      expect(annotationIsVisible('src/app.ts', 'additions', 2)).toBe(true);
+    });
+  });
+
+  it('hands the line over to the real thread without ever drawing two', async () => {
+    // The swap is one commit: `takeThread` adds the thread and retires the
+    // entry together, so the row is laid out once instead of twice.
+    const held = deferred<unknown>();
+    requestMock.mockImplementation((msg: { document: string }) =>
+      msg.document === START_REVIEW
+        ? Promise.resolve({
+            ok: true,
+            data: {
+              data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_1' } } },
+            },
+          })
+        : msg.document === ADD_THREAD
+          ? Promise.resolve({
+              ok: true,
+              data: {
+                data: {
+                  addPullRequestReviewThread: {
+                    thread: {
+                      id: 'PRRT_new',
+                      path: 'src/app.ts',
+                      line: 2,
+                      diffSide: 'RIGHT',
+                      subjectType: 'LINE',
+                      comments: {
+                        nodes: [
+                          { id: 'PRRC_1', body: 'This allocates once per row.' },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            })
+          : held.promise,
+    );
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickGutterUtility('src/app.ts', 2, 'additions');
+    });
+    const box = await screen.findByRole('textbox', { name: /comment on src\/app\.ts/i });
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'This allocates once per row.' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    });
+
+    // The review is open and the thread is in it; the submit is still out.
+    await waitFor(() => {
+      expect(document.querySelector('[data-thread="PRRT_new"]')).not.toBeNull();
+    });
+    expect(document.querySelectorAll('[data-posting]')).toHaveLength(0);
+    // One comment on the line, not two.
+    expect(screen.getAllByText('This allocates once per row.')).toHaveLength(1);
+    held.settle({ ok: true, data: { data: {} } });
+  });
+
+  it('lists a comment in flight whose line the diff is not drawing', async () => {
+    // The rare half of an optimistic post, and the one that must not be
+    // dropped: the reviewer changed what is on screen while a comment was in
+    // the air. Line 10 is in the gap between this patch's two hunks, so
+    // Pierre would take the annotation and draw nothing — in silence — and
+    // writing that exists on GitHub nowhere would be gone from the page.
+    requestMock.mockReturnValue(new Promise(() => {}));
+    mount(
+      [file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })],
+      {},
+      [],
+      <Poster line={10} />,
+    );
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'post off-hunk' }));
+    });
+
+    // In the card's body, under a sentence saying why it is not on its line.
+    const listed = document.querySelector('[data-unplaceable-posting="src/app.ts"]');
+    expect(listed).not.toBeNull();
+    expect(listed?.textContent).toMatch(/line 10/i);
+    expect(screen.getByText('Written before the diff moved.')).toBeDefined();
+    // And exactly once — not both listed and anchored.
+    expect(document.querySelectorAll('[data-posting]')).toHaveLength(1);
   });
 
   it('explains a drag across both sides instead of posting it', async () => {

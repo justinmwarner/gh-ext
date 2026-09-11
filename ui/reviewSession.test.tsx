@@ -22,7 +22,7 @@ import {
   UPDATE_COMMENT,
 } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
-import { DraftStore } from '@/lib/review/drafts';
+import { DraftStore, type KeyValueStore, draftKey } from '@/lib/review/drafts';
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
 import { pullRequestNode, reviewComment, reviewThread } from './prPayload.fixture';
@@ -160,6 +160,33 @@ function Harness() {
       </p>
       <p data-testid="unpublished">{[...session.unpublished].join(',')}</p>
       <p data-testid="failures">{[...session.failures.values()].join(' | ')}</p>
+      {/* The comments this session has written and GitHub has not answered
+          for yet. A failed post's reason lives here rather than in `failures`
+          — it belongs on the line the comment was written on, not on a
+          composer that closed the moment the reviewer pressed the button. */}
+      <p data-testid="posting">
+        {session.posting
+          .map((entry) => `${entry.body}${entry.error === null ? '' : `!${entry.error}`}`)
+          .join(' | ')}
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          const first = session.posting[0];
+          if (first !== undefined) void session.retryPost(first.id);
+        }}
+      >
+        retry post
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const first = session.posting[0];
+          if (first !== undefined) session.discardPost(first.id);
+        }}
+      >
+        discard post
+      </button>
     </div>
   );
 }
@@ -231,17 +258,21 @@ const documents = (): string[] =>
 function mount(
   node: Parameters<typeof pullRequestNode>[0] = {},
   threads: readonly ReviewThread[] = [reviewThread({ path: 'src/app.ts', line: 2 })],
+  store: KeyValueStore = memoryStore(),
 ) {
-  return render(
-    <ReviewSessionProvider
-      pullRequest={pullRequestNode(node)}
-      prRef={PR_REF}
-      threads={threads}
-      drafts={new DraftStore(memoryStore())}
-    >
-      <Harness />
-    </ReviewSessionProvider>,
-  );
+  return {
+    ...render(
+      <ReviewSessionProvider
+        pullRequest={pullRequestNode(node)}
+        prRef={PR_REF}
+        threads={threads}
+        drafts={new DraftStore(store)}
+      >
+        <Harness />
+      </ReviewSessionProvider>,
+    ),
+    store,
+  };
 }
 
 /** The `variables` of the nth `mutate` the page sent. */
@@ -326,6 +357,159 @@ describe('initialPendingReview', () => {
     for (const junk of [undefined, null, 'nope', 42]) {
       expect(openReviewId(junk as never)).toBeNull();
     }
+  });
+});
+
+/**
+ * Posting a comment is optimistic.
+ *
+ * The complaint that produced this: press Comment and the box sits on
+ * "Posting…" while three or four round trips go out, the finished thread
+ * arrives from the *second* of them, and for the remaining two the line holds
+ * the comment and the composer showing the same words. Then the box closes and
+ * the row re-lays out a second time.
+ *
+ * So the entry goes on screen before anything is sent, and the real thread
+ * replaces it in the same commit that adds it.
+ */
+describe('a comment on its way', () => {
+  const posted = (): string => screen.getByTestId('posting').textContent ?? '';
+
+  it('is on screen before a single request has been answered', async () => {
+    const { promise, settle } = deferred<unknown>();
+    requestMock.mockReturnValue(promise);
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    expect(posted()).toContain('a comment');
+    settle(REFUSED);
+  });
+
+  it('never holds the comment and the thread at the same time', async () => {
+    // The duplicate. `addPullRequestReviewThread` answers on the second round
+    // trip and `submitPullRequestReview` on the third, so the window between
+    // them is where the same words used to be drawn twice.
+    const held = deferred<unknown>();
+    answerByDocument({ [SUBMIT_REVIEW]: held.promise });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('threads').textContent).toContain('PRRT_new');
+    });
+    expect(posted()).toBe('');
+    held.settle({ ok: true, data: { data: {} } });
+  });
+
+  it('is gone once GitHub has it, and so is its draft', async () => {
+    const store = memoryStore({
+      [draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', line: 2, side: 'RIGHT' })]:
+        'a comment',
+    });
+    answerByDocument();
+    mount({}, [reviewThread({ path: 'src/app.ts', line: 2 })], store);
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => expect(posted()).toBe(''));
+    // Left behind, it would seed the next composer opened on that line with a
+    // comment the reviewer has already made.
+    await waitFor(async () => {
+      expect(
+        await store.get(
+          draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', line: 2, side: 'RIGHT' }),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  it('keeps the words and the reason when it does not get there', async () => {
+    answerByDocument({ [START_REVIEW]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => expect(posted()).toContain('GitHub said no'));
+    expect(posted()).toContain('a comment');
+  });
+
+  it('sends it again on a retry, and stops describing the last attempt', async () => {
+    answerByDocument({ [START_REVIEW]: REFUSED });
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await waitFor(() => expect(posted()).toContain('GitHub said no'));
+
+    answerByDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'retry post' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('threads').textContent).toContain('PRRT_new');
+    });
+    expect(posted()).toBe('');
+  });
+
+  it('refuses a retry while one is already in flight', async () => {
+    // The one mistake a retry button is uniquely able to make. A second press
+    // during the round trip would post the comment twice.
+    const { promise, settle } = deferred<unknown>();
+    requestMock.mockReturnValue(promise);
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await userEvent.click(screen.getByRole('button', { name: 'retry post' }));
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    settle(REFUSED);
+  });
+
+  it('discards a failed comment, and its draft with it', async () => {
+    const key = draftKey({
+      prId: 'PR_kwDOABCD',
+      path: 'src/app.ts',
+      line: 2,
+      side: 'RIGHT',
+    });
+    const store = memoryStore({ [key]: 'a comment' });
+    answerByDocument({ [START_REVIEW]: REFUSED });
+    mount({}, [reviewThread({ path: 'src/app.ts', line: 2 })], store);
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await waitFor(() => expect(posted()).toContain('GitHub said no'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'discard post' }));
+
+    expect(posted()).toBe('');
+    await waitFor(async () => expect(await store.get(key)).toBeNull());
+  });
+
+  it('is never left saying Sending when something throws', async () => {
+    // The composer has closed, so an error escaping the post would leave the
+    // entry in flight for the rest of the session: the words on screen, no
+    // retry, no discard and no explanation.
+    requestMock.mockRejectedValue(new Error('the port went away'));
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => expect(posted()).toContain('the port went away'));
+    expect(posted()).toContain('a comment');
+  });
+
+  it('will not discard one that is still in flight', async () => {
+    // GitHub may yet accept it. Taking the entry away would hide a comment
+    // that is about to be on the pull request.
+    const { promise, settle } = deferred<unknown>();
+    requestMock.mockReturnValue(promise);
+    mount();
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+    await userEvent.click(screen.getByRole('button', { name: 'discard post' }));
+
+    expect(posted()).toContain('a comment');
+    settle(REFUSED);
   });
 });
 
@@ -534,9 +718,13 @@ describe('a single comment that only partly went out', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'post' }));
 
+    // On the entry, not in `failures`: the composer closed on the press, so
+    // the only place that says *which* comment did not go out is the line it
+    // was written on. The words are still there beside the reason.
     await waitFor(() => {
-      expect(screen.getByTestId('failures').textContent).toMatch(/GitHub said no/);
+      expect(screen.getByTestId('posting').textContent).toMatch(/GitHub said no/);
     });
+    expect(screen.getByTestId('posting').textContent).toContain('a comment');
     // It looked for a review to join first — that is the recovery — and found
     // none, so the original refusal stands and no comment was written anywhere.
     expect(requestMock.mock.calls.some((call) => call[0]?.kind === 'get-pr')).toBe(true);
@@ -556,7 +744,7 @@ describe('a single comment that only partly went out', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mode').textContent).toBe('pending');
     });
-    expect(screen.getByTestId('failures').textContent).toMatch(/still open|submit|discard/i);
+    expect(screen.getByTestId('posting').textContent).toMatch(/still open|submit|discard/i);
   });
 
   it('keeps a comment that was saved but not published, and says so', async () => {
