@@ -188,6 +188,21 @@ describe('CODE_VIEW_SAFE_PROPS', () => {
   it('shows the gutter "+" that starts a comment', () => {
     expect(CODE_VIEW_SAFE_PROPS.options.enableGutterUtility).toBe(true);
   });
+
+  it('gives a rich card the whole width, and keeps both clauses that limit it', () => {
+    // Without this a rendered Markdown document draws at 405px inside an 880px
+    // card, beside an empty column. The two clauses are what keep it off
+    // ordinary diffs, and losing either silently collapses real two-column
+    // diffs to one:
+    //   `[data-diff-type="split"]` — unified has one column already.
+    //   `:only-child`             — a *text* diff can carry a file-level
+    //                               annotation too, and its lines are in that
+    //                               column as well.
+    const css = CODE_VIEW_SAFE_PROPS.options.unsafeCSS ?? '';
+    expect(css).toContain('[data-diff-type="split"]');
+    expect(css).toContain('[data-line-annotation="-1,-1"]:only-child');
+    expect(css).toContain('grid-template-columns: 1fr');
+  });
 });
 
 describe('DiffColumn', () => {

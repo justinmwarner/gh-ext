@@ -1277,8 +1277,15 @@ test('the keyboard map works against real key events', async ({
   await body.press('?');
   const help = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
   await expect(help).toBeVisible();
-  // Closed by its own button. This overlay has no Escape binding — the search
-  // panel below does — which the browser is the first thing to have noticed.
+  // Escape leaves it, which needs the overlay to have taken focus on the way
+  // in: the key is read on the panel, not on the document. Pressed through the
+  // dialog rather than through `body` for that reason.
+  await help.press('Escape');
+  await expect(help).toBeHidden();
+
+  // And its own button still does too.
+  await body.press('?');
+  await expect(help).toBeVisible();
   await help.getByRole('button', { name: 'Close' }).click();
   await expect(help).toBeHidden();
 
@@ -1291,8 +1298,17 @@ test('the keyboard map works against real key events', async ({
 
   // Mod+K opens the file filter. On this platform that is Ctrl.
   await body.press('Control+k');
-  await expect(page.getByRole('dialog', { name: /jump to a file/i })).toBeVisible();
-  await body.press('Escape');
+  const filter = page.getByRole('dialog', { name: /jump to a file/i });
+  await expect(filter).toBeVisible();
+
+  // Escape has to work from the results, not just from the input. The results
+  // are real buttons, so one Tab leaves the field — and a handler bound to the
+  // field never sees the key from there. That left a dialog the keyboard could
+  // enter and could not leave.
+  await page.keyboard.press('Tab');
+  await expect(filter.locator('.search-result:focus')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(filter).toBeHidden();
 });
 
 test('nothing unmodified fires while a comment is being typed', async ({
@@ -1538,6 +1554,37 @@ test('split view is a setting, and reaches a review that is already open', async
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
+
+  // A rich comparison gets the whole card here, not one column of it.
+  //
+  // Its card hands Pierre an empty diff, so both split columns hold nothing but
+  // the file-level annotation the body sits in — and Pierre sizes annotation
+  // content to a single column. Left alone, a rendered Markdown document drew
+  // 405px inside an 880px card, beside a 440px column with nothing in it.
+  // `FULL_WIDTH_RICH_BODY` collapses the empty pair; this is the only honest
+  // check of it, because jsdom performs no layout and the rule lives inside a
+  // shadow root.
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+  const rendered = fileBody(page, MARKDOWN_FILE).locator('.markdown-rendered');
+  await expect(rendered).toBeVisible();
+
+  // Measured against the column, not against an ancestor of the body: the body
+  // is light DOM slotted into a shadow row, so `closest()` stops at the
+  // annotation wrapper — which is itself the single column being complained
+  // about, and comparing the two gives 405 of 407 whether the rule is there or
+  // not.
+  const fit = await rendered.evaluate((element) => {
+    const column = document.querySelector('diffs-container');
+    return {
+      body: element.getBoundingClientRect().width,
+      column: column === null ? 0 : column.getBoundingClientRect().width,
+    };
+  });
+  // Generous on purpose: the exact figure moves with the viewport and with
+  // Pierre's own padding. Half a column is the failure being guarded against,
+  // and without the rule this measures 0.46.
+  expect(fit.column).toBeGreaterThan(0);
+  expect(fit.body / fit.column).toBeGreaterThan(0.85);
 });
 
 test('a diff read without its whitespace says so, on the row of each file it shortened', async ({
@@ -2352,4 +2399,73 @@ test('a rendered Markdown diff marks the prose and executes none of it', async (
   expect(await page.evaluate(() => (globalThis as { __pwned?: boolean }).__pwned)).toBe(
     undefined,
   );
+});
+
+test('the syntax theme is the reviewer\'s, and choosing one lets it colour the diff', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The only honest check of this. The theme is resolved by Shiki at runtime
+  // and painted into a shadow root as inline token colours, so nothing short of
+  // a real browser on the production build can say whether a choice took.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const tokenColours = () =>
+    page.evaluate(() => {
+      const root = document.querySelector('diffs-container')?.shadowRoot;
+      const spans = [...(root?.querySelectorAll('[style*="--diffs-token"]') ?? [])];
+      return {
+        // Deduplicated: what matters is the palette, not how many spans wear it.
+        colours: [
+          ...new Set(
+            spans.map((span) => span.getAttribute('style') ?? '').filter(Boolean),
+          ),
+        ].sort(),
+        // Set only once a theme has been chosen, and what releases this page's
+        // Primer overrides on the added and removed lines.
+        chosen: document.documentElement.getAttribute('data-syntax-theme'),
+        addition: getComputedStyle(document.documentElement).getPropertyValue(
+          '--diffs-addition-color-override',
+        ),
+      };
+    });
+
+  // Waited for rather than read straight off. The diff is on screen well before
+  // Shiki has highlighted it — the highlighter and the theme are both lazy
+  // chunks — so a bare read here finds no tokens at all on a machine that is
+  // busy, which is what a full suite run is and a single test is not.
+  await expect
+    .poll(async () => (await tokenColours()).colours.length, { timeout: 15_000 })
+    .toBeGreaterThan(0);
+
+  const before = await tokenColours();
+  // Untouched, the page still overrides Pierre's green with Primer's.
+  expect(before.chosen).toBeNull();
+  expect(before.addition.trim()).not.toBe('');
+
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.getByLabel(/syntax colours/i).selectOption('github-light-high-contrast');
+  await options.close();
+
+  // Polled on the colours rather than on the attribute, and that distinction is
+  // the test. The attribute is set synchronously by an effect the moment the
+  // setting lands; the theme itself is a lazy chunk Shiki fetches and resolves
+  // afterwards. Waiting on the attribute and then reading the colours passes
+  // whenever the machine is quick and fails whenever it is busy — which is
+  // exactly how this behaved, green alone and red in a full run.
+  await expect
+    .poll(async () => (await tokenColours()).colours.join('|'), { timeout: 15_000 })
+    .not.toBe(before.colours.join('|'));
+
+  const after = await tokenColours();
+  // Reaches a review that is already open, like every other preference here.
+  expect(after.chosen).toBe('github-light-high-contrast');
+  // And the additions and deletions are the theme's now, not Primer's. This is
+  // the half that matters for the colour-vision themes: leaving the override on
+  // would put a red and a green back on the only rows that carry meaning.
+  expect(after.addition.trim()).toBe('');
 });

@@ -90,7 +90,15 @@ export function LockedState({
         }}
       />
 
-      {problem !== null && <p className="problem">{problem}</p>}
+      {/* A refused passphrase is announced, not just drawn. Focus stays in the
+          field, so without this the reviewer presses Enter, the unlock is
+          rejected, and nothing is spoken — which is the state this file's own
+          docblock calls indistinguishable from a broken extension. */}
+      {problem !== null && (
+        <p className="problem" role="alert">
+          {problem}
+        </p>
+      )}
     </FullPage>
   );
 }

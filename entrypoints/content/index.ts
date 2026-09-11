@@ -199,7 +199,16 @@ export default defineContentScript({
 
       prefetch(pr);
 
-      if (!card) {
+      // `isConnected`, not just `card !== null`. The handle is a closure
+      // variable and stays truthy after its host leaves the document — which
+      // github.com does routinely, because Turbo replaces <body> on a page
+      // render, and which any other extension or userscript can do at any time.
+      // Testing the variable alone means one such navigation removes the
+      // extension's only entry point for the life of the tab: every later pull
+      // request reached by soft navigation gets no card, with no error to say
+      // why. Re-mounting is cheap; being silently absent is not.
+      if (!card || !card.host.isConnected) {
+        card?.destroy();
         card = mountCard(document, {
           collapsed,
           onOpen: () => {
@@ -252,13 +261,17 @@ export default defineContentScript({
     // Collapse is one choice about one extension, not a per-tab one. Without
     // this, collapsing on one pull request leaves every other open tab showing
     // an expanded card until it is reloaded.
-    browser.storage.onChanged.addListener((changes, areaName) => {
+    const onCollapsedChanged = (
+      changes: Record<string, { newValue?: unknown }>,
+      areaName: string,
+    ): void => {
       if (areaName !== 'local') return;
       const change = changes[CARD_COLLAPSED_KEY];
       if (change === undefined) return;
       collapsed = change.newValue === true;
       card?.setCollapsed(collapsed);
-    });
+    };
+    browser.storage.onChanged.addListener(onCollapsedChanged);
 
     // Narrow on purpose: one attribute on one element. Its predecessor watched
     // every mutation under `<body>` to keep a button wedged in GitHub's header,
@@ -273,6 +286,11 @@ export default defineContentScript({
 
     ctx.onInvalidated(() => {
       theme.disconnect();
+      // WXT's context cleans up addEventListener, the timers and the animation
+      // frame callbacks, but it does not know about browser.storage — this is
+      // the one listener that would otherwise outlive the teardown the rest of
+      // this file keeps carefully.
+      browser.storage.onChanged.removeListener(onCollapsedChanged);
       card?.destroy();
       card = null;
     });

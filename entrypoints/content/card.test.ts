@@ -42,6 +42,20 @@ describe('mounting', () => {
     expect(document.getElementById(CARD_HOST_ID)).toBe(card.host);
   });
 
+  it('clears a stale host wearing its id rather than joining it', () => {
+    // Either a double injection or something else on github.com owning the id.
+    // Two elements with one id means `CARD_HOST_ID` resolves to whichever came
+    // first, which is how the e2e locator and `sync` would both find the wrong
+    // one.
+    const impostor = document.createElement('div');
+    impostor.id = CARD_HOST_ID;
+    document.body.append(impostor);
+
+    const { card } = open();
+    expect(document.querySelectorAll(`#${CARD_HOST_ID}`)).toHaveLength(1);
+    expect(document.getElementById(CARD_HOST_ID)).toBe(card.host);
+  });
+
   it('puts everything behind a shadow boundary', () => {
     open();
     // The whole reason for the shadow root: github.com's stylesheet cannot
@@ -136,6 +150,32 @@ describe('collapsing', () => {
 
     expect(find(card, '.card').hidden).toBe(false);
     expect(onCollapsedChange).toHaveBeenCalledWith(false);
+  });
+
+  it('hands the keyboard to whatever replaced the button that was pressed', () => {
+    const { card } = open();
+    const collapse = find<HTMLButtonElement>(card, '.collapse');
+    collapse.focus();
+    collapse.click();
+    // Collapsing hides the focused button, and a hidden element cannot hold
+    // focus. Without the handover the keyboard lands on <body> — at the top of
+    // github.com, not on the pill sitting where the card just was.
+    expect(card.root.activeElement).toBe(find(card, '.pill'));
+
+    find<HTMLButtonElement>(card, '.pill').click();
+    // Expanding is the half that matters: the reviewer opened it to press this.
+    expect(card.root.activeElement).toBe(find(card, '.cta'));
+  });
+
+  it('does not take the keyboard when another tab collapses it', () => {
+    const { card } = open();
+    const cta = find<HTMLButtonElement>(card, '.cta');
+    cta.focus();
+    // The storage listener calls this directly. A background tab pulling focus
+    // because the card was collapsed in a foreground one would be worse than
+    // the problem the handover above solves.
+    card.setCollapsed(true);
+    expect(card.root.activeElement).toBe(cta);
   });
 
   it('never hides both, so there is always a way in', () => {

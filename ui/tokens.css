@@ -1,0 +1,103 @@
+/*
+ * The palette, once, for all three surfaces.
+ *
+ * The review page, the options page and the injected card each used to carry
+ * their own copy of these values as literal hex. Three copies of #59636e drift;
+ * this file is the reason they cannot.
+ *
+ * `:root, :host` rather than `:root`, because the card renders into a shadow
+ * root and `:root` does not match inside one. `:host` never matches outside a
+ * shadow tree, so the pair is safe in both places and the same text can be
+ * served to both. card.ts imports this file with `?raw` and inlines it, which
+ * is why the two selectors have to live in one rule rather than in two files.
+ *
+ * The card's shadow sheet also declares `:host { all: initial }`. That does not
+ * clear these: `all` is defined to reset every property *except* custom
+ * properties, so the tokens survive the reset and the reset still does its job.
+ *
+ * Values are GitHub Primer's, named for Primer's own roles. That is deliberate
+ * and it is documented in DESIGN.md: the extension wears GitHub's palette so
+ * there is no visual seam when a reviewer moves between the two. A value here
+ * is matched, not chosen. Changing one is a decision to introduce a seam.
+ *
+ * `light-dark()` needs `color-scheme` to be set on an ancestor or it silently
+ * resolves to the light half. Every surface that imports this sets it: the two
+ * pages on `:root`, the card as an inline style on its host element, which is
+ * in the outer tree and therefore beats the `:host` rule inside.
+ */
+
+:root,
+:host {
+  /* ------------------------------------------------------------- surfaces */
+
+  /* The page itself. Also pushed into Pierre as `--diffs-bg` so the diff, the
+     file tree and the page around them are one colour rather than three. */
+  --canvas-default: light-dark(#ffffff, #0d1117);
+  /* One step off the page. Secondary buttons at rest, inline `code`, grouped
+     rows. */
+  --canvas-subtle: light-dark(#f6f8fa, #212830);
+  /* Menus and popovers. Lighter than the page in dark mode on purpose — a dark
+     surface with a dark shadow under it reads as a hole rather than as a thing
+     above the page. */
+  --canvas-overlay: light-dark(#ffffff, #151b23);
+  /* Where every hoverable neutral surface goes. One value, not three: this
+     used to be #262c36 on buttons and #212830 on tree rows and view tabs, which
+     is the same interaction state answered two different ways. */
+  --neutral-hover: light-dark(#eef1f4, #262c36);
+
+  /* ------------------------------------------------------------------ text */
+
+  --fg-default: light-dark(#1f2328, #e6edf3);
+  /* The most-used colour in the product. 6.11:1 on canvas in light, 6.50:1 in
+     dark. Nothing quieter than this is allowed to carry text. */
+  --fg-muted: light-dark(#59636e, #9198a1);
+  /* 3.04:1 on canvas: clears the bar for a graphical object, not for text.
+     Icon strokes and disabled labels, never body copy. */
+  --fg-subtle: light-dark(#8c959f, #6e7681);
+
+  /* --------------------------------------------------------------- borders */
+
+  --border-default: light-dark(#d1d9e0, #3d444d);
+  /* Lighter-weight structure: the rules between grid cells, and the tiles of
+     the transparency checkerboard behind an image diff. */
+  --border-muted: light-dark(#eef1f4, #2d333b);
+
+  /* ---------------------------------------------------------------- accent */
+
+  /* The only blue, and the only thing that means "interaction": links, the
+     focus outline, `accent-color` for native controls, and the modified tint
+     inside the diff. A second blue is prohibited. */
+  --accent-fg: light-dark(#0969da, #4493f8);
+  /* A tint behind a whole row or chip, not a text colour. Three surfaces used
+     to spell this out with three different dark halves. */
+  --accent-subtle-bg: light-dark(#ddf4ff, #121d2f);
+
+  /* ------------------------------------------------------------ status: ok */
+
+  /* Text-weight green: additions, passing checks, the primary button's hover.
+     Also pushed into Pierre, whose own #0dbe4e measures 2.47:1 on white and is
+     unreadable at the 12px the diff counts are drawn at. */
+  --success-fg: light-dark(#1a7f37, #3fb950);
+  /* Fill-weight green: the primary button, the open badge. */
+  --success-emphasis: light-dark(#1f883d, #238636);
+  --success-subtle-bg: light-dark(#e6ffec, #12261e);
+
+  /* --------------------------------------------------------- status: wrong */
+
+  --danger-fg: light-dark(#cf222e, #f85149);
+  --danger-subtle-bg: light-dark(#ffebe9, #25171c);
+
+  /* ------------------------------------------------------- status: waiting */
+
+  /* Amber has three roles and they are not interchangeable: this one stands on
+     the page, the next sits on an already-tinted panel and so has to be darker,
+     and the third is a border. A fourth (#bf8700) has been retired into this
+     one — its dark half was already identical. */
+  --attention-fg: light-dark(#9a6700, #d29922);
+  --attention-fg-tinted: light-dark(#7d4e00, #e3b341);
+  --attention-border: light-dark(#d4a72c, #d29922);
+  /* The amber panel tint. Six surfaces reached for #fff8c5 and wrote six
+     different dark counterparts under it, so the one signal that was supposed
+     to read the same everywhere read the same only in light mode. */
+  --attention-subtle-bg: light-dark(#fff8c5, #2a2213);
+}

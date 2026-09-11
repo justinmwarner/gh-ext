@@ -31,8 +31,17 @@ import {
   type Settings,
   autoOpenAvailable,
 } from '@/lib/settings';
+import {
+  ACCESSIBLE_THEMES,
+  DARK_THEMES,
+  LIGHT_THEMES,
+  THEME_FOLLOWS_PAGE,
+} from '@/lib/compare/themes';
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
 import { browser } from 'wxt/browser';
+// Before the stylesheet, not after: everything in it refers to these by name.
+import '@/ui/tokens.css';
+import './style.css';
 
 const tokens = new ChromeTokenProvider();
 
@@ -282,6 +291,59 @@ function Preferences() {
               shortens says so above its body, and a comment left on a line that
               only moved is listed rather than quietly dropped.
             </span>
+          </span>
+        </label>
+
+        {/* A select rather than a radio set: seventy-five options is a list to
+            be searched, not a set to be compared, and a native select is the
+            one control that already types-to-find and scrolls on every
+            platform. Grouped by the mode each theme was built for, with the
+            four that answer colour vision deficiency first — they are the
+            reason this setting exists rather than a curiosity in it. */}
+        <label className="field" htmlFor="diffTheme">
+          Syntax colours
+          <select
+            id="diffTheme"
+            value={settings.diffTheme}
+            onChange={(event) => update({ diffTheme: event.target.value })}
+          >
+            <option value={THEME_FOLLOWS_PAGE}>
+              Match the page (default)
+            </option>
+            <optgroup label="Made for colour vision deficiency">
+              {ACCESSIBLE_THEMES.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Light">
+              {LIGHT_THEMES.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Dark">
+              {DARK_THEMES.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+          <span className="hint">
+            Only the code inside a diff, not the page around it. Left on{' '}
+            <strong>Match the page</strong> the diff follows your system between
+            light and dark; choosing a theme means that one theme in both.
+            {' '}Every theme is already in the extension, so picking one costs no
+            download.
+            <br />
+            Worth changing if the default is hard to read: its dimmest token
+            measures 2.14:1 against a white page, where text wants 4.5:1. The
+            two <strong>high contrast</strong> entries go the other way, and the
+            group at the top redraws additions and deletions so they do not rely
+            on telling red from green.
           </span>
         </label>
       </section>
@@ -706,7 +768,25 @@ function App() {
         </>
       )}
 
-      {result && <p className={`result ${result.tone}`}>{result.text}</p>}
+      {/* Every vault operation reports here, and until this carried `aria-live`
+          none of them reported to a screen reader at all — including the
+          failures, which are the ones with something to say.
+
+          Mounted whether or not there is anything in it, because a live region
+          that arrives at the same instant as its text is one some readers never
+          announce. Empty it has no height, and its top margin collapses with
+          the warning panel's, so an always-present one costs no space.
+
+          The element itself rather than a visually-hidden twin: a second copy
+          of the text would be read once and found twice, by `getByText` and by
+          anyone reading the DOM. */}
+      <p
+        className={result === null ? 'result' : `result ${result.tone}`}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {result?.text ?? ''}
+      </p>
 
       <div className="warning">
         <h2>What the passphrase does and does not protect</h2>

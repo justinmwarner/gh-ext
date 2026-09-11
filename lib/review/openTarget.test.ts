@@ -22,6 +22,7 @@ const settings = (openIn: OpenIn, autoOpen = true): Settings => ({
   ignoreWhitespace: false,
   splitView: false,
   hideGenerated: false,
+  diffTheme: '',
 });
 
 const ask = (

@@ -60,6 +60,7 @@ function mount(
         hideGenerated={false}
         gitAttributes={[]}
         diffStyle="unified"
+        syntaxTheme=""
         diff={{ source: 'unified', truncated: false }}
         sides={BOTH_SIDES}
       />

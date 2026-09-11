@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-10T19:38:37.588Z",
+  "title": "Design System: A Better Reviewer",
+  "extensions": {
+    "colorMeta": {
+      "accent-fg": {
+        "role": "primary",
+        "displayName": "Primer Accent Foreground",
+        "canonical": "oklch(54.0% 0.191 257.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.105 257.5)",
+          "oklch(26.0% 0.191 257.5)",
+          "oklch(37.0% 0.191 257.5)",
+          "oklch(48.0% 0.191 257.5)",
+          "oklch(59.0% 0.191 257.5)",
+          "oklch(70.0% 0.191 257.5)",
+          "oklch(83.0% 0.191 257.5)",
+          "oklch(95.0% 0.105 257.5)"
+        ]
+      },
+      "success-emphasis": {
+        "role": "primary",
+        "displayName": "Primer Success Emphasis",
+        "canonical": "oklch(55.2% 0.145 148.2)",
+        "tonalRamp": [
+          "oklch(15.0% 0.080 148.2)",
+          "oklch(26.0% 0.145 148.2)",
+          "oklch(37.0% 0.145 148.2)",
+          "oklch(48.0% 0.145 148.2)",
+          "oklch(59.0% 0.145 148.2)",
+          "oklch(70.0% 0.145 148.2)",
+          "oklch(83.0% 0.145 148.2)",
+          "oklch(95.0% 0.080 148.2)"
+        ]
+      },
+      "success-fg": {
+        "role": "primary",
+        "displayName": "Primer Success Foreground",
+        "canonical": "oklch(52.4% 0.140 148.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.077 148.0)",
+          "oklch(26.0% 0.140 148.0)",
+          "oklch(37.0% 0.140 148.0)",
+          "oklch(48.0% 0.140 148.0)",
+          "oklch(59.0% 0.140 148.0)",
+          "oklch(70.0% 0.140 148.0)",
+          "oklch(83.0% 0.140 148.0)",
+          "oklch(95.0% 0.077 148.0)"
+        ]
+      },
+      "danger-fg": {
+        "role": "secondary",
+        "displayName": "Primer Danger Foreground",
+        "canonical": "oklch(55.2% 0.205 24.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.113 24.5)",
+          "oklch(26.0% 0.205 24.5)",
+          "oklch(37.0% 0.205 24.5)",
+          "oklch(48.0% 0.205 24.5)",
+          "oklch(59.0% 0.205 24.5)",
+          "oklch(70.0% 0.205 24.5)",
+          "oklch(83.0% 0.205 24.5)",
+          "oklch(95.0% 0.113 24.5)"
+        ]
+      },
+      "attention-fg": {
+        "role": "secondary",
+        "displayName": "Primer Attention Foreground",
+        "canonical": "oklch(55.4% 0.117 75.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.064 75.0)",
+          "oklch(26.0% 0.117 75.0)",
+          "oklch(37.0% 0.117 75.0)",
+          "oklch(48.0% 0.117 75.0)",
+          "oklch(59.0% 0.117 75.0)",
+          "oklch(70.0% 0.117 75.0)",
+          "oklch(83.0% 0.117 75.0)",
+          "oklch(95.0% 0.064 75.0)"
+        ]
+      },
+      "done-emphasis": {
+        "role": "tertiary",
+        "displayName": "Primer Done Emphasis",
+        "canonical": "oklch(56.3% 0.207 295.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.114 295.0)",
+          "oklch(26.0% 0.207 295.0)",
+          "oklch(37.0% 0.207 295.0)",
+          "oklch(48.0% 0.207 295.0)",
+          "oklch(59.0% 0.207 295.0)",
+          "oklch(70.0% 0.207 295.0)",
+          "oklch(83.0% 0.207 295.0)",
+          "oklch(95.0% 0.114 295.0)"
+        ]
+      },
+      "canvas-default": {
+        "role": "neutral",
+        "displayName": "Primer Canvas Default",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(83.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "canvas-subtle": {
+        "role": "neutral",
+        "displayName": "Primer Canvas Subtle",
+        "canonical": "oklch(97.8% 0.003 247.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.002 247.9)",
+          "oklch(26.0% 0.003 247.9)",
+          "oklch(37.0% 0.003 247.9)",
+          "oklch(48.0% 0.003 247.9)",
+          "oklch(59.0% 0.003 247.9)",
+          "oklch(70.0% 0.003 247.9)",
+          "oklch(83.0% 0.003 247.9)",
+          "oklch(95.0% 0.002 247.9)"
+        ]
+      },
+      "canvas-overlay": {
+        "role": "neutral",
+        "displayName": "Primer Canvas Overlay",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(83.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "fg-default": {
+        "role": "neutral",
+        "displayName": "Primer Foreground Default",
+        "canonical": "oklch(25.4% 0.011 254.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 254.0)",
+          "oklch(26.0% 0.011 254.0)",
+          "oklch(37.0% 0.011 254.0)",
+          "oklch(48.0% 0.011 254.0)",
+          "oklch(59.0% 0.011 254.0)",
+          "oklch(70.0% 0.011 254.0)",
+          "oklch(83.0% 0.011 254.0)",
+          "oklch(95.0% 0.006 254.0)"
+        ]
+      },
+      "fg-muted": {
+        "role": "neutral",
+        "displayName": "Primer Foreground Muted",
+        "canonical": "oklch(49.5% 0.022 250.8)",
+        "tonalRamp": [
+          "oklch(15.0% 0.012 250.8)",
+          "oklch(26.0% 0.022 250.8)",
+          "oklch(37.0% 0.022 250.8)",
+          "oklch(48.0% 0.022 250.8)",
+          "oklch(59.0% 0.022 250.8)",
+          "oklch(70.0% 0.022 250.8)",
+          "oklch(83.0% 0.022 250.8)",
+          "oklch(95.0% 0.012 250.8)"
+        ]
+      },
+      "fg-subtle": {
+        "role": "neutral",
+        "displayName": "Primer Foreground Subtle",
+        "canonical": "oklch(66.6% 0.018 250.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 250.9)",
+          "oklch(26.0% 0.018 250.9)",
+          "oklch(37.0% 0.018 250.9)",
+          "oklch(48.0% 0.018 250.9)",
+          "oklch(59.0% 0.018 250.9)",
+          "oklch(70.0% 0.018 250.9)",
+          "oklch(83.0% 0.018 250.9)",
+          "oklch(95.0% 0.010 250.9)"
+        ]
+      },
+      "border-default": {
+        "role": "neutral",
+        "displayName": "Primer Border Default",
+        "canonical": "oklch(88.1% 0.013 244.3)",
+        "tonalRamp": [
+          "oklch(15.0% 0.007 244.3)",
+          "oklch(26.0% 0.013 244.3)",
+          "oklch(37.0% 0.013 244.3)",
+          "oklch(48.0% 0.013 244.3)",
+          "oklch(59.0% 0.013 244.3)",
+          "oklch(70.0% 0.013 244.3)",
+          "oklch(83.0% 0.013 244.3)",
+          "oklch(95.0% 0.007 244.3)"
+        ]
+      },
+      "neutral-hover": {
+        "role": "neutral",
+        "displayName": "Neutral Hover",
+        "canonical": "oklch(95.7% 0.005 247.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 247.9)",
+          "oklch(26.0% 0.005 247.9)",
+          "oklch(37.0% 0.005 247.9)",
+          "oklch(48.0% 0.005 247.9)",
+          "oklch(59.0% 0.005 247.9)",
+          "oklch(70.0% 0.005 247.9)",
+          "oklch(83.0% 0.005 247.9)",
+          "oklch(95.0% 0.003 247.9)"
+        ]
+      },
+      "border-muted": {
+        "role": "neutral",
+        "displayName": "Primer Border Muted",
+        "canonical": "oklch(95.7% 0.005 247.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 247.9)",
+          "oklch(26.0% 0.005 247.9)",
+          "oklch(37.0% 0.005 247.9)",
+          "oklch(48.0% 0.005 247.9)",
+          "oklch(59.0% 0.005 247.9)",
+          "oklch(70.0% 0.005 247.9)",
+          "oklch(83.0% 0.005 247.9)",
+          "oklch(95.0% 0.003 247.9)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The options page h1. The largest type in the product; nothing sits above it."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section headings, button labels, file names, thread authors. Separated from body by weight, not size."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Prose: comment bodies, hints, the options walkthrough. Also the :root inherited default."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "The workhorse at 43 declarations. Badges, chips, counts, metadata rows, tab labels."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Code, paths, tokens, rate-limit figures. Anything compared character by character."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay",
+        "value": "0 8px 24px light-dark(rgba(31, 35, 40, 0.16), rgba(1, 4, 9, 0.6))",
+        "purpose": "Menus and popovers. The default float."
+      },
+      {
+        "name": "overlay-large",
+        "value": "0 12px 32px light-dark(rgb(140 149 159 / 25%), rgb(1 4 9 / 65%))",
+        "purpose": "The search panel, which is bigger and sits further from the surface."
+      },
+      {
+        "name": "injected-card",
+        "value": "0 10px 28px light-dark(rgba(31, 35, 40, 0.14), rgba(1, 4, 9, 0.62)), 0 4px 18px -8px light-dark(rgba(31, 136, 61, 0.4), rgba(63, 185, 80, 0.36))",
+        "purpose": "The only tinted shadow. Licensed because the card floats over a page this system does not control. The green pass sits under the neutral shadow, not instead of it."
+      },
+      {
+        "name": "focus-ring",
+        "value": "outline: 2px solid light-dark(#0969da, #4493f8); outline-offset: 1px",
+        "purpose": "Not elevation, but the only other thing permitted to draw outside an element's box. Becomes outline-offset: -2px inside scrolling containers."
+      },
+      {
+        "name": "selection-ring",
+        "value": "0 0 0 2px light-dark(#1f883d, #3fb950)",
+        "purpose": "A 2px ring used where an outline would be clipped. Also in Border Default and Danger Foreground."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control",
+        "value": "background-color 0.12s ease",
+        "purpose": "The review page's only transition. Colour only, so reduced motion has nothing to suppress."
+      },
+      {
+        "name": "card-hover",
+        "value": "background 140ms ease-out, color 140ms ease-out",
+        "purpose": "Hoverable controls on the injected card."
+      },
+      {
+        "name": "cta-lift",
+        "value": "transform 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms ease-out, filter 150ms ease-out",
+        "purpose": "The injected card's call to action. Lifts 1px on hover, returns to 0 and dims on active."
+      },
+      {
+        "name": "rise",
+        "value": "420ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The injected card's entrance. Exponential ease-out."
+      },
+      {
+        "name": "sweep",
+        "value": "680-820ms cubic-bezier(0.33, 0, 0.15, 1)",
+        "purpose": "The light pass across the injected card, run once on mount."
+      },
+      {
+        "name": "draw",
+        "value": "440ms cubic-bezier(0.22, 1, 0.36, 1) backwards",
+        "purpose": "The card's edge drawing itself in."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "topbar",
+        "value": "52px",
+        "purpose": "--topbar-height. A layout constant, not a theme token: the sticky rail below has to know it and CSS cannot ask."
+      },
+      {
+        "name": "gap",
+        "value": "8px",
+        "purpose": "--gap. The base rhythm unit of the review page shell."
+      },
+      {
+        "name": "card-min",
+        "value": "248px",
+        "purpose": "Minimum width of the injected card, on someone else's page."
+      },
+      {
+        "name": "options-measure",
+        "value": "44rem",
+        "purpose": "Max width of the options page main column, keeping prose inside a readable measure."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "The common case. Most buttons in the product are this one.",
+      "html": "<button class=\"ds-btn\">Open in GitHub</button>",
+      "css": ".ds-btn { color-scheme: light dark; display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; font: 600 13px/20px ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; white-space: nowrap; color: light-dark(#1f2328, #e6edf3); border: 1px solid light-dark(#d1d9e0, #3d444d); border-radius: 6px; background: light-dark(#f6f8fa, #212830); cursor: pointer; transition: background-color 0.12s ease, border-color 0.12s ease; } .ds-btn:not(:disabled):hover { background: light-dark(#eef1f4, #262c36); } .ds-btn:focus-visible { outline: 2px solid light-dark(#0969da, #4493f8); outline-offset: 1px; } .ds-btn:disabled { cursor: default; color: light-dark(#8c959f, #6e7681); border-color: light-dark(#d1d9e0, #3d444d); background: light-dark(#f6f8fa, #212830); }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The affirmative action. At most one per view. Disabled drops the green entirely and takes the neutral disabled treatment: a blanket opacity would land the white label at 2.0:1 on its own fill, and this is the state a pull request author sees on Approve every time.",
+      "html": "<button class=\"ds-btn-primary\">Submit review</button>",
+      "css": ".ds-btn-primary { color-scheme: light dark; display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; font: 600 13px/20px ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; white-space: nowrap; color: #ffffff; border: 1px solid light-dark(#1f883d, #2f6f42); border-radius: 6px; background: light-dark(#1f883d, #238636); cursor: pointer; transition: background-color 0.12s ease, border-color 0.12s ease; } .ds-btn-primary:not(:disabled):hover { background: light-dark(#1a7f37, #29903b); } .ds-btn-primary:focus-visible { outline: 2px solid light-dark(#0969da, #4493f8); outline-offset: 1px; } .ds-btn-primary:disabled { cursor: default; color: light-dark(#8c959f, #6e7681); border-color: light-dark(#d1d9e0, #3d444d); background: light-dark(#f6f8fa, #212830); }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "The checks rollup. Always carries the written state; colour reinforces the word rather than replacing it.",
+      "html": "<span class=\"ds-chip ds-chip-good\">Checks passed</span> <span class=\"ds-chip ds-chip-bad\">Checks failed</span> <span class=\"ds-chip ds-chip-pending\">Checks running</span>",
+      "css": ".ds-chip { color-scheme: light dark; display: inline-flex; align-items: center; padding: 1px 10px; border-radius: 999px; font: 500 12px/1.4 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; white-space: nowrap; border: 1px solid light-dark(#d1d9e0, #3d444d); } .ds-chip-good { color: light-dark(#1a7f37, #3fb950); } .ds-chip-bad { color: light-dark(#cf222e, #f85149); } .ds-chip-pending { color: light-dark(#9a6700, #d29922); } .ds-chip-neutral { color: light-dark(#59636e, #9198a1); }"
+    },
+    {
+      "name": "State Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Pull request state, solid fill. Shares its box with the chip via a transparent 1px border it never paints, so both sit on one baseline in the same bar.",
+      "html": "<span class=\"ds-badge ds-badge-open\">Open</span> <span class=\"ds-badge ds-badge-merged\">Merged</span> <span class=\"ds-badge ds-badge-closed\">Closed</span>",
+      "css": ".ds-badge { color-scheme: light dark; display: inline-flex; align-items: center; padding: 1px 10px; border: 1px solid transparent; border-radius: 999px; font: 500 12px/1.4 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; white-space: nowrap; color: #ffffff; } .ds-badge-open { background: light-dark(#1f883d, #238636); } .ds-badge-draft { background: light-dark(#59636e, #6e7781); } .ds-badge-merged { background: light-dark(#8250df, #8957e5); } .ds-badge-closed { background: light-dark(#cf222e, #da3633); }"
+    },
+    {
+      "name": "Token Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "The options page token field. Mono because the content is compared character by character.",
+      "html": "<input class=\"ds-input\" type=\"password\" value=\"github_pat_11ABCDE\" aria-label=\"Personal access token\" />",
+      "css": ".ds-input { color-scheme: light dark; width: 100%; padding: 6px 10px; font: 400 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: light-dark(#1f2328, #e6edf3); background: light-dark(#ffffff, #0d1117); border: 1px solid light-dark(#d1d9e0, #3d444d); border-radius: 6px; } .ds-input:focus-visible { outline: 2px solid light-dark(#0969da, #4493f8); outline-offset: 1px; } .ds-input:disabled { color: light-dark(#8c959f, #6e7681); background: light-dark(#f6f8fa, #212830); cursor: default; }"
+    },
+    {
+      "name": "File Tree Row",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "The navigation primitive. A 20px hit target around a 13px box: the box is what the reviewer sees, the target is what they hit.",
+      "html": "<div class=\"ds-tree-row\" tabindex=\"0\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Z\"></path></svg><span class=\"ds-tree-path\">ui/</span><span class=\"ds-tree-name\">ThreadCard.tsx</span><span class=\"ds-tree-count\">+42 -7</span></div>",
+      "css": ".ds-tree-row { color-scheme: light dark; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; font: 400 13px/1.5 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; color: light-dark(#1f2328, #e6edf3); cursor: pointer; transition: background-color 0.12s ease; } .ds-tree-row svg { flex: none; color: light-dark(#8c959f, #6e7681); } .ds-tree-row:hover { background: light-dark(#eef1f4, #262c36); } .ds-tree-row:focus-visible { outline: 2px solid light-dark(#0969da, #4493f8); outline-offset: -2px; } .ds-tree-path { color: light-dark(#59636e, #9198a1); } .ds-tree-count { margin-left: auto; font-size: 11px; color: light-dark(#59636e, #9198a1); }"
+    },
+    {
+      "name": "Injected Card",
+      "kind": "card",
+      "refersTo": "card-injected",
+      "description": "The entry point, in a shadow root on github.com. The one surface licensed to be expressive, because it has to read as not part of GitHub while sitting inside GitHub.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><span class=\"ds-card-title\">A Better Reviewer</span><span class=\"ds-card-sub\">#412</span></div><button class=\"ds-cta\">Start a Better Review</button></div>",
+      "css": ".ds-card { color-scheme: light dark; position: relative; display: flex; flex-direction: column; gap: 12px; min-width: 248px; padding: 14px; border: 1px solid transparent; border-radius: 14px; font: 500 14px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; color: light-dark(#1f2328, #e6edf3); background: linear-gradient(160deg, light-dark(#ffffff, #1b222c), light-dark(#f3f6fa, #10161e)) padding-box, linear-gradient(140deg, light-dark(rgba(31, 136, 61, 0.7), rgba(63, 185, 80, 0.8)), light-dark(rgba(9, 105, 218, 0.45), rgba(88, 166, 255, 0.5)) 26%, light-dark(#d1d9e0, #3d444d) 56%, light-dark(#d1d9e0, #3d444d)) border-box; box-shadow: 0 10px 28px light-dark(rgba(31, 35, 40, 0.14), rgba(1, 4, 9, 0.62)), 0 4px 18px -8px light-dark(rgba(31, 136, 61, 0.4), rgba(63, 185, 80, 0.36)); } .ds-card-head { display: flex; align-items: baseline; gap: 8px; } .ds-card-title { font-size: 13px; font-weight: 600; } .ds-card-sub { font-size: 13px; font-weight: 500; color: light-dark(#59636e, #9198a1); }"
+    },
+    {
+      "name": "Injected Card CTA",
+      "kind": "button",
+      "refersTo": "cta-injected",
+      "description": "Lit top to bottom while the card is lit from a corner, so the two gradients do not fight. Active returns to 0 and dims: a button that only ever rises has no bottom to it.",
+      "html": "<button class=\"ds-cta\">Start a Better Review</button>",
+      "css": ".ds-cta { color-scheme: light dark; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 18px; font: 600 14px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; color: #ffffff; border: 1px solid light-dark(rgba(31, 35, 40, 0.16), rgba(240, 246, 252, 0.12)); border-radius: 999px; background: linear-gradient(180deg, #2ea043, light-dark(#1a7f37, #187433)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 12px -5px light-dark(rgba(31, 136, 61, 0.55), rgba(63, 185, 80, 0.4)); cursor: pointer; transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms ease-out, filter 150ms ease-out; } .ds-cta:hover { transform: translateY(-1px); filter: brightness(1.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 16px -6px light-dark(rgba(31, 136, 61, 0.6), rgba(63, 185, 80, 0.5)); } .ds-cta:active { transform: translateY(0); filter: brightness(0.97); } .ds-cta:focus-visible { outline: 2px solid light-dark(#0969da, #4493f8); outline-offset: 2px; } @media (prefers-reduced-motion: reduce) { .ds-cta { transition: none; } .ds-cta:hover { transform: none; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Borrowed Room",
+    "overview": "This system furnishes a room in someone else's house. A reviewer arrives from a github.com pull request page and lands on a page that is not github.com, and the design's entire job is to make that transition unnoticeable. Nothing announces itself as new. There is no logo lockup on the review page, no accent colour that GitHub does not already use, no typeface GitHub does not already use. The improvement the reviewer feels is speed and keyboard reach, not decoration. If someone screenshots the review page and a colleague cannot immediately tell it is not GitHub, the system is working.\n\nThat constraint is load-bearing rather than lazy. Both @pierre/diffs and @pierre/trees render into shadow roots and theme themselves from color-scheme: light dark plus light-dark(). Matching them means there is one source of truth for theme, the operating system, and no second theme system to drift. Every colour is a GitHub Primer value written as a light-dark() pair, and it is named as a Primer value so nobody later mistakes it for a choice that is theirs to nudge. Changing one of these is not a taste decision; it is a decision to introduce a seam.\n\nThe density is that of a tool used under load. The workhorse size is 12px, not 14px. Controls are 28px tall, not 40px. Padding is measured in 4px and 6px steps, not 16px ones. This system explicitly rejects the visual language of a developer tool that is being sold: no gradient hero, no metric tiles, no purple-to-blue accent, no illustrated empty states. It equally rejects being a second GitHub with everything in it, and the interface should never read as though it is trying to be comprehensive.",
+    "keyCharacteristics": [
+      "Dual-theme by default, driven entirely by color-scheme: light dark and light-dark(). There is no theme toggle and no theme context.",
+      "GitHub Primer palette, hard-coded and matched deliberately.",
+      "System font stack only. Zero web fonts, zero network requests for type.",
+      "Dense: 11/12/13px carry the interface; 14px is body prose.",
+      "Flat by default. Three shadows exist and all three mean \"this floats\".",
+      "One accent (Primer blue) for interaction, one green for affirmative action, one red for destructive and deletion.",
+      "Motion is 120-150ms and confined to colour, with two exceptions, both on the injected card."
+    ],
+    "rules": [
+      {
+        "name": "The Matched Value Rule",
+        "body": "Every colour in this system exists in GitHub Primer at the same role name. Introducing a colour that Primer does not have requires a reason that survives the question \"what happens at the seam when a reviewer looks at both pages in the same minute\". There are two standing exceptions, both on the injected card.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Blue Rule",
+        "body": "#0969da / #4493f8 is the only blue. It means interaction. A second blue for information, for headings, or for a link that is somehow different, is prohibited. Native controls are pinned to it via accent-color for exactly this reason.",
+        "section": "colors"
+      },
+      {
+        "name": "The Pushed-In, Not Pulled-Out Rule",
+        "body": "When Pierre's colours are wrong, they are overridden from this system rather than copied out of it. Read the fallback slot (--diffs-light-bg), not the declared property (--diffs-bg), because :host inside the shadow sheet declares the latter and beats anything inherited. Never duplicate a Pierre value into page CSS: two copies drift.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight-First Rule",
+        "body": "Hierarchy is established by weight (400 to 600) and by colour (Foreground Default to Foreground Muted) before it is established by size. The whole scale spans 11px to 22px; there is no room to shout, so do not try.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Web Font Rule",
+        "body": "Prohibited without exception. The system stack is not a fallback here, it is the choice.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Eyebrow Rule",
+        "body": "No small uppercase tracked labels above sections. This is a tool, not a landing page, and at 11px an uppercase tracked label is both unreadable and a genre signal from a genre this product rejects. All-caps is permitted only inside a status value that GitHub itself sends in caps.",
+        "section": "typography"
+      },
+      {
+        "name": "The Shadow Means Float Rule",
+        "body": "If the element is in normal flow, it gets a border. If it is in a portal, a popover, or someone else's page, it may have a shadow. There is no third case, and there is no decorative shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do write every colour as a light-dark() pair from the token list in section 2. Both halves, always. A single-value colour is a bug in one of the two themes.",
+      "Do name the Primer role the value came from when adding a token, so the next reader knows it is matched rather than chosen.",
+      "Do override Pierre's colours through the fallback slot (--diffs-light-bg) or by targeting the host element from the outer tree. Setting --diffs-bg does nothing: :host declares it and wins.",
+      "Do separate surfaces with a 1px Primer Border Default line or a step to Canvas Subtle. Reach for a shadow only when the element genuinely floats.",
+      "Do carry status in a word first. \"Checks failed\" with red text, never red text alone. The most common colour vision deficiency makes red and green the two worst colours to encode a diff's primary signal in.",
+      "Do keep the type between 11px and 22px and get hierarchy from weight and from Foreground Muted.",
+      "Do give every animation a prefers-reduced-motion: reduce alternative, and prefer colour-only transitions that need none.",
+      "Do use real disabled colours. opacity on the primary button drops its label to 2.0:1.",
+      "Do keep the focus ring. 2px Accent Foreground at 1px offset, or -2px inside a scrolling container so it is not clipped.",
+      "Do label buttons verb-plus-object: \"Submit review\", \"Resolve conversation\", \"Save token\"."
+    ],
+    "donts": [
+      "Don't introduce a colour GitHub Primer does not have. See The Matched Value Rule.",
+      "Don't add a second blue. Accent Foreground means interaction and nothing else means interaction.",
+      "Don't load a web font. The system stack is the choice, not the fallback.",
+      "Don't use border-left or border-right above 1px as a coloured stripe. The options page warning panel currently does this (border-left-width: 4px) and it is the one piece of the system that should not be copied. Full border, or a background tint, or a leading icon.",
+      "Don't build the visual language of a tool that is being sold: no gradient hero, no metric tiles, no purple-to-blue accent, no illustrated empty states, no product tour. PRODUCT.md names \"a SaaS-looking developer tool\" as an anti-reference.",
+      "Don't write chatty or cute copy. No emoji in interface text, no exclamation marks, no \"Oops! Something went wrong.\" Say what failed and what to do.",
+      "Don't nest cards, and don't reach for a card grid where a list of rows would do. This interface is rows.",
+      "Don't put a small uppercase tracked eyebrow above a section.",
+      "Don't apply a decorative shadow, a glass blur, or a gradient anywhere except the injected card, whose exceptions are enumerated in section 5 and are not precedents.",
+      "Don't animate layout properties. Colour, transform and opacity only, and on the review page really just colour.",
+      "Don't let the injected card grow. It is 248px of someone else's page and every addition to it is taken from a site the user came to read.",
+      "Don't write a literal colour outside ui/tokens.css. If the value is used three times it is a token; if it is used once it needs a comment saying why it is not."
+    ]
+  }
+}

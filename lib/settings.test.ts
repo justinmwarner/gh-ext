@@ -165,6 +165,27 @@ describe('how a diff is drawn', () => {
     },
   );
 
+  it('leaves the syntax theme to Pierre until asked otherwise', () => {
+    expect(DEFAULT_SETTINGS.diffTheme).toBe('');
+    expect(parseSettings({}).diffTheme).toBe('');
+  });
+
+  it('reads a stored syntax theme', () => {
+    expect(parseSettings({ diffTheme: 'nord' }).diffTheme).toBe('nord');
+    expect(
+      parseSettings({ diffTheme: 'pierre-dark-tritanopia' }).diffTheme,
+    ).toBe('pierre-dark-tritanopia');
+  });
+
+  it('falls back rather than handing Pierre a theme it cannot draw', () => {
+    // A settings blob from a later version, or a theme Shiki has dropped.
+    // Passed through, it renders a diff with no highlighting and no
+    // explanation; refused here, the reviewer gets the default back.
+    expect(parseSettings({ diffTheme: 'solarized-mauve' }).diffTheme).toBe('');
+    expect(parseSettings({ diffTheme: 42 }).diffTheme).toBe('');
+    expect(parseSettings({ diffTheme: null }).diffTheme).toBe('');
+  });
+
   it.each(['splitView', 'ignoreWhitespace', 'hideGenerated'] as const)(
     'falls back to off for a non-boolean %s',
     (key) => {

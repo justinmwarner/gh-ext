@@ -23,7 +23,7 @@
  * is `lib/keymap.ts`; this is only what happens next.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PrPayload } from '@/lib/messages';
 import {
   BOTH_SIDES,
@@ -142,6 +142,25 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    */
   const settings = useSettings();
   const diffStyle: DiffStyle = settings.splitView ? 'split' : 'unified';
+
+  /**
+   * Tell the stylesheet to stop overriding Pierre's addition and deletion
+   * colours, because the reviewer has chosen a theme and those are its job now.
+   *
+   * On `<html>` rather than on the shell, because the rule it gates sits on
+   * `:root` alongside the rest of the Pierre slots — those have to be declared
+   * where the custom properties inherit from, which is the document element.
+   *
+   * The stylesheet carries the reasoning. In one line: the themes most worth
+   * choosing are the ones built for colour vision deficiency, and keeping a
+   * Primer red and a Primer green on the added and removed lines would undo
+   * exactly the thing they were chosen to do.
+   */
+  useEffect(() => {
+    const root = document.documentElement;
+    if (settings.diffTheme === '') root.removeAttribute('data-syntax-theme');
+    else root.setAttribute('data-syntax-theme', settings.diffTheme);
+  }, [settings.diffTheme]);
   /**
    * What the repository declares about its own generated files.
    *
@@ -463,6 +482,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               }
               sides={sides}
               diffStyle={diffStyle}
+              syntaxTheme={settings.diffTheme}
               ignoreWhitespace={settings.ignoreWhitespace}
               hideGenerated={settings.hideGenerated}
               gitAttributes={gitAttributes}

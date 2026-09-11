@@ -71,18 +71,36 @@ export function MenuButton({ label, items }: MenuButtonProps) {
       // The click that opened the menu is also a click on the page. Without
       // this the watcher sees it and the menu flickers shut.
       if (target instanceof Node && host.current?.contains(target) === true) return;
-      setOpen(false);
+      // Only reclaim the keyboard if the keyboard was in here. Opening puts
+      // focus on the first item, so dismissing by pointer would otherwise
+      // strand it on `<body>` when the click lands somewhere unfocusable. The
+      // guard matters because this runs on `pointerdown`, before the browser
+      // has moved focus to whatever is being clicked — restoring
+      // unconditionally would take focus off the thing the reviewer is in the
+      // middle of pressing.
+      const inside =
+        document.activeElement instanceof Node &&
+        host.current?.contains(document.activeElement) === true;
+      if (inside) shut();
+      else setOpen(false);
     };
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [open]);
 
   // The pointer is not required: opening puts the keyboard on the first item.
+  //
+  // Keyed on the first item's *id*, not on `items`. Callers build that array
+  // inline, so its identity changes on every render of the component holding
+  // the menu — and those re-render on any session change. Depending on the
+  // array meant a background resolve or viewed-toggle re-ran this while the
+  // menu was open, dragging focus off whatever the reviewer had arrowed to and
+  // back to the top. The id is what this effect actually reads.
+  const firstId = items[0]?.id;
   useEffect(() => {
-    if (!open) return;
-    const first = items[0];
-    if (first !== undefined) elements.current.get(first.id)?.focus();
-  }, [open, items]);
+    if (!open || firstId === undefined) return;
+    elements.current.get(firstId)?.focus();
+  }, [open, firstId]);
 
   const shut = (): void => {
     setOpen(false);

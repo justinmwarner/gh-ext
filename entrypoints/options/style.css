@@ -1,0 +1,257 @@
+/*
+ * The options page's chrome.
+ *
+ * Colours come from `ui/tokens.css`, which main.tsx imports ahead of this file
+ * and which the review page and the injected card import too.
+ *
+ * This used to be an inline <style> in index.html. Inline, it could not share
+ * those tokens, so the palette existed here a second time in literal hex and
+ * drifted from the review page's copy.
+ */
+
+:root {
+  /* The review page declares the same pair, and both Pierre packages theme
+     themselves this way. Without it this is the one screen in the extension
+     that cannot follow the OS — and it is the first screen a new reviewer
+     sees, reached from a dark review page by a button, as a full-window white
+     flash.
+
+     On `:root` rather than `body`, both to match the review page and because
+     the user agent reads it there for the canvas and the scrollbars. index.html
+     carries the matching <meta name="color-scheme"> so the first paint is
+     right before this file has loaded at all — which matters more now that
+     this is a separate request rather than markup in the head. */
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg-default);
+  background: var(--canvas-default);
+}
+main {
+  max-width: 44rem;
+}
+h1 {
+  font-size: 1.375rem;
+  margin: 0 0 1.5rem;
+}
+h2 {
+  font-size: 1rem;
+  margin: 2rem 0 0.5rem;
+}
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+/* Matches the review page's unlock field, because the two are the same
+   interaction reached from different places.
+
+   `color` and `background` are not optional here. Without them the user agent
+   draws its own dark form control — measured at #3b3b3b on a #0d1117 page,
+   a light grey box on a near-black one — and the placeholder below lands at
+   2.43:1 against it. */
+input[type="password"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: inherit;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+/* A placeholder is text and answers to the same 4.5:1 as any other text. The
+   UA default is #757575 whatever the field is sitting on, which is the whole
+   problem. */
+input[type="password"]::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
+}
+
+/* The review page's ring, so focus looks the same on both of the extension's
+   pages rather than falling through to whatever each browser draws. */
+:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 1px;
+}
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+button {
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-subtle);
+  cursor: pointer;
+}
+/* Real disabled colours rather than a blanket opacity, the same way the review
+   page does it. `opacity` composites the label along with the fill, and the
+   label is the part that has to stay readable — it is what says the control is
+   off rather than broken. */
+button:disabled {
+  cursor: default;
+  color: var(--fg-subtle);
+  border-color: var(--border-default);
+  background: var(--canvas-subtle);
+}
+/* The setup walkthrough. Numbers matter here — this is a sequence
+   someone follows on another site with this page beside it. */
+ol.setup {
+  margin: 0 0 1.5rem;
+  padding-left: 1.25rem;
+  line-height: 1.6;
+}
+ol.setup li { margin-bottom: 0.6rem; }
+ol.setup a { color: inherit; }
+table.perms {
+  border-collapse: collapse;
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.9em;
+}
+table.perms th,
+table.perms td {
+  text-align: left;
+  padding: 0.25rem 0.9rem 0.25rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  vertical-align: top;
+}
+table.perms th { font-weight: 600; color: var(--fg-muted); }
+/* The Reviewing section. Radios and a checkbox, each with its
+   consequence written under it — these change what happens when a button
+   is pressed on another site, which is not something to leave to a
+   three-word label. */
+section.settings {
+  margin: 0 0 2rem;
+}
+fieldset.choices {
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem 0.9rem;
+}
+fieldset.choices legend {
+  font-weight: 600;
+  padding: 0 0.35rem;
+}
+fieldset.choices label,
+label.check {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.1rem 0.55rem;
+  align-items: start;
+  font-weight: 400;
+  margin: 0 0 0.5rem;
+  cursor: pointer;
+}
+fieldset.choices label:last-child,
+label.check {
+  margin-bottom: 0;
+}
+fieldset.choices input,
+label.check input {
+  margin: 0.2rem 0 0;
+}
+label.check input:disabled,
+label.check:has(input:disabled) {
+  cursor: default;
+}
+/* The disabled label carries the *explanation* of why the control is off —
+   "Not available when reviews open in this tab: it would replace the pull
+   request the moment you arrived" — so it is the last text on this page that
+   should be faded out. A blanket 0.55 measured 2.36:1 on the hint in light
+   mode. Colour instead, and the hint keeps its own. */
+label.check:has(input:disabled) > span {
+  color: var(--fg-muted);
+}
+/* A labelled control that is not a checkbox, so it stacks rather than sitting
+   in the two-column grid the check rows use. */
+label.field {
+  display: block;
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+label.field select {
+  display: block;
+  margin: 0.35rem 0 0;
+  padding: 0.3rem 0.5rem;
+  max-width: 22rem;
+  width: 100%;
+  font: inherit;
+  font-weight: 400;
+  color: inherit;
+  /* Both named, for the same reason the token field names them: left to the
+     user agent this draws as a light control on a dark page. */
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+label.field .hint {
+  font-weight: 400;
+}
+
+label > span > .hint {
+  display: block;
+}
+.hint {
+  color: var(--fg-muted);
+  margin: 0.35rem 0 0;
+}
+/* A full border, not a thick left stripe. The stripe is a decoration that
+   reads as a system convention it is not part of, and this panel is important
+   enough to say so with the whole of its edge. */
+.warning {
+  border: 1px solid var(--danger-fg);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 1.5rem 0;
+}
+.warning h2 {
+  margin: 0 0 0.5rem;
+  color: var(--danger-fg);
+}
+.warning p {
+  margin: 0 0 0.5rem;
+}
+.warning p:last-child {
+  margin-bottom: 0;
+}
+.result {
+  margin: 0.75rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.result.bad {
+  color: var(--danger-fg);
+}
+.result.good {
+  color: var(--success-fg);
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+dt {
+  color: var(--fg-muted);
+}
+dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--canvas-subtle);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}

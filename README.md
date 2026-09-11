@@ -15,6 +15,13 @@ survive a failed post, multi-line comments, suggestion authoring, noise
 filtering, diff search, expand-unchanged-context, and scoping the diff to one
 commit, a range of commits, or "changes since my last review".
 
+The diff's syntax colours are yours to pick: seventy-five themes, all already in
+the extension so choosing one downloads nothing. Two of them are high contrast
+and four are built for colour vision deficiency — those redraw additions and
+deletions so that telling them apart does not mean telling red from green, and
+choosing one also stops this extension repainting those lines in its own red and
+green.
+
 Anything it does not do hands off to GitHub through an **Open in GitHub**
 escape hatch.
 
@@ -219,5 +226,4 @@ how to validate a mutation without performing one.
 - The bundle carries an unreachable Shiki WebAssembly chunk. It is dead weight
   in the output, not on the main thread — the default highlighter is the
   JavaScript regex engine and nothing selects the WASM path.
-- The shortcut help overlay has no Escape binding.
 - github.com only. GitHub Enterprise is a base-URL abstraction away.

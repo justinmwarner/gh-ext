@@ -12,11 +12,26 @@
  */
 
 /**
+ * The same palette the review page and the options page use, as text.
+ *
+ * `?raw` rather than a normal import because this stylesheet is not going into
+ * the document — it goes into a shadow root on somebody else's page, as the
+ * text content of a <style> element. The file declares `:root, :host` for
+ * exactly this: `:root` matches on the two extension pages, `:host` matches
+ * here, and neither selector does any harm in the other place.
+ */
+import TOKENS from '@/ui/tokens.css?raw';
+
+/**
  * Identifies the host element on the page.
  *
  * The only part of this component visible from outside the shadow root, which
- * is the point: it is how `sync` asks "is the card already up" and how the end
- * to end suite finds it.
+ * is the point: it is how a fresh mount clears a stale host of its own, and how
+ * the end to end suite finds the card.
+ *
+ * Not how `sync` decides whether to mount. That asks the handle it is holding
+ * whether its host is still connected, which is a different and stricter
+ * question than whether *something* on the page carries this id.
  */
 export const CARD_HOST_ID = 'a-better-reviewer-card';
 
@@ -141,14 +156,19 @@ function createArrow(doc: Document): SVGSVGElement {
 }
 
 /**
- * Primer's palette, hard-coded, with the extension's own colours over it.
+ * The card's own chrome. The palette it draws from is `TOKENS`, above.
  *
- * Reading GitHub's CSS custom properties would track their themes exactly, but
- * those properties are defined on `:root` in the page and do not cross into a
- * shadow root, so every one would have to be read and copied on every theme
- * change. These values have been stable across Primer's light and dark
- * defaults for years, and being one shade off is a far smaller problem than a
- * card that inherits nothing and renders as unstyled HTML.
+ * Reading GitHub's own CSS custom properties would track their themes exactly,
+ * and it would work: custom properties inherit through a shadow boundary, so
+ * `--color-canvas-default` from their `:root` is legible in here, and the
+ * `all: initial` below does not clear it (`all` is defined to reset every
+ * property except custom ones). It is not done because those names are
+ * GitHub's private interface. They are unversioned and can be renamed in any
+ * deploy, and the failure mode is a card that resolves nothing and renders as
+ * unstyled HTML on every pull request page until someone notices. Primer's
+ * *values* have been stable across its light and dark defaults for years;
+ * Primer's variable names have not. Being one shade off is the far smaller
+ * problem, and it is the one this takes.
  *
  * What is *not* Primer is the lit edge, the bloom and the sweep. github.com is
  * a page of grey rectangles by design, and a grey rectangle in the corner of it
@@ -161,6 +181,8 @@ function createArrow(doc: Document): SVGSVGElement {
  * a thing to be closed.
  */
 const STYLES = `
+  ${TOKENS}
+
   :host {
     all: initial;
   }
@@ -170,7 +192,7 @@ const STYLES = `
   .layer {
     font: 500 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
       Helvetica, Arial, sans-serif;
-    color: light-dark(#1f2328, #e6edf3);
+    color: var(--fg-default);
   }
   [hidden] {
     display: none !important;
@@ -199,9 +221,9 @@ const STYLES = `
         linear-gradient(
           140deg,
           light-dark(rgba(31, 136, 61, 0.7), rgba(63, 185, 80, 0.8)),
-          light-dark(rgba(9, 105, 218, 0.45), rgba(88, 166, 255, 0.5)) 26%,
-          light-dark(#d1d9e0, #3d444d) 56%,
-          light-dark(#d1d9e0, #3d444d)
+          light-dark(rgba(9, 105, 218, 0.45), rgba(68, 147, 248, 0.5)) 26%,
+          var(--border-default) 56%,
+          var(--border-default)
         )
         border-box;
     box-shadow:
@@ -240,7 +262,7 @@ const STYLES = `
       ),
       radial-gradient(
         90% 80% at 104% 112%,
-        light-dark(rgba(9, 105, 218, 0.09), rgba(88, 166, 255, 0.13)),
+        light-dark(rgba(9, 105, 218, 0.09), rgba(68, 147, 248, 0.13)),
         transparent 58%
       );
   }
@@ -265,7 +287,7 @@ const STYLES = `
       transparent 34%,
       light-dark(rgba(31, 136, 61, 0.18), rgba(63, 185, 80, 0.14)) 44%,
       light-dark(rgba(255, 255, 255, 0.92), rgba(224, 238, 255, 0.24)) 50%,
-      light-dark(rgba(9, 105, 218, 0.14), rgba(88, 166, 255, 0.14)) 56%,
+      light-dark(rgba(9, 105, 218, 0.14), rgba(68, 147, 248, 0.14)) 56%,
       transparent 66%
     );
     animation: sweep 820ms 200ms cubic-bezier(0.33, 0, 0.15, 1);
@@ -300,7 +322,7 @@ const STYLES = `
        the tile vanishes and the mark reads as three bars floating in space.
        A hairline boundary rather than a lighter tile, so the logo itself is
        the same artwork on both themes. */
-    box-shadow: 0 0 0 1px light-dark(transparent, rgba(240, 246, 252, 0.14));
+    box-shadow: 0 0 0 1px light-dark(transparent, rgba(230, 237, 243, 0.14));
   }
   /* The mark drawing itself: added, removed, unchanged, in that order and from
      the left, which is how the diff underneath renders too. The backwards fill
@@ -326,7 +348,7 @@ const STYLES = `
   .name {
     font-size: 13px;
     font-weight: 500;
-    color: light-dark(#59636e, #9198a1);
+    color: var(--fg-muted);
   }
   .brand {
     display: flex;
@@ -341,7 +363,7 @@ const STYLES = `
     border: 1px solid transparent;
   }
   button:focus-visible {
-    outline: 2px solid light-dark(#0969da, #4493f8);
+    outline: 2px solid var(--accent-fg);
     outline-offset: 2px;
   }
   .collapse {
@@ -355,12 +377,12 @@ const STYLES = `
     line-height: 1;
     border-radius: 999px;
     background: transparent;
-    color: light-dark(#59636e, #9198a1);
+    color: var(--fg-muted);
     transition: background 140ms ease-out, color 140ms ease-out;
   }
   .collapse:hover {
-    background: light-dark(rgba(31, 35, 40, 0.07), rgba(240, 246, 252, 0.1));
-    color: light-dark(#1f2328, #e6edf3);
+    background: light-dark(rgba(31, 35, 40, 0.07), rgba(230, 237, 243, 0.1));
+    color: var(--fg-default);
   }
   /* A pill, matching the collapsed state: the same shape growing and shrinking
      is what makes the two reads as one thing. Its own gradient runs top to
@@ -377,8 +399,13 @@ const STYLES = `
     font-weight: 600;
     border-radius: 999px;
     color: #ffffff;
-    background: linear-gradient(180deg, #2ea043, light-dark(#1a7f37, #187433));
-    border-color: light-dark(rgba(31, 35, 40, 0.16), rgba(240, 246, 252, 0.12));
+    /* The top stop is the success-emphasis token, not a lighter green, because
+       the label is white at 14px/600 — not large text, so it answers to 4.5:1,
+       and it sits across the whole band rather than at the bottom of it. The
+       previous #2ea043 measured 3.37:1 against white; this measures 4.52:1
+       light and 4.63:1 dark at the top edge, 5.08:1 and 5.86:1 at the bottom. */
+    background: linear-gradient(180deg, var(--success-emphasis), light-dark(#1a7f37, #187433));
+    border-color: light-dark(rgba(31, 35, 40, 0.16), rgba(230, 237, 243, 0.12));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.22),
       0 4px 12px -5px light-dark(rgba(31, 136, 61, 0.55), rgba(63, 185, 80, 0.4));
@@ -387,9 +414,14 @@ const STYLES = `
       box-shadow 150ms ease-out,
       filter 150ms ease-out;
   }
+  /* No brightness() here. Lightening the fill is the one hover effect that
+     costs the label contrast, and it costs enough to matter: 1.07 drops the top
+     of the band to 4.02:1, and even 1.04 lands at 4.22:1. The button would be
+     at its least readable exactly while being read. The lift, the deeper
+     shadow and the brighter inset highlight below already say "hover" without
+     touching the fill. The active state still darkens, which only helps. */
   .cta:hover {
     transform: translateY(-1px);
-    filter: brightness(1.07);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.28),
       0 8px 16px -6px light-dark(rgba(31, 136, 61, 0.6), rgba(63, 185, 80, 0.5));
@@ -437,7 +469,7 @@ const STYLES = `
   .status {
     margin: 0;
     font-size: 12px;
-    color: light-dark(#cf222e, #f85149);
+    color: var(--danger-fg);
   }
   .pill {
     display: flex;
@@ -447,7 +479,7 @@ const STYLES = `
     font-size: 13px;
     font-weight: 500;
     border-radius: 999px;
-    color: light-dark(#59636e, #9198a1);
+    color: var(--fg-muted);
     transition:
       transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
       color 140ms ease-out,
@@ -455,7 +487,7 @@ const STYLES = `
   }
   .pill:hover {
     transform: translateY(-1px);
-    color: light-dark(#1f2328, #e6edf3);
+    color: var(--fg-default);
     box-shadow:
       0 14px 30px light-dark(rgba(31, 35, 40, 0.16), rgba(1, 4, 9, 0.66)),
       0 6px 20px -8px light-dark(rgba(31, 136, 61, 0.5), rgba(63, 185, 80, 0.45));
@@ -613,13 +645,26 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
     render();
   }
 
+  /* Focus moves to whatever replaced the thing that was just pressed.
+     Collapsing hides the button the keyboard is standing on, and a hidden
+     element cannot hold focus — without these two lines it falls to <body>,
+     which throws a screen reader's cursor to the top of github.com and loses
+     Shift+Tab's place. Expanding is the worse half: the reviewer expands in
+     order to press the button, so landing them on it is the whole point.
+
+     In the click handlers rather than in `setCollapsed`, deliberately.
+     `setCollapsed` is also how a collapse in one tab reaches every other one,
+     and a background tab must not pull focus. The ring is `:focus-visible`, so
+     a mouse press moves focus without drawing anything. */
   collapse.addEventListener('click', () => {
     setCollapsed(true);
+    pill.focus();
     options.onCollapsedChange(true);
   });
 
   pill.addEventListener('click', () => {
     setCollapsed(false);
+    cta.focus();
     options.onCollapsedChange(false);
   });
 
@@ -636,6 +681,10 @@ export function mountCard(doc: Document, options: CardOptions): CardHandle {
   }
 
   render();
+  // Anything already wearing our id goes first, so mounting twice cannot leave
+  // two of these on the page and cannot leave `CARD_HOST_ID` resolving to the
+  // wrong one. Costs a lookup once per mount.
+  doc.getElementById(CARD_HOST_ID)?.remove();
   doc.body.append(host);
 
   return {

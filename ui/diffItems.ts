@@ -377,15 +377,18 @@ export function showsTextDiff(file: ReviewFile, mode: string): boolean {
  * its header and its annotation — which is what it looked like when these were
  * collapsed items, and the appearance is not meant to change.
  *
- * **Why not a `file` item.** One was tried, and it is better in one way and
- * worse in another. A `diff` item lays its annotations out per side, so in
- * split view the comparison renders in one column: measured at 407px of an
- * 880px card, against 848px for a `file` item, which has no sides. But a file's
- * line count comes from `linesFromFileContents`, whose offsets start at `[0]`,
- * so *even empty contents are one line* — every rich card grew a blank row with
- * a `1` in its gutter, in both views, under a PNG. A constant piece of wrong
- * chrome on every rich card lost to a narrower comparison in the view that is
- * not the default.
+ * **Why not a `file` item.** One was tried and refused, for one reason. A
+ * file's line count comes from `linesFromFileContents`, whose offsets start at
+ * `[0]`, so *even empty contents are one line* — every rich card grew a blank
+ * row with a `1` in its gutter, in both views, under a PNG. A constant piece of
+ * wrong chrome on every rich card is not worth it.
+ *
+ * This used to be a trade rather than a plain refusal: a `diff` item lays its
+ * annotations out per side, so in split view the comparison drew in one column,
+ * measured at 407px of an 880px card against 848px for a `file` item. That cost
+ * is gone — `FULL_WIDTH_RICH_BODY` in `DiffColumn.tsx` collapses the empty pair
+ * to one column, and the body now measures 845px. Both halves are had, and the
+ * phantom line is the only thing still deciding this.
  *
  * Cached on the `ReviewFile` for the same reason the parsed diffs are: a fresh
  * object every render reads to `CodeView` as a different file to render.

@@ -187,6 +187,14 @@ export interface DiffColumnProps {
   /** Unified or side by side. From the options page — see `Shell`. */
   diffStyle?: DiffStyle;
   /**
+   * Which syntax theme to draw the code in. Empty means Pierre chooses.
+   *
+   * Also decides whether this page keeps overriding Pierre's addition and
+   * deletion colours — see `syntaxTheme` in `Shell`, which is where that is
+   * explained, because the override lives in CSS rather than here.
+   */
+  syntaxTheme?: string;
+  /**
    * Read every file through the whitespace rewrite rather than GitHub's patch.
    *
    * One flag for the whole column, from the options page. It was a set of
@@ -225,6 +233,41 @@ export type HeldBack = 'generated' | 'whitespace';
 // this page does not use: no item is ever handed `edit`, and `createEditor` is
 // not on the React options at all. `undefined` is what the components
 // themselves default it to; only the exported aliases require it spelled out.
+/**
+ * A rich comparison gets the whole card, rather than one split column of it.
+ *
+ * A rich card hands Pierre an empty diff (`emptyDiffFor` in `diffItems.ts`), so
+ * in split view both columns hold nothing but the file-level annotation the
+ * body is slotted into — and Pierre sizes annotation content to a single
+ * column. Measured on the fixture, a rendered Markdown document drew 405px
+ * inside an 880px card, beside a 440px column containing nothing at all. None
+ * of these comparisons is a two-column diff; an image's own side-by-side is
+ * laid out inside `.image-compare`. So the pair collapses to one.
+ *
+ * The selector is what keeps this off ordinary diffs. `-1,-1` is Pierre's file
+ * level (§B.2), and `:only-child` is the load-bearing half: a *text* diff can
+ * carry a file-level annotation too — unanchored threads, the whitespace
+ * notice — and its columns hold its lines as well, which are the diff the
+ * reviewer asked for.
+ *
+ * Delivered through `unsafeCSS` because every element it names is inside the
+ * `diffs-container` shadow root, which the page stylesheet cannot reach. That
+ * is the library's own door for this (§E.6) and it ships inside `@layer
+ * unsafe`, the highest layer, so it wins without a specificity argument.
+ * §E.6 also warns that structural selectors are the fragile kind across Pierre
+ * versions: if a future release moves the annotation, this stops matching and
+ * the body goes back to half a card. It does not break anything else.
+ */
+const FULL_WIDTH_RICH_BODY = /* css */ `
+pre[data-diff-type="split"]:has([data-content] > [data-line-annotation="-1,-1"]:only-child) {
+  grid-template-columns: 1fr;
+}
+
+pre[data-diff-type="split"]:has([data-content] > [data-line-annotation="-1,-1"]:only-child) > [data-deletions] {
+  display: none;
+}
+`;
+
 const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata, undefined> = {
   // The default rather than the answer: the reviewer arrived from GitHub's
   // Files-changed tab, which is unified, and the `diffStyle` prop overrides it.
@@ -233,6 +276,7 @@ const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata, undefined> = {
   // The "+" in the gutter, and the drag that turns it into a range.
   enableGutterUtility: true,
   enableLineSelection: true,
+  unsafeCSS: FULL_WIDTH_RICH_BODY,
 };
 
 /**
@@ -324,6 +368,7 @@ export function DiffColumn({
   hideGenerated = false,
   gitAttributes = NO_ATTRIBUTES,
   diffStyle = 'unified',
+  syntaxTheme = '',
   ref,
 }: DiffColumnProps) {
   const session = useReviewSession();
@@ -966,6 +1011,10 @@ export function DiffColumn({
       // what changing the layout has to do and the reason this is in the
       // dependency list rather than read through a ref.
       diffStyle,
+      // Omitted rather than passed empty. Pierre falls back to its own
+      // light/dark pair only when the key is absent, so an empty string here
+      // would be a theme named '' and nothing would highlight.
+      ...(syntaxTheme === '' ? {} : { theme: syntaxTheme }),
       // Present only when there is somewhere to load from. Its mere presence
       // is what makes Pierre draw an expander at all, so an always-present
       // loader that always failed would be worse than none.
@@ -990,7 +1039,7 @@ export function DiffColumn({
         noticeExpansion.current(path, fileDiff, instance);
       },
     }),
-    [loadDiffFiles, diffStyle],
+    [loadDiffFiles, diffStyle, syntaxTheme],
   );
 
   /** The source text under the composer's selection, for the suggestion button. */
@@ -1042,6 +1091,53 @@ export function DiffColumn({
       );
     },
     [composer, composerLines, closeComposer, byPath, modes, recomputed, layouts, blobs],
+  );
+
+  /**
+   * The file card, memoized because `SlotPortals` watches this callback's
+   * identity as well as the item versions.
+   *
+   * An inline arrow here defeated both its `memo` and the `useMemo` building
+   * its portal list, so every mounted card, thread and composer re-rendered on
+   * every render of this column — including every frame of a rail drag.
+   *
+   * Safe to memoize now, and deliberately was not before: `versionOf` in
+   * `diffItems.ts` folds `mode`, `collapsed` and `body` into each item's
+   * version, which is the guard rail its comment describes. Without that, a
+   * memoized callback would leave the mode buttons changing nothing — silently,
+   * one file type at a time.
+   */
+  const renderHeader = useCallback(
+    (item: { id: string }) => {
+      const file = byPath.get(item.id);
+      if (file === undefined) return null;
+      return (
+        <FileCard
+          file={file}
+          collapsed={collapsed.has(file.path)}
+          onToggleCollapsed={toggleCollapsed}
+          onHeaderRef={registerHeader}
+          mode={modes.get(file.path) ?? RAW.id}
+          onChangeMode={changeMode}
+          whitespace={recomputed.get(file.path) ?? null}
+          held={flags.get(file.path) ?? null}
+          shown={shown.has(file.path)}
+          onToggleShown={toggleShown}
+        />
+      );
+    },
+    [
+      byPath,
+      collapsed,
+      toggleCollapsed,
+      registerHeader,
+      modes,
+      changeMode,
+      recomputed,
+      flags,
+      shown,
+      toggleShown,
+    ],
   );
 
   /**
@@ -1191,24 +1287,7 @@ export function DiffColumn({
           className="diff-view"
           renderCodeViewFooter={renderTail}
           renderAnnotation={renderAnnotation}
-          renderCustomHeader={(item) => {
-            const file = byPath.get(item.id);
-            if (file === undefined) return null;
-            return (
-              <FileCard
-                file={file}
-                collapsed={collapsed.has(file.path)}
-                onToggleCollapsed={toggleCollapsed}
-                onHeaderRef={registerHeader}
-                mode={modes.get(file.path) ?? RAW.id}
-                onChangeMode={changeMode}
-                whitespace={recomputed.get(file.path) ?? null}
-                held={flags.get(file.path) ?? null}
-                shown={shown.has(file.path)}
-                onToggleShown={toggleShown}
-              />
-            );
-          }}
+          renderCustomHeader={renderHeader}
         />
       )}
     </main>

@@ -8,6 +8,8 @@
  * browser to prove it.
  */
 
+import { THEME_FOLLOWS_PAGE, isDiffTheme } from './compare/themes';
+
 /** Where a review opens. */
 export type OpenIn = 'new-tab' | 'new-window' | 'same-tab';
 
@@ -69,6 +71,28 @@ export interface Settings {
    * expensive on the first pull request they ever open here.
    */
   hideGenerated: boolean;
+  /**
+   * Which syntax theme the diff is drawn in.
+   *
+   * A theme id from `lib/compare/themes.ts`, or {@link THEME_FOLLOWS_PAGE} —
+   * the empty string, and the default — meaning Pierre picks its own pair and
+   * follows the page.
+   *
+   * It exists because of contrast rather than taste. Pierre's default palette
+   * has tokens that measure 2.14:1 against a white page, which is below what
+   * any text needs and well below what code a reviewer reads character by
+   * character deserves. Two answers were possible: pick a better theme for
+   * everybody, or let the reviewer pick. The second is right here, because the
+   * people worst served by the default are the ones whose needs nobody else can
+   * guess — the high-contrast themes and the colour-vision-deficiency themes
+   * are both in the list, and both are somebody's answer and nobody else's.
+   *
+   * Naming one theme rather than a light/dark pair is deliberate. A pair sounds
+   * tidier and is worse: most of the list has no counterpart in the other mode,
+   * so a pair either halves what can be offered or invents partnerships the
+   * reviewer did not choose.
+   */
+  diffTheme: string;
 }
 
 /** `storage.local` key holding the whole {@link Settings} object. */
@@ -101,6 +125,10 @@ export const DEFAULT_SETTINGS: Settings = {
   ignoreWhitespace: false,
   splitView: false,
   hideGenerated: false,
+  // Unset, so Pierre keeps choosing. A theme named here would be this version's
+  // taste frozen into every install's storage, and a later change to it
+  // invisible to anyone who had already opened the options page.
+  diffTheme: THEME_FOLLOWS_PAGE,
 };
 
 /**
@@ -151,6 +179,13 @@ export function parseSettings(raw: unknown): Settings {
     ignoreWhitespace: flag('ignoreWhitespace'),
     splitView: flag('splitView'),
     hideGenerated: flag('hideGenerated'),
+    // Checked against what this build can actually draw, rather than passed
+    // through. A theme id from a later version, or one Shiki has since dropped,
+    // would otherwise reach Pierre and produce a diff rendered without
+    // highlighting at all, with nothing on the page to say why.
+    diffTheme: isDiffTheme(stored.diffTheme)
+      ? stored.diffTheme
+      : DEFAULT_SETTINGS.diffTheme,
   };
 }
 

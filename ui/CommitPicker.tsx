@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PrCommit } from '@/lib/github/types';
 import { commitLabel } from '@/lib/review/diffScope';
 import { shortDate } from './timestamp';
+import { useModalFocus } from './useModalFocus';
 
 export interface CommitPickerProps {
   commits: readonly PrCommit[];
@@ -53,6 +54,9 @@ export function CommitPicker({
     panel.current?.focus();
   }, []);
 
+  // Trap Tab inside the dialog, and hand the keyboard back on close.
+  useModalFocus(panel);
+
   const index = positions(commits);
   const range =
     selected === null
@@ -83,7 +87,14 @@ export function CommitPicker({
         // to it and close the thing that was just clicked.
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose();
+          if (event.key !== 'Escape') return;
+          // Focus rests on this div rather than an input, so `isTypingTarget`
+          // is false and every single-key shortcut still reaches the document
+          // through an `aria-modal` dialog — `j` moving the file behind it, `v`
+          // marking one the reviewer cannot see. NoticeCenter stops it here for
+          // the same reason.
+          event.stopPropagation();
+          onClose();
         }}
       >
         <header className="overlay-head">

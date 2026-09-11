@@ -11,6 +11,7 @@
  * they are one thing the reviewer can do.
  */
 
+import { useEffect, useRef } from 'react';
 import {
   SHORTCUTS,
   type ShortcutGroup,
@@ -20,6 +21,7 @@ import {
   shortcutsByAction,
 } from '@/lib/keymap';
 import { platformString } from './platform';
+import { useModalFocus } from './useModalFocus';
 
 /** The order the groups read in. Derived from the table, not a second list. */
 function groupsInOrder(): ShortcutGroup[] {
@@ -33,6 +35,17 @@ function groupsInOrder(): ShortcutGroup[] {
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const mod = resolveMod(platformString());
   const actions = shortcutActions();
+  const panel = useRef<HTMLDivElement>(null);
+
+  // Escape closes, and the panel takes focus so it does. Both are what every
+  // other overlay on this page does, and this was the one that did neither —
+  // which is a poor joke in the overlay whose whole subject is the keyboard.
+  useEffect(() => {
+    panel.current?.focus();
+  }, []);
+
+  // Trap Tab inside the dialog, and hand the keyboard back on close.
+  useModalFocus(panel);
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -41,9 +54,14 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
+        tabIndex={-1}
+        ref={panel}
         // The backdrop closes; a click on the panel itself must not travel up
         // to it and close the thing that was just clicked.
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onClose();
+        }}
       >
         <header className="overlay-head">
           <h2>Keyboard shortcuts</h2>

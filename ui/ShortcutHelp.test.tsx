@@ -8,6 +8,7 @@
  */
 
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { SHORTCUTS, resolveMod, shortcutLabel } from '@/lib/keymap';
 import { ShortcutHelp } from './ShortcutHelp';
@@ -64,5 +65,50 @@ describe('ShortcutHelp', () => {
 
     (container.querySelector('.overlay-backdrop') as HTMLElement).click();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the keyboard when it opens, and gives it back on Escape', async () => {
+    const onClose = vi.fn();
+    render(<ShortcutHelp onClose={onClose} />);
+
+    // Focused on mount, which is what makes the key below land here rather
+    // than on whatever the reviewer was reading behind it.
+    const panel = screen.getByRole('dialog');
+    expect(document.activeElement).toBe(panel);
+
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the keyboard to wherever it came from', () => {
+    // The reviewer pressed `?` from somewhere in a long diff. Closing used to
+    // drop focus on <body>, so the next Tab restarted at the top of the page.
+    const trigger = document.createElement('button');
+    document.body.append(trigger);
+    trigger.focus();
+
+    const { unmount } = render(<ShortcutHelp onClose={() => {}} />);
+    expect(document.activeElement).not.toBe(trigger);
+
+    unmount();
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+
+  it('keeps Tab inside itself, because it claims to be modal', async () => {
+    render(<ShortcutHelp onClose={() => {}} />);
+    const panel = screen.getByRole('dialog');
+
+    // Close is the only focusable thing in here, so Tab in either direction has
+    // nowhere else to go and must not leave. `aria-modal` tells a screen reader
+    // the page behind does not exist; Tab walking out into it made that a lie.
+    await userEvent.tab();
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    await userEvent.tab();
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    await userEvent.tab({ shift: true });
+    expect(panel.contains(document.activeElement)).toBe(true);
   });
 });

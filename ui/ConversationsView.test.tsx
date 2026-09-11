@@ -60,7 +60,7 @@ describe('ConversationsView', () => {
     );
 
     expect(
-      screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent),
+      screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent),
     ).toEqual(['README.md', 'src/app.ts']);
   });
 
@@ -168,7 +168,7 @@ describe('ConversationsView', () => {
     // place a resolved thread on an unrendered file can be reached from.
     mount([reviewThread({ path: 'src/app.ts', line: 2, isResolved: true })]);
 
-    expect(screen.getByRole('heading', { name: 'src/app.ts', level: 3 })).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'src/app.ts', level: 2 })).toBeDefined();
     expect(screen.getByText(/1 resolved/i)).toBeDefined();
   });
 

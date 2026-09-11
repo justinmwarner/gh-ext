@@ -9,6 +9,8 @@
 import { createRoot } from 'react-dom/client';
 import { followLoggingSetting } from '@/lib/settings-store';
 import { App } from '@/ui/App';
+// Before the stylesheet, not after: everything in it refers to these by name.
+import '@/ui/tokens.css';
 import './style.css';
 
 // Not awaited: the page has nothing to say until something fails, and making

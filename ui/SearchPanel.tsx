@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useModalFocus } from './useModalFocus';
 import { type DiffMatch, filterPaths, searchDiff } from '@/lib/review/search';
 import type { ReviewFile } from './reviewFiles';
 
@@ -92,6 +93,7 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
 
   const paths = useMemo(() => files.map((file) => file.path), [files]);
 
@@ -120,6 +122,9 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
     input.current?.focus();
   }, []);
 
+  // Trap Tab inside the dialog, and hand the keyboard back on close.
+  useModalFocus(panel);
+
   const choose = (row: Row | undefined): void => {
     if (row === undefined) return;
     onChoose(row.target);
@@ -130,10 +135,24 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
     <div className="overlay-backdrop" onClick={onClose}>
       <div
         className="overlay search-panel"
+        ref={panel}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={LABELS[mode].title}
         onClick={(event) => event.stopPropagation()}
+        // On the panel rather than on the input, so Escape still closes once
+        // Tab has moved into the results — they are real buttons, and from one
+        // of them a handler bound to the input never sees the key. It reaches
+        // `document`, matches nothing in the keymap, and is dropped, leaving a
+        // dialog the keyboard cannot leave. Every other overlay binds here.
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          // The page behind is still listening; a modal's Escape is its own.
+          event.stopPropagation();
+          onClose();
+        }}
       >
         <input
           ref={input}
@@ -144,10 +163,7 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              onClose();
-            } else if (event.key === 'ArrowDown') {
+            if (event.key === 'ArrowDown') {
               event.preventDefault();
               setActive((at) => Math.min(at + 1, rows.length - 1));
             } else if (event.key === 'ArrowUp') {

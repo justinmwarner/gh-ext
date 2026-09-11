@@ -129,11 +129,11 @@ function Group({
 }) {
   return (
     <section className="conversation-group">
-      <h3 className="conversation-path" title={group.path}>
+      <h2 className="conversation-path" title={group.path}>
         {/* Isolated so the right-to-left truncation reverses where the text is
             cut without reversing the path itself. */}
         <span>{group.path}</span>
-      </h3>
+      </h2>
 
       {!group.inDiff && (
         // The column has no card to scroll to. Saying so is the whole reason

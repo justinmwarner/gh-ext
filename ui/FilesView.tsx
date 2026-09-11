@@ -56,6 +56,8 @@ export interface FilesViewProps {
   sides: AnchorableSides;
   /** Unified or side by side. Passed straight through, like `sides`. */
   diffStyle: DiffStyle;
+  /** Which syntax theme the diff draws in. Empty means Pierre chooses. */
+  syntaxTheme: string;
   /** Draw every file without its whitespace-only changes. Also passed through. */
   ignoreWhitespace: boolean;
   /** Fold away the diff of a file nobody wrote. Also passed through. */
@@ -76,6 +78,7 @@ export function FilesView({
   diff,
   sides,
   diffStyle,
+  syntaxTheme,
   ignoreWhitespace,
   hideGenerated,
   gitAttributes,
@@ -177,6 +180,7 @@ export function FilesView({
           diff={diff}
           sides={sides}
           diffStyle={diffStyle}
+          syntaxTheme={syntaxTheme}
           ignoreWhitespace={ignoreWhitespace}
           hideGenerated={hideGenerated}
           gitAttributes={gitAttributes}

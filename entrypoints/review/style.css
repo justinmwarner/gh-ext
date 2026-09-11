@@ -5,6 +5,11 @@
  * what @pierre/diffs and @pierre/trees do natively, so the page follows the OS
  * the same way the diff will, and there is no second source of truth to keep in
  * sync when those components mount here.
+ *
+ * The colours themselves are in `ui/tokens.css`, which main.tsx imports ahead
+ * of this file and which the options page and the injected card import too.
+ * Everything below refers to them by name; a literal hex here is either a
+ * one-off used once or twice, or a mistake.
  */
 
 :root {
@@ -15,7 +20,7 @@
   --topbar-height: 52px;
   --gap: 8px;
 
-  /* One palette across all three surfaces.
+  /* Pierre's slots, filled from the tokens above.
      ------------------------------------------------------------------
      Both Pierre packages render into shadow roots, so page CSS cannot
      reach them — but their colours are read through custom properties
@@ -28,21 +33,36 @@
      this page at #0d1117, the file tree at #141415 and the diff at
      pure black. Same for "added", which was three colours within
      300px of each other, one of them teal. */
-  --page-bg: light-dark(#ffffff, #0d1117);
-  --page-fg: light-dark(#1f2328, #e6edf3);
-
-  /* Pushed into Pierre rather than pulled out of it: its own #0dbe4e
-     measures 2.47:1 on white, which is unreadable at the 12px these
-     counts are drawn at. Pierre derives its line tints from these with
-     `color-mix`, so the backgrounds stay subtle on their own. */
-  --diffs-addition-color-override: light-dark(#1a7f37, #3fb950);
-  --diffs-deletion-color-override: light-dark(#cf222e, #f85149);
-  --diffs-modified-color-override: light-dark(#0969da, #4493f8);
+  --page-bg: var(--canvas-default);
+  --page-fg: var(--fg-default);
 
   /* Native controls — the viewed checkbox, the palette's search input —
      draw in the UA's own blue otherwise, which is a fifth blue on a page
      that already has enough. */
-  accent-color: light-dark(#0969da, #4493f8);
+  accent-color: var(--accent-fg);
+}
+
+/* Pierre's own addition and deletion colours, replaced with Primer's —
+   but only while the reviewer is letting Pierre choose the theme.
+   ------------------------------------------------------------------
+   Pushed in rather than pulled out: Pierre's own #0dbe4e measures 2.47:1
+   on white, unreadable at the 12px these counts are drawn at. It derives
+   its line tints from these with `color-mix`, so the backgrounds stay
+   subtle on their own.
+
+   The `:not()` is the whole point of the setting. Every one of these is
+   a red or a green, and the themes worth choosing hardest — the
+   protanopia/deuteranopia and tritanopia ones — exist precisely because
+   red against green is the distinction their reviewer cannot make.
+   Overriding them with Primer's red and green would hand that reviewer a
+   theme that changes the syntax colours and then puts the two colours
+   they came here to escape back on the only thing that matters, the
+   added and removed lines. So choosing any theme releases these and lets
+   it speak. `Shell` sets the attribute. */
+:root:not([data-syntax-theme]) {
+  --diffs-addition-color-override: var(--success-fg);
+  --diffs-deletion-color-override: var(--danger-fg);
+  --diffs-modified-color-override: var(--accent-fg);
 }
 
 /* The diff's own surface, matched to the page.
@@ -61,7 +81,7 @@ diffs-container {
 /* Links had no rule at all, so every one of them rendered in Chrome's
    default #0000EE, or lavender in dark mode. */
 a {
-  color: light-dark(#0969da, #4493f8);
+  color: var(--accent-fg);
   text-decoration: none;
 }
 
@@ -81,8 +101,8 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
-  color: light-dark(#1f2328, #e6edf3);
-  background: light-dark(#ffffff, #0d1117);
+  color: var(--fg-default);
+  background: var(--canvas-default);
 }
 
 code {
@@ -115,20 +135,20 @@ code {
   white-space: nowrap;
   text-decoration: none;
   color: inherit;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
   cursor: pointer;
 }
 
 .button:not(:disabled):hover {
-  background: light-dark(#eef1f4, #262c36);
+  background: var(--neutral-hover);
 }
 
 .button.primary {
   color: #ffffff;
   border-color: light-dark(#1f883d, #2f6f42);
-  background: light-dark(#1f883d, #238636);
+  background: var(--success-emphasis);
 }
 
 .button.primary:not(:disabled):hover {
@@ -145,13 +165,13 @@ code {
    cursor reads as one that should work. */
 .button:disabled {
   cursor: default;
-  color: light-dark(#8c959f, #6e7681);
-  border-color: light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#f6f8fa, #212830);
+  color: var(--fg-subtle);
+  border-color: var(--border-default);
+  background: var(--canvas-subtle);
 }
 
 :focus-visible {
-  outline: 2px solid light-dark(#0969da, #4493f8);
+  outline: 2px solid var(--accent-fg);
   outline-offset: 1px;
 }
 
@@ -180,8 +200,8 @@ code {
   gap: calc(var(--gap) * 2);
   height: var(--topbar-height);
   padding: 0 12px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#ffffff, #0d1117);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--canvas-default);
 }
 
 .topbar-identity {
@@ -201,7 +221,7 @@ code {
 }
 
 .pr-number {
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   font-weight: 400;
 }
 
@@ -236,7 +256,7 @@ code {
 }
 
 .badge-open {
-  background: light-dark(#1f883d, #238636);
+  background: var(--success-emphasis);
 }
 
 .badge-draft {
@@ -252,23 +272,23 @@ code {
 }
 
 .chip {
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
 }
 
 .chip-good {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 .chip-bad {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .chip-pending {
-  color: light-dark(#9a6700, #d29922);
+  color: var(--attention-fg);
 }
 
 .chip-neutral {
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* -------------------------------------------------------------- reviewers */
@@ -287,14 +307,14 @@ code {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 .avatar-empty {
   display: grid;
   place-items: center;
   font-size: 11px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* Qualified on `.reviewer`, and it has to be. The rail's reviewer list emits
@@ -303,7 +323,7 @@ code {
    list item — which reads as a green rule drawn under every approval. */
 .reviewer {
   border-radius: 50%;
-  box-shadow: 0 0 0 2px light-dark(#d1d9e0, #3d444d);
+  box-shadow: 0 0 0 2px var(--border-default);
 }
 
 .reviewer.reviewer-good {
@@ -311,7 +331,7 @@ code {
 }
 
 .reviewer.reviewer-bad {
-  box-shadow: 0 0 0 2px light-dark(#cf222e, #f85149);
+  box-shadow: 0 0 0 2px var(--danger-fg);
 }
 
 /* -------------------------------------------------------------- scope bar */
@@ -367,7 +387,7 @@ code {
   margin: 0;
   min-width: 0;
   padding: 0 0 11px 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -382,11 +402,11 @@ code {
 }
 
 .scope-counts .additions {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 .scope-counts .deletions {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 /* Only ever on screen when the column is narrowed or is being narrowed, so it
@@ -404,7 +424,7 @@ code {
   font-size: 13px;
   font-weight: 600;
   text-align: left;
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
   border: 0;
   background: none;
   overflow: hidden;
@@ -416,7 +436,7 @@ button.scope-showing {
 }
 
 button.scope-showing:hover {
-  color: light-dark(#0969da, #4493f8);
+  color: var(--accent-fg);
   text-decoration: underline;
 }
 
@@ -428,8 +448,8 @@ button.scope-showing:hover {
 .scope-bar[data-scope='failed'] {
   /* Inset rather than a left border: a border would shove the whole row 4px
      sideways the moment something went wrong. */
-  box-shadow: inset 4px 0 0 light-dark(#bf8700, #d29922);
-  --scope-ground: light-dark(#fff8c5, #272115);
+  box-shadow: inset 4px 0 0 var(--attention-fg);
+  --scope-ground: var(--attention-subtle-bg);
 }
 
 /* Full width, under everything else. */
@@ -438,11 +458,11 @@ button.scope-showing:hover {
   margin: 0;
   padding: 0 12px 6px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .scope-note[role='alert'] {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 /* ------------------------------------------------------- the commit strip */
@@ -481,7 +501,7 @@ button.scope-showing:hover {
   /* So the strip does not jitter as the numbers gain a digit. */
   font-variant-numeric: tabular-nums;
   line-height: 18px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
@@ -493,17 +513,17 @@ button.scope-showing:hover {
 }
 
 .commit-tab:hover {
-  color: light-dark(#1f2328, #e6edf3);
-  background: light-dark(#eaeef2, #151b23);
+  color: var(--fg-default);
+  background: var(--neutral-hover);
 }
 
 /* The page's own colour, which is the diff's. A saturated fill on one of a
    dozen small controls shouts across the whole bar; being the same colour as
    what it opens says the same thing, about the right thing. */
 .commit-tab[aria-pressed='true'] {
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
   font-weight: 600;
-  border-color: light-dark(#d1d9e0, #3d444d);
+  border-color: var(--border-default);
   background: var(--page-bg);
 }
 
@@ -553,7 +573,7 @@ button.scope-showing:hover {
   width: 28px;
   height: 28px;
   padding: 0;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   border: 1px solid transparent;
   border-radius: 6px;
   background: none;
@@ -562,8 +582,8 @@ button.scope-showing:hover {
 
 .menu-trigger:hover,
 .menu-trigger[aria-expanded='true'] {
-  color: light-dark(#1f2328, #e6edf3);
-  border-color: light-dark(#d1d9e0, #3d444d);
+  color: var(--fg-default);
+  border-color: var(--border-default);
   background: var(--page-bg);
 }
 
@@ -576,7 +596,7 @@ button.scope-showing:hover {
   flex-direction: column;
   min-width: 220px;
   padding: 4px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
   background: var(--page-bg);
   box-shadow: 0 8px 24px light-dark(rgba(31, 35, 40, 0.16), rgba(1, 4, 9, 0.6));
@@ -614,7 +634,7 @@ button.scope-showing:hover {
 
 .menu-item:hover,
 .menu-item:focus-visible {
-  background: light-dark(#eaeef2, #212830);
+  background: var(--neutral-hover);
 }
 
 .menu-item[aria-disabled='true'] {
@@ -632,8 +652,8 @@ button.scope-showing:hover {
   margin: 0;
   padding: 8px 16px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .commit-list {
@@ -650,7 +670,7 @@ button.scope-showing:hover {
   align-items: center;
   gap: var(--gap);
   padding: 0 8px 0 16px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .commit-list li:last-child {
@@ -675,18 +695,18 @@ button.scope-showing:hover {
 
 .commit-row:hover,
 .commit-row:focus-visible {
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 .commit-row[data-selected] {
-  background: light-dark(#ddf4ff, #121d2f);
+  background: var(--accent-subtle-bg);
 }
 
 .commit-oid {
   flex: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* The headline is the part worth reading, so it is what gets the room and
@@ -702,7 +722,7 @@ button.scope-showing:hover {
 .commit-meta {
   flex: none;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .commit-anchor {
@@ -711,7 +731,7 @@ button.scope-showing:hover {
   font: inherit;
   font-size: 12px;
   line-height: 18px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   background: none;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -721,8 +741,8 @@ button.scope-showing:hover {
 .commit-anchor:hover,
 .commit-anchor[aria-pressed='true'] {
   color: inherit;
-  border-color: light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#f6f8fa, #212830);
+  border-color: var(--border-default);
+  background: var(--canvas-subtle);
 }
 
 /* ----------------------------------------------------------------- layout */
@@ -761,7 +781,7 @@ button.scope-showing:hover {
   width: max-content;
   min-width: 72px;
   padding: 8px 6px;
-  border-right: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-right: 1px solid var(--border-default);
   background: light-dark(#f6f8fa, #010409);
 }
 
@@ -790,7 +810,7 @@ button.scope-showing:hover {
   font: inherit;
   font-size: 11px;
   line-height: 14px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   border: 0;
   border-radius: 6px;
   background: none;
@@ -801,13 +821,13 @@ button.scope-showing:hover {
 }
 
 .view-tab:hover {
-  color: light-dark(#1f2328, #e6edf3);
-  background: light-dark(#eef1f4, #212830);
+  color: var(--fg-default);
+  background: var(--neutral-hover);
 }
 
 .view-tab-active {
-  color: light-dark(#1f2328, #e6edf3);
-  background: light-dark(#eef1f4, #212830);
+  color: var(--fg-default);
+  background: var(--neutral-hover);
   font-weight: 600;
 }
 
@@ -819,7 +839,7 @@ button.scope-showing:hover {
   bottom: 6px;
   width: 2px;
   border-radius: 0 2px 2px 0;
-  background: light-dark(#0969da, #4493f8);
+  background: var(--accent-fg);
 }
 
 .view-icon {
@@ -837,13 +857,19 @@ button.scope-showing:hover {
   left: 9px;
   min-width: 16px;
   padding: 0 4px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 15px;
   text-align: center;
-  color: #ffffff;
+  /* Inverts rather than staying white, which is the only way an amber badge
+     clears 4.5:1 in both themes: white on the light amber is 4.87:1, but white
+     on the dark one is 2.52:1, and the #bb8009 this used to reach for only got
+     to 3.38:1 while also being a fourth amber. Canvas-dark on the dark amber is
+     7.50:1. A one-off pair on purpose — there is no token for "whatever this
+     fill is not". Was 10px, which is under the 11px floor. */
+  color: light-dark(#ffffff, #0d1117);
   border-radius: 999px;
-  background: light-dark(#9a6700, #bb8009);
+  background: var(--attention-fg);
 }
 
 .view-label {
@@ -897,8 +923,8 @@ button.scope-showing:hover {
   margin: 0;
   padding: 6px 12px;
   font-size: 12px;
-  color: light-dark(#9a6700, #d29922);
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  color: var(--attention-fg);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .filesview-body {
@@ -946,7 +972,7 @@ button.scope-showing:hover {
 }
 
 .tree-row:hover {
-  background: light-dark(#eef1f4, #212830);
+  background: var(--neutral-hover);
 }
 
 .tree-row[aria-selected='true'] {
@@ -967,7 +993,7 @@ button.scope-showing:hover {
   width: 20px;
   height: 20px;
   margin-left: -2px;
-  color: light-dark(#0969da, #4493f8);
+  color: var(--accent-fg);
 }
 
 .tree-check::before,
@@ -979,9 +1005,9 @@ button.scope-showing:hover {
   content: '';
   width: 13px;
   height: 13px;
-  border: 1px solid light-dark(#8c959f, #6e7681);
+  border: 1px solid var(--fg-subtle);
   border-radius: 3px;
-  background: light-dark(#ffffff, #0d1117);
+  background: var(--canvas-default);
 }
 
 .tree-check[data-check='checked']::before {
@@ -1020,7 +1046,7 @@ button.scope-showing:hover {
   place-items: center;
   width: 12px;
   height: 20px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .tree-chevron::before {
@@ -1035,6 +1061,16 @@ button.scope-showing:hover {
 
 .tree-row[aria-expanded='true'] .tree-chevron::before {
   rotate: 90deg;
+}
+
+/* The one thing on this page that actually moves.
+   Everything else transitions colour, which reduced motion has no quarrel
+   with — but `rotate` is transform-family, and a reviewer who has asked for
+   less motion should get the chevron's end state without the sweep to it. */
+@media (prefers-reduced-motion: reduce) {
+  .tree-chevron::before {
+    transition: none;
+  }
 }
 
 /* A folder is a different kind of thing from a file and the eye should not
@@ -1052,7 +1088,7 @@ button.scope-showing:hover {
   height: 7px;
   margin: 0 3px 0 2px;
   border-radius: 2px;
-  background: light-dark(#8c959f, #6e7681);
+  background: var(--fg-subtle);
 }
 
 .tree-name {
@@ -1063,10 +1099,21 @@ button.scope-showing:hover {
 }
 
 /* Present, reachable, and out of the way: a lockfile has to stay clickable
-   without drawing the eye every time it passes. */
+   without drawing the eye every time it passes.
+
+   `--fg-muted`, not something quieter. This reached past it for #818b98 /
+   #656c76, which measure 3.45:1 and 3.57:1 against the page — under the 4.5:1
+   a filename needs, and under the floor tokens.css sets for any text at all.
+   Muted against the surrounding rows' Foreground Default is already a visible
+   step down; the italic below does the rest of the work the extra dimming was
+   doing, and does it without taking legibility for it. */
 .tree-row[data-noise='true'] .tree-name,
 .tree-row[data-noise='true'] .tree-counts {
-  color: light-dark(#818b98, #656c76);
+  color: var(--fg-muted);
+}
+
+.tree-row[data-noise='true'] .tree-name {
+  font-style: italic;
 }
 
 .tree-status {
@@ -1075,19 +1122,19 @@ button.scope-showing:hover {
   text-align: center;
   font-size: 11px;
   font-weight: 600;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .tree-row[data-status='added'] .tree-status {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 .tree-row[data-status='deleted'] .tree-status {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .tree-row[data-status='modified'] .tree-status {
-  color: light-dark(#0969da, #4493f8);
+  color: var(--accent-fg);
 }
 
 .tree-row[data-status='renamed'] .tree-status {
@@ -1111,12 +1158,12 @@ button.scope-showing:hover {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: light-dark(#9a6700, #d29922);
+  background: var(--attention-fg);
 }
 
 .tree-comment[data-tone='resolved'] {
   background: none;
-  box-shadow: inset 0 0 0 1.5px light-dark(#8c959f, #6e7681);
+  box-shadow: inset 0 0 0 1.5px var(--fg-subtle);
 }
 
 .rail-resizer {
@@ -1136,7 +1183,7 @@ button.scope-showing:hover {
 
 .rail-resizer:hover,
 .rail-resizer:focus-visible {
-  background-color: light-dark(#0969da, #4493f8);
+  background-color: var(--accent-fg);
 }
 
 /* The global ring sits 1px outside, which around a 5px bar draws a blue blob
@@ -1182,8 +1229,8 @@ button.scope-showing:hover {
   width: 100%;
   padding: 8px 12px;
   background: light-dark(#f6f8fa, #161b22);
-  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .file-card-head {
@@ -1215,7 +1262,7 @@ button.scope-showing:hover {
 }
 
 .collapse-toggle:hover {
-  background: light-dark(#eef1f4, #262c36);
+  background: var(--neutral-hover);
 }
 
 .file-path {
@@ -1241,7 +1288,7 @@ button.scope-showing:hover {
 }
 
 .file-path-old {
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   text-decoration: line-through;
 }
 
@@ -1253,11 +1300,11 @@ button.scope-showing:hover {
 }
 
 .file-counts .additions {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 .file-counts .deletions {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .viewed {
@@ -1266,14 +1313,14 @@ button.scope-showing:hover {
   gap: 4px;
   margin-left: auto;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   white-space: nowrap;
 }
 
 /* DISMISSED is a third state, not a shade of unviewed: the reviewer did look,
    and what they looked at has since changed. */
 .viewed[data-viewed-state='DISMISSED'] {
-  color: light-dark(#9a6700, #d29922);
+  color: var(--attention-fg);
 }
 
 .viewed-note::before {
@@ -1284,9 +1331,9 @@ button.scope-showing:hover {
   margin: 0;
   padding: 6px 8px;
   font-size: 13px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 .visually-hidden {
@@ -1302,14 +1349,16 @@ button.scope-showing:hover {
 
 .placeholder {
   margin: 8px 0;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
+/* A full 1px border. This carried a 4px left edge, which is the same coloured
+   side stripe the options page's warning panel had and the same one DESIGN.md
+   bans by technique rather than by property. */
 .notice {
   margin: 0 0 12px;
   padding: 8px 12px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
-  border-left-width: 4px;
+  border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
@@ -1358,9 +1407,9 @@ button.scope-showing:hover {
 }
 
 .notice-trigger[data-tone='incomplete'] {
-  color: light-dark(#7d4e00, #e3b341);
+  color: var(--attention-fg-tinted);
   border-color: light-dark(#f0d58c, #6b4b12);
-  background: light-dark(#fff8c5, #2b2416);
+  background: var(--attention-subtle-bg);
 }
 
 .notice-trigger[data-tone='incomplete']:hover {
@@ -1370,7 +1419,7 @@ button.scope-showing:hover {
 .notice-trigger[data-tone='moved'] {
   color: light-dark(#0550ae, #79c0ff);
   border-color: light-dark(#b6d7ff, #1f4b7d);
-  background: light-dark(#ddf4ff, #12233a);
+  background: var(--accent-subtle-bg);
 }
 
 .notice-trigger[data-tone='moved']:hover {
@@ -1417,15 +1466,15 @@ button.scope-showing:hover {
   width: min(460px, calc(100vw - 24px));
   max-height: min(70vh, 620px);
   overflow-y: auto;
-  background: light-dark(#ffffff, #151b23);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: var(--canvas-overlay);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
   box-shadow: 0 12px 32px light-dark(rgb(140 149 159 / 25%), rgb(1 4 9 / 65%));
 }
 
 .notice-item {
   padding: 12px 14px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .notice-item:last-child {
@@ -1449,7 +1498,7 @@ button.scope-showing:hover {
 }
 
 .notice-item[data-tone='incomplete'] .notice-item-title {
-  color: light-dark(#7d4e00, #e3b341);
+  color: var(--attention-fg-tinted);
 }
 
 .notice-item[data-tone='moved'] .notice-item-title {
@@ -1477,9 +1526,9 @@ button.scope-showing:hover {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
 
@@ -1487,7 +1536,7 @@ button.scope-showing:hover {
    Quieter than the first without changing size, because it is still prose to
    be read rather than a detail to be skipped. */
 .notice-more {
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* Always the last thing in a notice, so every one of them reads the same way:
@@ -1504,7 +1553,7 @@ button.scope-showing:hover {
    reviewer comparing what is on screen against what `git log` just told them
    should not have to work out whether these are the same kind of thing. */
 .notice-body code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
 
@@ -1526,7 +1575,7 @@ button.scope-showing:hover {
 }
 
 .fullpage .detail {
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
@@ -1546,20 +1595,26 @@ button.scope-showing:hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   color: inherit;
-  background: light-dark(#ffffff, #0d1117);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
+/* Real colours, for the reason spelled out above `.button:disabled`: a blanket
+   opacity composites the text along with the box, and this is the field on the
+   unlock screen — the one place a reviewer is already unsure whether the
+   extension is working. */
 .fullpage input[type="password"]:disabled {
-  opacity: 0.6;
+  color: var(--fg-subtle);
+  background: var(--canvas-subtle);
+  border-color: var(--border-default);
 }
 
 /* A refused passphrase is the reviewer's next action, not a footnote, so it
    does not get the muted treatment `.detail` gives background error text. */
 .fullpage .problem {
   margin-top: 0.5rem;
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .fullpage-actions {
@@ -1572,7 +1627,7 @@ button.scope-showing:hover {
   margin: 0;
   padding: 4rem 2rem;
   text-align: center;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* --------------------------------------------------------------- threads */
@@ -1585,9 +1640,9 @@ button.scope-showing:hover {
 .thread {
   margin: 4px 0;
   padding: 8px 10px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#ffffff, #151b23);
+  background: var(--canvas-overlay);
 }
 
 .thread-head,
@@ -1597,15 +1652,15 @@ button.scope-showing:hover {
   gap: 8px;
   align-items: baseline;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .thread-resolved {
   margin: 4px 0;
   padding: 6px 10px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 .thread-resolved > summary {
@@ -1614,11 +1669,9 @@ button.scope-showing:hover {
 
 .thread-flag {
   padding: 0 6px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 999px;
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .thread-comments {
@@ -1630,7 +1683,7 @@ button.scope-showing:hover {
 .comment + .comment {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-top: 1px solid var(--border-default);
 }
 
 .comment-head {
@@ -1638,12 +1691,12 @@ button.scope-showing:hover {
   gap: 8px;
   align-items: baseline;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .comment-author {
   font-weight: 600;
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
 }
 
 /* Pushed to the far end of the head row, away from the author and the
@@ -1671,13 +1724,13 @@ button.scope-showing:hover {
 }
 
 .comment-action:hover {
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
 }
 
 /* The one irreversible control on a comment, and the only place on the card
    that is red. */
 .comment-action-danger:hover {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .comment-edit {
@@ -1689,9 +1742,9 @@ button.scope-showing:hover {
   width: 100%;
   min-height: 4.5rem;
   padding: 6px 8px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#ffffff, #0d1117);
+  background: var(--canvas-default);
   color: inherit;
   font: inherit;
   resize: vertical;
@@ -1734,7 +1787,7 @@ button.scope-showing:hover {
 
 .suggestion {
   margin: 8px 0 0;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -1743,10 +1796,8 @@ button.scope-showing:hover {
   margin: 0;
   padding: 4px 8px;
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  background: light-dark(#f6f8fa, #212830);
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: var(--canvas-subtle);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .suggestion-code {
@@ -1760,7 +1811,7 @@ button.scope-showing:hover {
 .unanchored-reason {
   margin: 6px 0 0;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .thread-error,
@@ -1768,7 +1819,7 @@ button.scope-showing:hover {
   margin: 6px 0 0;
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid light-dark(#cf222e, #f85149);
+  border: 1px solid var(--danger-fg);
   color: light-dark(#cf222e, #ff7b72);
   font-size: 12px;
 }
@@ -1789,16 +1840,16 @@ button.scope-showing:hover {
   flex: 1;
   min-height: 4.5rem;
   padding: 6px 8px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#ffffff, #0d1117);
+  background: var(--canvas-default);
   color: inherit;
   font: inherit;
   resize: vertical;
 }
 
 .thread-reply-input:disabled {
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
   cursor: not-allowed;
 }
 
@@ -1810,14 +1861,14 @@ button.scope-showing:hover {
 .unanchored {
   margin: 8px 0 0;
   padding: 6px 8px;
-  border: 1px dashed light-dark(#d1d9e0, #3d444d);
+  border: 1px dashed var(--border-default);
   border-radius: 6px;
 }
 
 .unanchored > summary {
   cursor: pointer;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .unanchored-list {
@@ -1831,9 +1882,9 @@ button.scope-showing:hover {
 .composer {
   margin: 4px 0;
   padding: 8px 10px;
-  border: 1px solid light-dark(#0969da, #4493f8);
+  border: 1px solid var(--accent-fg);
   border-radius: 6px;
-  background: light-dark(#ffffff, #151b23);
+  background: var(--canvas-overlay);
 }
 
 .composer-head {
@@ -1843,7 +1894,7 @@ button.scope-showing:hover {
   align-items: baseline;
   margin-bottom: 6px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .composer-input {
@@ -1915,16 +1966,19 @@ button.scope-showing:hover {
   min-height: 20px;
   margin-bottom: 6px;
   padding-bottom: 4px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid var(--border-default);
 }
 
+/* A heading, set as one. This was 11px uppercase tracked 0.04em over a rule —
+   the small-caps eyebrow DESIGN.md bans by name, and at 11px it was the least
+   readable text on the page. Title size in muted does the same job: quieter
+   than the content under it, still legible, and it stops announcing a genre
+   this product is not in. */
 .overview-head h2 {
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* ---------------------------------------------- the Overview's commit log */
@@ -1933,7 +1987,7 @@ button.scope-showing:hover {
 .overview-count {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .commit-log {
@@ -1984,7 +2038,7 @@ button.scope-showing:hover {
 }
 
 .commit-log-open:hover {
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 .commit-log-number {
@@ -1992,7 +2046,7 @@ button.scope-showing:hover {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .commit-log-headline {
@@ -2013,7 +2067,7 @@ button.scope-showing:hover {
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .commit-log-meta code {
@@ -2025,13 +2079,13 @@ button.scope-showing:hover {
   align-items: center;
   flex: 0 0 auto;
   padding: 0 8px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   border-radius: 6px;
 }
 
 .commit-log-link:hover {
-  color: light-dark(#0969da, #4493f8);
-  background: light-dark(#f6f8fa, #212830);
+  color: var(--accent-fg);
+  background: var(--canvas-subtle);
 }
 
 .overview-text {
@@ -2044,7 +2098,7 @@ button.scope-showing:hover {
 .overview-note {
   margin: 10px 0 0;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .overview-branches {
@@ -2053,14 +2107,14 @@ button.scope-showing:hover {
   flex-wrap: wrap;
   gap: 6px;
   margin: 0;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .overview-branches code {
   display: block;
   padding: 1px 6px;
   border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
   /* The full pair is already on the element's `title`. */
   max-width: 18ch;
   overflow: hidden;
@@ -2082,8 +2136,8 @@ button.scope-showing:hover {
 
 .branch-link:hover code,
 .branch-link:focus-visible code {
-  color: light-dark(#0969da, #4493f8);
-  background: light-dark(#eaeef2, #2a313c);
+  color: var(--accent-fg);
+  background: var(--neutral-hover);
   text-decoration: underline;
 }
 
@@ -2101,7 +2155,7 @@ button.scope-showing:hover {
   align-items: baseline;
   gap: 6px;
   padding: 4px 0;
-  border-bottom: 1px solid light-dark(#eef1f4, #262c36);
+  border-bottom: 1px solid var(--neutral-hover);
 }
 
 .check:last-child {
@@ -2117,7 +2171,7 @@ button.scope-showing:hover {
 .check-detail {
   flex: 0 1 auto;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .reviewer-state {
@@ -2126,11 +2180,11 @@ button.scope-showing:hover {
 }
 
 .reviewer-state.reviewer-good {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 .reviewer-state.reviewer-bad {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 /* ------------------------------------------------- the Conversations view */
@@ -2173,7 +2227,7 @@ button.scope-showing:hover {
 .conversation-absent {
   margin: -4px 0 8px;
   font-size: 12px;
-  color: light-dark(#9a6700, #d29922);
+  color: var(--attention-fg);
 }
 
 /* Settled business, one line until asked for — the same treatment a resolved
@@ -2186,15 +2240,15 @@ button.scope-showing:hover {
   display: inline-flex;
   padding: 4px 10px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-default);
   border-radius: 999px;
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
 
 .conversation-resolved > summary:hover {
-  background: light-dark(#eef1f4, #262c36);
+  background: var(--neutral-hover);
 }
 
 .conversation-resolved[open] > summary {
@@ -2203,9 +2257,9 @@ button.scope-showing:hover {
 
 .thread-entry {
   padding: 12px 14px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
-  background: light-dark(#ffffff, #151b23);
+  background: var(--canvas-overlay);
 }
 
 .thread-entry + .thread-entry {
@@ -2229,7 +2283,7 @@ button.scope-showing:hover {
 .thread-entry-position {
   font-size: 12px;
   font-weight: 600;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .thread-entry-byline {
@@ -2239,7 +2293,7 @@ button.scope-showing:hover {
   gap: 8px;
   margin: 0 0 6px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* Markdown drawn as plain text, so the newlines in the body are the only
@@ -2257,7 +2311,7 @@ button.scope-showing:hover {
 }
 
 .thread-entry-replies {
-  color: light-dark(#0969da, #4493f8);
+  color: var(--accent-fg);
 }
 
 /* --------------------------------------------------- pending review footer */
@@ -2269,8 +2323,8 @@ button.scope-showing:hover {
 .review-footer {
   flex: 0 0 auto;
   padding: 8px 12px;
-  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#f6f8fa, #212830);
+  border-top: 1px solid var(--border-default);
+  background: var(--canvas-subtle);
 }
 
 .review-footer-row {
@@ -2296,9 +2350,9 @@ button.scope-showing:hover {
   font: inherit;
   font-size: 13px;
   color: inherit;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#ffffff, #0d1117);
+  background: var(--canvas-default);
   resize: vertical;
 }
 
@@ -2309,13 +2363,13 @@ button.scope-showing:hover {
 }
 
 .button.danger {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .review-note {
   margin: 6px 0 0;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .review-confirm {
@@ -2340,7 +2394,7 @@ button.scope-showing:hover {
 .viewed-error {
   margin: 6px 0 0;
   font-size: 12px;
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 /* The top bar is one fixed-height row, so a start-review failure is clipped
@@ -2385,8 +2439,8 @@ button.scope-showing:hover {
   width: min(680px, calc(100vw - 32px));
   max-height: 70vh;
   overflow: hidden;
-  background: light-dark(#ffffff, #151b23);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: var(--canvas-overlay);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
   box-shadow: 0 8px 24px light-dark(rgb(140 149 159 / 20%), rgb(1 4 9 / 60%));
 }
@@ -2397,7 +2451,7 @@ button.scope-showing:hover {
   justify-content: space-between;
   gap: var(--gap);
   padding: 12px 16px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .overlay-head h2 {
@@ -2413,20 +2467,19 @@ button.scope-showing:hover {
 
 .shortcut-group {
   padding: 12px 16px;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .shortcut-group:last-child {
   border-bottom: 0;
 }
 
+/* Same change as .overview-head h2, and the same reason. */
 .shortcut-group h3 {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .shortcut-list {
@@ -2456,14 +2509,14 @@ button.scope-showing:hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 18px;
-  background: light-dark(#f6f8fa, #212830);
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border-default);
   border-bottom-width: 2px;
   border-radius: 4px;
 }
 
 .shortcut-or {
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* ------------------------------------------------------------- search panel */
@@ -2478,7 +2531,7 @@ button.scope-showing:hover {
   color: inherit;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-bottom: 1px solid var(--border-default);
   outline-offset: -2px;
 }
 
@@ -2506,7 +2559,7 @@ button.scope-showing:hover {
 }
 
 .search-result:hover {
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 /* Split from `:hover` deliberately. Sharing the rule meant moving the
@@ -2514,22 +2567,26 @@ button.scope-showing:hover {
    do — and at 1.065:1 against the panel there was barely an indication
    to destroy. The outline is what Pierre uses for its own selected row. */
 .search-result.active {
+  /* Stronger than --accent-subtle-bg on purpose, and the only place that is
+     true. This marks which row Enter will take among a list of near-identical
+     ones, so it has to win against the row above and below it rather than just
+     against the panel. */
   background: light-dark(#ddf4ff, #0c2d6b);
-  outline: 1px solid light-dark(#0969da, #4493f8);
+  outline: 1px solid var(--accent-fg);
   outline-offset: -1px;
 }
 
 .search-result-path {
   flex: 0 0 auto;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .search-result-line {
   flex: 0 0 auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* The changed line itself. Clipped rather than wrapped: a minified file has
@@ -2542,6 +2599,9 @@ button.scope-showing:hover {
   text-overflow: ellipsis;
 }
 
+/* Stronger than --attention-subtle-bg, which is a panel tint. This is a run of
+   matched characters inside a line of text, a few pixels wide, and a tint that
+   reads correctly behind a whole chip disappears at that size. */
 .search-result mark {
   color: inherit;
   background: light-dark(#fff8c5, #4d3b00);
@@ -2551,7 +2611,7 @@ button.scope-showing:hover {
 .search-empty {
   margin: 0;
   padding: 16px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* ------------------------------------------- not posted yet
@@ -2563,13 +2623,13 @@ button.scope-showing:hover {
    Words as well as colour, on the badge and in its title: a tint alone cannot
    say *why*, and cannot be read at all by a reviewer who does not see it. */
 .thread-unpublished {
-  border-color: light-dark(#d4a72c, #d29922);
-  background: light-dark(#fff8c5, #2a2213);
+  border-color: var(--attention-border);
+  background: var(--attention-subtle-bg);
 }
 
 .thread-flag-unposted {
-  border-color: light-dark(#d4a72c, #d29922);
-  color: light-dark(#7d4e00, #e3b341);
+  border-color: var(--attention-border);
+  color: var(--attention-fg-tinted);
   cursor: help;
 }
 
@@ -2582,7 +2642,7 @@ button.scope-showing:hover {
 /* The composer says which of the two things the button is about to do. Queued
    is the surprising one, so it is the one that gets the colour. */
 .composer-target-queued {
-  color: light-dark(#7d4e00, #e3b341);
+  color: var(--attention-fg-tinted);
   font-weight: 600;
 }
 
@@ -2597,7 +2657,7 @@ button.scope-showing:hover {
 /* A composer GitHub refused looked byte-identical to a working one — same
    confident blue border — while holding text that cannot be posted. */
 .composer-rejected {
-  border-color: light-dark(#cf222e, #f85149);
+  border-color: var(--danger-fg);
 }
 
 /* An optimistic comment, still in flight. Only the literal word "Sending…"
@@ -2608,7 +2668,7 @@ button.scope-showing:hover {
 
 .comment-pending {
   font-style: italic;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* A link that stands in for a control. It had padding and no colour, so it
@@ -2619,18 +2679,28 @@ button.scope-showing:hover {
   padding: 4px 12px;
   font-size: 13px;
   line-height: 20px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
   text-decoration: none;
 }
 
 .suggestion-apply:hover {
-  background: light-dark(#eef1f4, #262c36);
+  background: var(--neutral-hover);
   text-decoration: none;
 }
 
 /* ------------------------------------------------- rich comparison modes */
+
+/* None of the comparisons below sets a width, and the one that decides it is
+   not in this file. Every one of them is slotted into a Pierre file-level
+   annotation, which is sized to a single diff column — so in split view they
+   all used to draw at 407px of an 880px card, beside an empty column. The rule
+   that undoes that names elements inside `diffs-container`'s shadow root,
+   which this stylesheet cannot reach; it is `FULL_WIDTH_RICH_BODY` in
+   `ui/DiffColumn.tsx`, handed to Pierre through `unsafeCSS`, with the
+   measurements. Anything here that looks half-width in side-by-side belongs
+   there, not in a `width` added below. */
 
 /* The per-file mode switcher. A segmented control rather than a row of
    separate buttons: the choices are exclusive and adjacency is what says
@@ -2639,7 +2709,7 @@ button.scope-showing:hover {
 .mode-switch {
   display: inline-flex;
   align-self: flex-start;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -2650,10 +2720,10 @@ button.scope-showing:hover {
   font-size: 12px;
   line-height: 20px;
   white-space: nowrap;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   border: 0;
-  border-left: 1px solid light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#f6f8fa, #212830);
+  border-left: 1px solid var(--border-default);
+  background: var(--canvas-subtle);
   cursor: pointer;
   transition:
     background-color 0.12s ease,
@@ -2665,7 +2735,7 @@ button.scope-showing:hover {
 }
 
 .mode-button:hover {
-  background: light-dark(#eef1f4, #262c36);
+  background: var(--neutral-hover);
 }
 
 /* The selected mode carries a real colour change rather than a shade of
@@ -2698,7 +2768,7 @@ button.scope-showing:hover {
   color: light-dark(#4d2d00, #f0b72f);
   border: 1px solid light-dark(#d4a72c, #855b0f);
   border-radius: 999px;
-  background: light-dark(#fff8c5, #2e2a1a);
+  background: var(--attention-subtle-bg);
 }
 
 /* Grey rather than amber. A generated file is not a caveat on what is on
@@ -2707,13 +2777,17 @@ button.scope-showing:hover {
    attention. Amber is reserved for the one flag that means the body below is
    not the diff GitHub is showing. */
 .whitespace-flag[data-held='generated'] {
-  color: light-dark(#59636e, #9198a1);
-  border-color: light-dark(#d1d9e0, #3d444d);
-  background: light-dark(#f6f8fa, #212830);
+  color: var(--fg-muted);
+  border-color: var(--border-default);
+  background: var(--canvas-subtle);
 }
 
+/* `filter: brightness(0.97)` was one value for both themes, so it darkened on
+   hover in dark mode while every other hover on this page moves toward
+   `--neutral-hover`, which is lighter there. It also dimmed the label and the
+   border along with the fill, because a filter composites the whole element. */
 .whitespace-flag:hover {
-  filter: brightness(0.97);
+  background: var(--neutral-hover);
 }
 
 /* Pressed means the reviewer overrode the rule and is reading the file in full.
@@ -2730,7 +2804,7 @@ button.scope-showing:hover {
 .compare-summary {
   margin: 0;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* -------------------------------------------------------------- images */
@@ -2740,7 +2814,7 @@ button.scope-showing:hover {
   flex-direction: column;
   gap: var(--gap);
   padding: 8px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
@@ -2761,12 +2835,12 @@ button.scope-showing:hover {
   align-items: baseline;
   margin-bottom: 4px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .image-side {
   font-weight: 600;
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
 }
 
 /* The checkerboard is not decoration. A PNG whose change is in its alpha
@@ -2779,10 +2853,10 @@ button.scope-showing:hover {
 .image-stage {
   background-color: light-dark(#ffffff, #22272e);
   background-image:
-    linear-gradient(45deg, light-dark(#eef1f4, #2d333b) 25%, transparent 25%),
-    linear-gradient(-45deg, light-dark(#eef1f4, #2d333b) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, light-dark(#eef1f4, #2d333b) 75%),
-    linear-gradient(-45deg, transparent 75%, light-dark(#eef1f4, #2d333b) 75%);
+    linear-gradient(45deg, var(--border-muted) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border-muted) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border-muted) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border-muted) 75%);
   background-size: 16px 16px;
   background-position:
     0 0,
@@ -2795,7 +2869,7 @@ button.scope-showing:hover {
   display: block;
   max-width: 100%;
   height: auto;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 4px;
 }
 
@@ -2803,8 +2877,8 @@ button.scope-showing:hover {
   padding: 16px 8px;
   font-size: 13px;
   text-align: center;
-  color: light-dark(#59636e, #9198a1);
-  border: 1px dashed light-dark(#d1d9e0, #3d444d);
+  color: var(--fg-muted);
+  border: 1px dashed var(--border-default);
   border-radius: 4px;
 }
 
@@ -2824,7 +2898,7 @@ button.scope-showing:hover {
 .image-stage {
   position: relative;
   width: 100%;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -2874,7 +2948,7 @@ button.scope-showing:hover {
   gap: var(--gap);
   align-items: center;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .image-slider input {
@@ -2891,7 +2965,7 @@ button.scope-showing:hover {
 .image-hint {
   margin: 0;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 /* --------------------------------------------------------------- tables */
@@ -2908,7 +2982,7 @@ button.scope-showing:hover {
 .table-scroll {
   max-height: 60vh;
   overflow: auto;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
@@ -2923,8 +2997,8 @@ button.scope-showing:hover {
 .grid td {
   padding: 2px 8px;
   text-align: left;
-  border-right: 1px solid light-dark(#eef1f4, #2d333b);
-  border-bottom: 1px solid light-dark(#eef1f4, #2d333b);
+  border-right: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
 }
 
 .grid thead th {
@@ -2932,7 +3006,7 @@ button.scope-showing:hover {
   top: 0;
   z-index: 1;
   font-weight: 600;
-  background: light-dark(#f6f8fa, #212830);
+  background: var(--canvas-subtle);
 }
 
 .grid-gutter {
@@ -2940,9 +3014,9 @@ button.scope-showing:hover {
   left: 0;
   z-index: 1;
   font-weight: 400;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   text-align: right;
-  background: light-dark(#ffffff, #0d1117);
+  background: var(--canvas-default);
 }
 
 .grid-mark {
@@ -2954,11 +3028,11 @@ button.scope-showing:hover {
 /* Row tints in the same greens and reds as Pierre's own diff lines, so a
    changed row here and a changed line there read as the same event. */
 .grid-added td {
-  background: light-dark(#e6ffec, #12261e);
+  background: var(--success-subtle-bg);
 }
 
 .grid-removed td {
-  background: light-dark(#ffebe9, #25171c);
+  background: var(--danger-subtle-bg);
   text-decoration: line-through;
   text-decoration-color: light-dark(#cf222e88, #f8514988);
 }
@@ -2966,12 +3040,12 @@ button.scope-showing:hover {
 /* A changed row is deliberately not tinted. Only the cells that moved are,
    because the point of the whole mode is that the rest of the row did not. */
 .grid-cell-changed {
-  background: light-dark(#fff8c5, #2b2611);
+  background: var(--attention-subtle-bg);
 }
 
 .grid-was {
   margin-right: 6px;
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
   text-decoration: line-through;
 }
 
@@ -2986,7 +3060,7 @@ button.scope-showing:hover {
   padding: 6px 8px;
   overflow: auto;
   list-style: none;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
@@ -3000,18 +3074,18 @@ button.scope-showing:hover {
 }
 
 .key-added {
-  background: light-dark(#e6ffec, #12261e);
+  background: var(--success-subtle-bg);
 }
 
 .key-removed {
-  background: light-dark(#ffebe9, #25171c);
+  background: var(--danger-subtle-bg);
 }
 
 .key-path {
   flex: 0 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
 }
 
 .key-values {
@@ -3021,15 +3095,15 @@ button.scope-showing:hover {
   flex-wrap: wrap;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .key-before {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .key-after {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 /* ------------------------------------------------------------ notebooks */
@@ -3044,7 +3118,7 @@ button.scope-showing:hover {
 }
 
 .cell {
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -3057,8 +3131,8 @@ button.scope-showing:hover {
   margin: 0;
   padding: 4px 8px;
   font-size: 12px;
-  color: light-dark(#59636e, #9198a1);
-  background: light-dark(#f6f8fa, #212830);
+  color: var(--fg-muted);
+  background: var(--canvas-subtle);
 }
 
 .cell summary {
@@ -3067,7 +3141,7 @@ button.scope-showing:hover {
 
 .cell-number {
   font-weight: 600;
-  color: light-dark(#1f2328, #e6edf3);
+  color: var(--fg-default);
 }
 
 .cell-state {
@@ -3075,11 +3149,11 @@ button.scope-showing:hover {
 }
 
 .cell-added .cell-head {
-  color: light-dark(#1a7f37, #3fb950);
+  color: var(--success-fg);
 }
 
 .cell-removed .cell-head {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .cell-source,
@@ -3094,16 +3168,16 @@ button.scope-showing:hover {
 }
 
 .cell-outputs {
-  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-top: 1px solid var(--border-default);
 }
 
 .cell-output {
   max-height: 240px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
 }
 
 .cell-output-error {
-  color: light-dark(#cf222e, #f85149);
+  color: var(--danger-fg);
 }
 
 .cell-output-image {
@@ -3132,7 +3206,7 @@ button.scope-showing:hover {
 .markdown-compare {
   max-height: 60vh;
   overflow: auto;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
@@ -3182,8 +3256,8 @@ button.scope-showing:hover {
 
 .markdown-rendered blockquote {
   padding-left: 10px;
-  border-left: 3px solid light-dark(#d1d9e0, #3d444d);
-  color: light-dark(#59636e, #9198a1);
+  border-left: 3px solid var(--border-default);
+  color: var(--fg-muted);
 }
 
 .markdown-rendered code {
@@ -3214,12 +3288,12 @@ button.scope-showing:hover {
 .markdown-rendered th,
 .markdown-rendered td {
   padding: 3px 8px;
-  border: 1px solid light-dark(#d1d9e0, #3d444d);
+  border: 1px solid var(--border-default);
 }
 
 .markdown-rendered hr {
   border: 0;
-  border-top: 1px solid light-dark(#d1d9e0, #3d444d);
+  border-top: 1px solid var(--border-default);
 }
 
 /* An image is named rather than loaded — see the renderer in
@@ -3228,9 +3302,9 @@ button.scope-showing:hover {
 .markdown-rendered .md-image {
   padding: 1px 6px;
   background: light-dark(#eff1f3, #21262d);
-  border: 1px dashed light-dark(#d1d9e0, #3d444d);
+  border: 1px dashed var(--border-default);
   border-radius: 4px;
-  color: light-dark(#59636e, #9198a1);
+  color: var(--fg-muted);
   font-size: 0.9em;
 }
 
@@ -3244,14 +3318,14 @@ button.scope-showing:hover {
    default for `<ins>` is an underline, which in a rendered document is
    indistinguishable from a link. */
 .markdown-rendered ins {
-  background: light-dark(#e6ffec, #12261e);
-  color: light-dark(#1a7f37, #3fb950);
+  background: var(--success-subtle-bg);
+  color: var(--success-fg);
   text-decoration: none;
 }
 
 .markdown-rendered del {
-  background: light-dark(#ffebe9, #25171c);
-  color: light-dark(#cf222e, #f85149);
+  background: var(--danger-subtle-bg);
+  color: var(--danger-fg);
   text-decoration: line-through;
   text-decoration-color: light-dark(#cf222e88, #f8514988);
 }
