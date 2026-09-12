@@ -208,16 +208,22 @@ export function parseSettings(raw: unknown): Settings {
 /**
  * Read a stored mode memory, dropping per entry.
  *
- * Three things can make an entry unusable, and all three are ordinary rather
- * than exceptional: a build that remembers more kinds than this one wrote it, a
- * mode id has since been withdrawn, or the id belongs to a different kind
- * entirely. Each would put a control on a card that the file cannot answer, so
- * each is dropped — and dropped one at a time, like {@link parseSettings}, so
- * one bad entry does not discard a neighbouring good one.
+ * Four things can make an entry unusable, and all four are ordinary rather than
+ * exceptional: the value is not a string at all, the kind is one a later build
+ * remembers and this one does not, the mode id has since been withdrawn, or the
+ * id is real but belongs to a different kind. Each would put a control on a card
+ * that the file cannot answer, so each is dropped — and dropped one at a time,
+ * like {@link parseSettings}, so one bad entry does not discard a neighbouring
+ * good one.
  */
 export function parseModeMemory(raw: unknown): ModeMemory {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return EMPTY_MODE_MEMORY;
+    // Spread rather than the constant itself, matching what {@link parseSettings}
+    // does on the same path. `Readonly` stops a caller reassigning a field, but
+    // it is a compile-time claim about this codebase rather than a property of
+    // the object, and handing every fallback the same one makes a single
+    // mutation through a cast everybody's problem.
+    return { ...EMPTY_MODE_MEMORY };
   }
 
   const stored = raw as Record<string, unknown>;

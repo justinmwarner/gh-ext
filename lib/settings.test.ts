@@ -215,6 +215,15 @@ describe('parseModeMemory', () => {
     expect(parseModeMemory(raw)).toEqual({});
   });
 
+  // Pins intent rather than catching a regression, and is worth having for
+  // that: the mode id check below shadows this one behaviourally, since no
+  // number or null can match an id, so deleting the `typeof` guard would break
+  // the types and no test. What the guard says is that a stored value of the
+  // wrong shape is an ordinary thing to find rather than a reason to throw.
+  it.each([42, null, true, {}, ['raw']])('drops the non-string value %p', (mode) => {
+    expect(parseModeMemory({ markdown: mode })).toEqual({});
+  });
+
   // A kind this build does not remember, written by a later one.
   it('drops a kind that is not remembered', () => {
     expect(parseModeMemory({ image: 'image:swipe' })).toEqual({});
