@@ -24,6 +24,9 @@ vi.mock('./mermaid', async () => {
 
 const renderMock = renderMermaid as unknown as Mock;
 
+/** A fixed nonce: these tests are about the card, not about the anchors on it. */
+const NONCE = 'b3f1c0de-0000-4000-8000-000000000000';
+
 beforeEach(() => {
   renderMock.mockReset();
   renderMock.mockResolvedValue({
@@ -40,7 +43,7 @@ const doc = (diagram: string, prose = 'Some prose.'): string =>
   `# Title\n\n${prose}\n\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`;
 
 function mount(before: string, after: string) {
-  return render(<MarkdownCompare comparison={compareMarkdown(before, after)} />);
+  return render(<MarkdownCompare comparison={compareMarkdown(before, after, NONCE)} />);
 }
 
 const diagram = (): HTMLImageElement | null =>
@@ -150,7 +153,7 @@ describe('a comparison with nothing to render', () => {
   it('says why instead of drawing an empty card', () => {
     render(
       <MarkdownCompare
-        comparison={compareMarkdown('# Same\n', '# Same\n')}
+        comparison={compareMarkdown('# Same\n', '# Same\n', NONCE)}
       />,
     );
 

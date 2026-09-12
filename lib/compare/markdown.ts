@@ -37,7 +37,9 @@
  */
 
 import MarkdownIt from 'markdown-it';
+import type { DiffSide } from '../github/types';
 import { diffHtml } from './htmlDiff/htmlDiff';
+import { ANCHOR_ATTRIBUTE, anchorValue } from './markdownAnchors';
 
 export interface MarkdownLimits {
   /**
@@ -56,6 +58,14 @@ export interface MarkdownLimits {
    * would let through documents whose rendered form is the thing that costs.
    * Rendering is linear and fast — 71 ms for 119,000 characters — so measuring
    * it before deciding is affordable, and the expensive step is the one after.
+   *
+   * Measured with the source anchors removed, so this cap means the same thing
+   * it meant before they existed. An anchor is forty-odd characters of this
+   * module's own bookkeeping on every block, which on a long README is
+   * kilobytes that the reader never asked for and — because `toWords` makes
+   * each tag one token however many attributes it carries — that the word diff
+   * does not pay for either. Counting them would quietly shrink the document
+   * this mode will accept, in exchange for measuring nothing real.
    */
   maxRenderedChars: number;
 }
@@ -79,6 +89,18 @@ export interface MarkdownComparison {
   unsafeHtml: string | null;
   /** Why there is no comparison, in a sentence. Null when there is one. */
   reason: string | null;
+  /**
+   * The nonce the anchors in `unsafeHtml` were stamped with.
+   *
+   * Handed back rather than left with the caller to remember, because the value
+   * and the document it describes are one thing and separating them is how they
+   * come apart: a page holding last render's nonce believes none of this
+   * render's anchors, and a page holding the wrong render's nonce is worse than
+   * that. Present on every status, including the three refusals, so the failure
+   * path has the same shape as the success one and no reader has to work out
+   * which branch left the field off.
+   */
+  nonce: string;
 }
 
 /**
@@ -225,6 +247,77 @@ renderer.core.ruler.push('task-list-text', (state): void => {
 });
 
 /**
+ * What `renderSide` puts in the renderer's `env` for the rule below to find.
+ *
+ * `markdown-it` types `env` as `any` and threads whatever it is given straight
+ * through to the core rules, so this interface is the only description of the
+ * contract between the two halves and both halves are in this file.
+ */
+interface AnchorEnv {
+  mdAnchor?: { nonce: string; side: DiffSide };
+}
+
+/**
+ * Every block says which line of which document it came from.
+ *
+ * This is what makes the mode commentable at all. See `./markdownAnchors.ts`
+ * for the format and for why the value carries a nonce; the decision worth
+ * recording here is the shape of the mechanism rather than the format.
+ *
+ * **Pushed once, not per render.** The side and the nonce travel in the `env`
+ * that `render(src, env)` threads through to the core rules, so one rule serves
+ * both sides of every comparison with no state of its own. Installing a
+ * freshly-closed-over rule per render was the obvious alternative and is a
+ * leak: `core.ruler` is a property of this module-level instance, so the chain
+ * would grow by two every time a reviewer opened a card, and a pull request
+ * with two hundred `.md` files would end up running four hundred stale rules
+ * over every document. A render whose `env` carries no `mdAnchor` — which is
+ * every render this module does not make — stamps nothing.
+ *
+ * **Two classes of token are skipped, for different reasons.** A closing tag
+ * has `nesting === -1` and prints no attributes, so an anchor on one is
+ * invisible. An `inline` token does carry a `map`, which is easy to miss, but
+ * `renderInline` walks its children and never prints the container, so an
+ * anchor there is a fact nothing can read. What is left is the set of tokens
+ * whose attributes reach the page: every block opening, and the standalone
+ * blocks — `fence`, `code_block`, `hr` — that are one token with no closer.
+ *
+ * One block is not reachable this way and it is worth naming rather than
+ * discovering: `html_block`, a run of raw HTML in the `.md` file, is rendered
+ * by returning its content verbatim, so it has nowhere to put an attribute and
+ * gets no anchor. A reviewer cannot comment on a hand-written `<table>` in a
+ * README. That is the same trade the sanitiser already makes about raw HTML,
+ * and the alternative — synthesizing a wrapper element around content a pull
+ * request wrote — is markup this module manufactures out of an attacker's
+ * string, which is the one thing the image rule above exists to avoid.
+ *
+ * **It does not interact with `task-list-text` above.** That rule reads
+ * `state.tokens[index - 2]` and mutates `content` and `children` on `inline`
+ * tokens; this one reads `map` and `nesting` and mutates `attrs` on everything
+ * else. Neither inserts, removes or reorders anything in `state.tokens`, so
+ * the lookback cannot be shifted and the disjoint fields cannot be overwritten
+ * — which means the order the two run in is not load-bearing, and the order
+ * they happen to run in is the order they are pushed, this one second. A test
+ * pins a ticked box that also carries an anchor, so a future rule that did
+ * insert a token would fail here rather than in a browser.
+ */
+renderer.core.ruler.push('source-anchors', (state): void => {
+  const stamp = (state.env as AnchorEnv).mdAnchor;
+  if (stamp === undefined) return;
+
+  for (const token of state.tokens) {
+    if (token.map === null || token.nesting === -1 || token.type === 'inline') continue;
+
+    const line = token.map[0];
+    if (line === undefined) continue;
+
+    // `map` counts from zero; GitHub counts from one, and so does every line
+    // number elsewhere in this project.
+    token.attrSet(ANCHOR_ATTRIBUTE, anchorValue(stamp.nonce, stamp.side, line + 1));
+  }
+});
+
+/**
  * Escape for a text position in HTML.
  *
  * Belt and braces: the sanitiser downstream would catch anything this let
@@ -242,11 +335,45 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-const tooLarge = (reason: string): MarkdownComparison => ({
+const tooLarge = (nonce: string, reason: string): MarkdownComparison => ({
   status: 'too-large',
   unsafeHtml: null,
   reason,
+  nonce,
 });
+
+/** One side, rendered with every block told which line of it it came from. */
+const renderSide = (source: string, nonce: string, side: DiffSide): string =>
+  renderer.render(source, { mdAnchor: { nonce, side } } satisfies AnchorEnv);
+
+/**
+ * Every anchor in a rendered document, as a pattern.
+ *
+ * `attrSet` and `markdown-it`'s `renderAttrs` are the only things that write
+ * this attribute here, and they write it one way: a leading space, the name, an
+ * `=`, and a double-quoted value with no double quote inside it, because the
+ * renderer escapes the value it is given. So the match is exact rather than
+ * approximate. Declared once at module scope like `TASK_MARKER` above, and safe
+ * to be global because `replace` resets `lastIndex` where `test` would have
+ * carried it between calls — which is a defect this project has already fixed
+ * once, in `htmlDiff`.
+ */
+const ANCHOR_PATTERN = new RegExp(` ${ANCHOR_ATTRIBUTE}="[^"]*"`, 'g');
+
+/**
+ * The rendered document without this module's bookkeeping on it.
+ *
+ * Used for the two questions that must not see the anchors: how large the
+ * document is, and whether the two sides are the same document. Both are
+ * questions about what the reader gets, and an anchor is not that — two
+ * documents identical but for a blank line inserted above them render the same
+ * prose and carry different line numbers, and calling that a change would
+ * reintroduce exactly the noise the rendered mode exists to remove.
+ *
+ * This is `htmlDiff`'s own trick one layer up: strip the attributes to decide,
+ * never to emit. `unsafeHtml` is always the anchored form.
+ */
+const withoutAnchors = (html: string): string => html.replace(ANCHOR_PATTERN, '');
 
 /**
  * Render both sides and mark the difference between them.
@@ -255,10 +382,17 @@ const tooLarge = (reason: string): MarkdownComparison => ({
  * one-sided change — see `modes.ts`, where `markdown:rendered` is marked
  * `needsBothSides`, because a document with every word marked as inserted is a
  * rendered preview wearing a diff's clothes.
+ *
+ * The nonce is required and has no default. An empty one would still stamp
+ * anchors, and `parseAnchor` would then believe any anchor a pull request wrote
+ * by hand — so a default here would not be a convenience, it would be the
+ * mechanism quietly turning itself off. It is minted by the caller in `ui/`,
+ * because `lib/` is pure and has no source of randomness.
  */
 export function compareMarkdown(
   before: string | null,
   after: string | null,
+  nonce: string,
 ): MarkdownComparison {
   const source = { before: before ?? '', after: after ?? '' };
 
@@ -267,6 +401,7 @@ export function compareMarkdown(
     source.after.length > MARKDOWN_LIMITS.maxSourceChars
   ) {
     return tooLarge(
+      nonce,
       'This document is too large to render and mark up here. Raw shows the ' +
         'change as GitHub sent it.',
     );
@@ -275,8 +410,8 @@ export function compareMarkdown(
   let rendered: { before: string; after: string };
   try {
     rendered = {
-      before: renderer.render(source.before),
-      after: renderer.render(source.after),
+      before: renderSide(source.before, nonce, 'LEFT'),
+      after: renderSide(source.after, nonce, 'RIGHT'),
     };
   } catch {
     // `markdown-it` is forgiving by design and there is no such thing as
@@ -288,14 +423,21 @@ export function compareMarkdown(
       reason:
         'This document could not be rendered. Raw shows the change as GitHub ' +
         'sent it.',
+      nonce,
     };
   }
 
+  const plain = {
+    before: withoutAnchors(rendered.before),
+    after: withoutAnchors(rendered.after),
+  };
+
   if (
-    rendered.before.length > MARKDOWN_LIMITS.maxRenderedChars ||
-    rendered.after.length > MARKDOWN_LIMITS.maxRenderedChars
+    plain.before.length > MARKDOWN_LIMITS.maxRenderedChars ||
+    plain.after.length > MARKDOWN_LIMITS.maxRenderedChars
   ) {
     return tooLarge(
+      nonce,
       'This document renders to more than can be marked up here. Raw shows ' +
         'the change as GitHub sent it.',
     );
@@ -306,13 +448,18 @@ export function compareMarkdown(
   // trailing whitespace, a reordered link reference — are genuinely the same
   // document, and saying so is more useful than marking nothing in a wall of
   // prose and leaving the reader to work out that nothing is what was meant.
-  if (rendered.before === rendered.after) {
+  //
+  // Compared without the anchors for the same reason: the two sides are stamped
+  // `L` and `R`, so the anchored forms of one unchanged document never match
+  // each other and this branch would be unreachable.
+  if (plain.before === plain.after) {
     return {
       status: 'unchanged',
       unsafeHtml: null,
       reason:
         'These two versions render identically. The difference between them is ' +
         'in the Markdown rather than in the document.',
+      nonce,
     };
   }
 
@@ -325,8 +472,9 @@ export function compareMarkdown(
         'Marking up the differences in this document ran past its budget, so ' +
         'there is no complete answer to show. Raw shows the change as GitHub ' +
         'sent it.',
+      nonce,
     };
   }
 
-  return { status: 'ok', unsafeHtml: marked, reason: null };
+  return { status: 'ok', unsafeHtml: marked, reason: null, nonce };
 }

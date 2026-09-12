@@ -123,11 +123,20 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
   // Rendering and word-diffing two documents, which is the expensive step in
   // this file — see `HTML_DIFF_BUDGET`. Memoized on the two sides, so a
   // re-render caused by anything else on the card does not pay for it again.
+  //
+  // The nonce is minted here rather than in `lib/` because `lib/` is pure and
+  // has no source of randomness, and it is minted *inside the memo* so that it
+  // is exactly as stable as the document it stamps: one value for as long as
+  // the two sides do not move, a fresh one the moment they do. A nonce hoisted
+  // to module scope, or held in a ref for the life of the card, would be a
+  // value the reviewer's own browser has already put in the DOM once — and the
+  // whole of `markdownAnchors.ts` rests on a `.md` file never having seen the
+  // nonce its anchors will be checked against.
   const markdown = useMemo(
     () =>
       kind !== 'markdown' || text.status !== 'ready'
         ? null
-        : compareMarkdown(text.before, text.after),
+        : compareMarkdown(text.before, text.after, crypto.randomUUID()),
     [kind, text.status, text.before, text.after],
   );
 
