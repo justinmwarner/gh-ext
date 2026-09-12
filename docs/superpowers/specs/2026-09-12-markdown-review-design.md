@@ -238,6 +238,38 @@ Both halves get a test that fails if either is loosened, and the comment in
 `ui/markdownHtml.ts` is amended to explain the exception rather than leaving the
 next reader to find it by grep.
 
+### 5.1 Three things found while building this, on 2026-09-12
+
+**Stamping breaks the `unchanged` comparison, and the fix is `htmlDiff`'s own
+rule one layer up.** Two sides that render identically no longer compare equal
+once each carries its own anchors — one says `L`, the other `R`. So
+`compareMarkdown` strips anchors for the two decisions that must not see
+bookkeeping — the `maxRenderedChars` gate and the `unchanged` equality test —
+while `unsafeHtml` is always the anchored form. That is exactly `htmlDiff`'s
+"strip attributes for matching, never for emission", and stripping for the size
+gate too is deliberate rather than incidental: an anchor is about forty-five
+characters a block that `toWords` never pays for, since a tag is one token
+whatever its attributes, so counting them would shrink the accepted document
+size in exchange for measuring nothing real.
+
+**A raw HTML block gets no anchor, so it cannot be commented on.**
+`markdown-it` gives `html_block` a `map`, but its renderer returns
+`token.content` verbatim — the attribute never reaches the output. A README
+containing a hand-written `<table>` or `<details>` therefore has a block with no
+comment affordance. This is a real gap in §7's "everything is commentable" and
+the affordance must not pretend otherwise: a block with no anchor gets the
+file-level path, not a missing control. `inline` tokens do carry a `map`,
+contrary to what this document first assumed, but stamping one is useless —
+`renderInline` walks children and never prints the container.
+
+**An unchanged block is emitted as the new side's tag, so it carries `R`.**
+`htmlDiff`'s `equal` branch slices `newWords`, and tags are compared with
+attributes stripped, so a `<p>` present on both sides emits the new document's
+anchor. The old side's `L` survives only where its tag falls inside a delete or
+replace region — a genuinely removed block. That is the right behaviour rather
+than a limitation: one element on screen is one block of the new document, and
+it should name the line a comment on it would actually reach.
+
 ---
 
 ## 6. Decision 4 — the document is split into per-block React elements
