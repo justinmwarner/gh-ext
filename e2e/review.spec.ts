@@ -2605,8 +2605,9 @@ test('the markdown mode outlives the page', async ({ context, extensionId, api }
   const raw = page
     .locator(`[data-file-card="${MARKDOWN_FILE}"]`)
     .getByRole('button', { name: 'Raw', exact: true });
-  // The rendered document is a separate element from the card — see `fileBody`
-  // — so it is the only thing that can say the card itself moved.
+  // Scoped to the body, which is a separate element from the card — see
+  // `fileBody`. Looked for inside the card, `.markdown-rendered` is absent in
+  // either mode, and every assertion below would hold without testing one.
   const prose = fileBody(page, MARKDOWN_FILE).locator('.markdown-rendered');
 
   // Where a `.md` card opens when nobody has ever said otherwise.
