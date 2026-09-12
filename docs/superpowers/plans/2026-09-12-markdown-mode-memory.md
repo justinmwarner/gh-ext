@@ -325,71 +325,133 @@ git commit -m "feat: read and write the remembered mode"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `ui/useModeMemory.test.tsx`. Follow the mocking style already used in `ui/useSettings.test.tsx` — read that file first and mirror how it fakes `lib/settings-store`.
+Create `ui/useModeMemory.test.tsx`. **Read `ui/useSettings.test.tsx` first and mirror it exactly** — it is the same hook one size smaller, and its approach is deliberate: it does *not* mock `lib/settings-store`, it drives the real store against the fake `browser` that `ui/testSetup.ts` installs, swapping in a working `onChanged` for the duration and restoring the original afterwards. A `vi.mock` of the store here would assert that mocks were called rather than that the hook works, and this project does not write that kind of test. Use a probe component and `render`, not `renderHook`.
 
 ```tsx
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, renderHook, waitFor } from '@testing-library/react';
+/**
+ * The remembered comparison mode reaching an open review, and staying current.
+ *
+ * The same two halves as `useSettings`, failing the same two ways: without the
+ * read a preference does nothing until reload, and without the listener a
+ * second review tab and this one disagree about how Markdown is drawn.
+ *
+ * The shared stub in `testSetup` answers reads but has an inert `onChanged`, so
+ * this file installs a working one for the duration and puts the original back.
+ */
 
-const readModeMemory = vi.fn();
-const writeModeMemory = vi.fn();
-let notify: ((memory: unknown) => void) | null = null;
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { MODE_MEMORY_KEY, type ModeMemory } from '@/lib/settings';
+import { useModeMemory } from './useModeMemory';
 
-vi.mock('@/lib/settings-store', () => ({
-  readModeMemory: () => readModeMemory(),
-  writeModeMemory: (memory: unknown) => writeModeMemory(memory),
-  onModeMemoryChanged: (onChange: (memory: unknown) => void) => {
-    notify = onChange;
-    return () => {
-      notify = null;
-    };
-  },
-}));
+type Listener = (
+  changes: Record<string, { newValue?: unknown }>,
+  areaName: string,
+) => void;
 
-const { useModeMemory } = await import('./useModeMemory');
+let listeners: Listener[] = [];
+let original: unknown;
+
+beforeEach(async () => {
+  listeners = [];
+  original = browser.storage.onChanged;
+  Object.defineProperty(browser.storage, 'onChanged', {
+    value: {
+      addListener: (fn: Listener) => listeners.push(fn),
+      removeListener: (fn: Listener) => {
+        listeners = listeners.filter((held) => held !== fn);
+      },
+    },
+    writable: true,
+    configurable: true,
+  });
+  await browser.storage.local.remove(MODE_MEMORY_KEY);
+});
+
+afterEach(() => {
+  Object.defineProperty(browser.storage, 'onChanged', {
+    value: original,
+    writable: true,
+    configurable: true,
+  });
+});
+
+/** What another review tab does when the reviewer presses a mode in it. */
+const announce = (memory: ModeMemory): void => {
+  act(() => {
+    for (const listener of [...listeners]) {
+      listener({ [MODE_MEMORY_KEY]: { newValue: memory } }, 'local');
+    }
+  });
+};
+
+let remember: (kind: 'markdown', mode: string) => void = () => {};
+
+function Probe() {
+  const [memory, set] = useModeMemory();
+  remember = set;
+  return <output>{memory.markdown ?? 'unset'}</output>;
+}
+
+const shown = (): string => screen.getByRole('status').textContent ?? '';
 
 describe('useModeMemory', () => {
-  beforeEach(() => {
-    readModeMemory.mockReset().mockResolvedValue({});
-    writeModeMemory.mockReset().mockResolvedValue(undefined);
-    notify = null;
+  it('renders unset before storage has answered', () => {
+    render(<Probe />);
+    expect(shown()).toBe('unset');
   });
 
-  it('starts empty and adopts what storage held', async () => {
-    readModeMemory.mockResolvedValue({ markdown: 'raw' });
-    const { result } = renderHook(() => useModeMemory());
-    expect(result.current[0]).toEqual({});
-    await waitFor(() => expect(result.current[0]).toEqual({ markdown: 'raw' }));
+  it('picks up what was stored', async () => {
+    await browser.storage.local.set({ [MODE_MEMORY_KEY]: { markdown: 'raw' } });
+
+    render(<Probe />);
+
+    await waitFor(() => {
+      expect(shown()).toBe('raw');
+    });
   });
 
-  it('remembering shows immediately and persists', async () => {
-    const { result } = renderHook(() => useModeMemory());
-    await waitFor(() => expect(readModeMemory).toHaveBeenCalled());
+  it('remembering shows at once and is written through', async () => {
+    render(<Probe />);
+    await waitFor(() => {
+      expect(shown()).toBe('unset');
+    });
+
     act(() => {
-      result.current[1]('markdown', 'raw');
+      remember('markdown', 'raw');
     });
-    expect(result.current[0]).toEqual({ markdown: 'raw' });
-    expect(writeModeMemory).toHaveBeenCalledWith({ markdown: 'raw' });
+
+    expect(shown()).toBe('raw');
+    await waitFor(async () => {
+      const stored = await browser.storage.local.get(MODE_MEMORY_KEY);
+      expect(stored[MODE_MEMORY_KEY]).toEqual({ markdown: 'raw' });
+    });
   });
 
-  // The same ordering hazard useSettings documents: a write landing between the
-  // listener going on and the opening read resolving must not be lost.
-  it('a change outranks an opening read still in flight', async () => {
-    let settle: (memory: unknown) => void = () => {};
-    readModeMemory.mockReturnValue(
-      new Promise((resolve) => {
-        settle = resolve;
-      }),
-    );
-    const { result } = renderHook(() => useModeMemory());
-    await waitFor(() => expect(notify).not.toBeNull());
+  it('follows a press made in another review tab', async () => {
+    render(<Probe />);
+    await waitFor(() => {
+      expect(shown()).toBe('unset');
+    });
+
+    announce({ markdown: 'raw' });
+
+    expect(shown()).toBe('raw');
+  });
+
+  it('ignores a write to a different area', async () => {
+    render(<Probe />);
+    await waitFor(() => {
+      expect(shown()).toBe('unset');
+    });
+
     act(() => {
-      notify?.({ markdown: 'raw' });
+      for (const listener of [...listeners]) {
+        listener({ [MODE_MEMORY_KEY]: { newValue: { markdown: 'raw' } } }, 'sync');
+      }
     });
-    await act(async () => {
-      settle({});
-    });
-    expect(result.current[0]).toEqual({ markdown: 'raw' });
+
+    expect(shown()).toBe('unset');
   });
 });
 ```
@@ -519,14 +581,13 @@ describe('remembering how markdown is compared', () => {
   });
 
   it('pressing a mode on one markdown card flips the others', async () => {
-    const user = userEvent.setup();
     mount([
       file({ path: 'docs/a.md' }),
       file({ path: 'docs/b.md' }),
       file({ path: 'assets/logo.png', isBinary: true }),
     ]);
 
-    await user.click(within(card('docs/a.md')).getByRole('button', { name: 'Raw' }));
+    fireEvent.click(within(card('docs/a.md')).getByRole('button', { name: 'Raw' }));
 
     for (const path of ['docs/a.md', 'docs/b.md']) {
       await waitFor(() => {
@@ -544,15 +605,12 @@ describe('remembering how markdown is compared', () => {
   });
 
   it('a per-file choice on an unremembered kind still stands alone', async () => {
-    const user = userEvent.setup();
     mount([
       file({ path: 'assets/a.png', isBinary: true }),
       file({ path: 'assets/b.png', isBinary: true }),
     ]);
 
-    await user.click(
-      within(card('assets/a.png')).getByRole('button', { name: 'Onion skin' }),
-    );
+    fireEvent.click(within(card('assets/a.png')).getByRole('button', { name: 'Onion skin' }));
 
     expect(
       within(card('assets/b.png')).getByRole('button', { name: 'Side by side' }),
@@ -572,7 +630,13 @@ describe('remembering how markdown is compared', () => {
 });
 ```
 
-Add to that file's imports: `MODE_MEMORY_KEY` from `@/lib/settings`, `browser` from `wxt/browser`, and `afterEach` / `waitFor` / `within` / `userEvent` if they are not already there.
+**Imports that file is missing.** `waitFor`, `within`, `fireEvent`, `describe`, `expect`, `it` and `beforeEach` are already imported. You must add:
+
+- `afterEach` to the existing `vitest` import
+- `browser` from `wxt/browser`
+- `MODE_MEMORY_KEY` from `@/lib/settings`
+
+Do **not** reach for `@testing-library/user-event`. It is a dependency of this project, but `ui/DiffColumn.test.tsx` drives every interaction with `fireEvent` and mixing the two in one file is how a test file stops having one convention.
 
 - [ ] **Step 2: Run test to verify it fails**
 
