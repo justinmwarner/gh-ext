@@ -10,9 +10,9 @@
  * So the mode is a rendered **diff**. The new document, formatted the way the
  * reader will eventually see it, with insertions and deletions marked where
  * they happened — which is the one arrangement that keeps the formatting and
- * the marks at the same time. Three steps: render both sides with `marked`,
- * word-diff the two HTML strings with the vendored `htmlDiff`, and hand the
- * result to `ui/` to be sanitised and shown.
+ * the marks at the same time. Three steps: render both sides with
+ * `markdown-it`, word-diff the two HTML strings with the vendored `htmlDiff`,
+ * and hand the result to `ui/` to be sanitised and shown.
  *
  * **The output of this module is not safe and its type name says so.** The
  * document came from a pull request, which anyone can open, and this page runs
@@ -36,7 +36,7 @@
  * cannot predict.
  */
 
-import { Marked } from 'marked';
+import MarkdownIt from 'markdown-it';
 import { diffHtml } from './htmlDiff/htmlDiff';
 
 export interface MarkdownLimits {
@@ -84,50 +84,74 @@ export interface MarkdownComparison {
 /**
  * The renderer, configured once.
  *
- * A `Marked` instance rather than the global `marked.use`, which mutates
- * process-wide state that a test — or another feature added later — would then
- * inherit without asking for it.
+ * An instance of its own rather than a shared module-level default, which would
+ * mutate process-wide state that a test — or another feature added later —
+ * would then inherit without asking for it. The rules installed below belong to
+ * this module.
+ *
+ * `markdown-it` rather than `marked`, for three reasons set out in §3 and §4 of
+ * the Markdown review design. Two of them are defects `marked` rendered on the
+ * page: `~~struck~~` came out as `<del>`, the very tag `htmlDiff` marks
+ * deletions with, so a word an author struck through was painted — and, because
+ * `<del>` carries its meaning to a screen reader, *announced* — as a word the
+ * diff had removed; and a ticked checkbox came out as an attribute on an
+ * `<input>`, which the word diff strips and the sanitiser forbids, so ticking a
+ * box rendered as no change at all. The third is `token.map`, a source line
+ * range carried on every block token, which is what anchoring a comment to a
+ * paragraph of rendered prose needs and what `marked` carries nothing of.
  */
-const renderer = new Marked({
-  // GitHub Flavoured Markdown: tables, task lists, strikethrough, autolinks.
-  // These are what a repository's documentation is actually written in.
-  gfm: true,
+const renderer = new MarkdownIt({
+  // Raw HTML in a `.md` file is passed through and sanitised downstream, which
+  // is what GitHub does and what a README expects. `ui/markdownHtml.ts` is the
+  // gate; turning this off here would silently change how documents render
+  // without making anything safer.
+  html: true,
+  // Bare URLs become links, which is half of what `gfm: true` meant before.
+  linkify: true,
   // Off, matching how GitHub renders a `.md` *file*: a single newline is a
   // wrap, not a line break. On, every re-wrapped paragraph in a pull request
   // would show as a structural change.
   breaks: false,
-  // Synchronous, so `parse` returns a string rather than a promise. Nothing
-  // here is async and the caller renders inside React.
-  async: false,
-  renderer: {
-    /**
-     * An image is named, never loaded.
-     *
-     * Two reasons, and the first is the serious one. An absolute `src` in a
-     * `.md` file makes this page fetch from a third party the instant a
-     * reviewer opens the card — announcing who is reviewing which pull request,
-     * from which address, from inside the extension origin. It is the quietest
-     * possible way to get a signal out of a review tool and it needs no script
-     * at all. Second, a relative `src` — which is most of them — has no base to
-     * resolve against here and would draw a broken icon.
-     *
-     * Naming the file instead has a benefit beyond the two costs it avoids:
-     * swapping one image for another becomes a text change, which is something
-     * this diff can mark. Two `<img>` tags with different `src` attributes are
-     * invisible to a word diff that strips attributes before comparing.
-     *
-     * This is the same trade §3.3 of the comparison spec made for SVG, one step
-     * further along: there, markup renders through `<img>` because `<img>` runs
-     * no script and fetches nothing beyond itself; here even that fetch is more
-     * than a prose diff needs.
-     */
-    image({ href, text, title }): string {
-      const label = text !== '' ? text : (title ?? '');
-      const named = label !== '' ? `${label} (${href})` : href;
-      return `<span class="md-image">Image: ${escapeHtml(named)}</span>`;
-    },
-  },
+  // No smart quotes. A typographic substitution the author did not write is a
+  // character this diff would mark as changed.
+  typographer: false,
 });
+
+/**
+ * An image is named, never loaded.
+ *
+ * Two reasons, and the first is the serious one. An absolute `src` in a `.md`
+ * file makes this page fetch from a third party the instant a reviewer opens
+ * the card — announcing who is reviewing which pull request, from which
+ * address, from inside the extension origin. It is the quietest possible way to
+ * get a signal out of a review tool and it needs no script at all. Second, a
+ * relative `src` — which is most of them — has no base to resolve against here
+ * and would draw a broken icon.
+ *
+ * Naming the file instead has a benefit beyond the two costs it avoids:
+ * swapping one image for another becomes a text change, which is something this
+ * diff can mark. Two `<img>` tags with different `src` attributes are invisible
+ * to a word diff that strips attributes before comparing.
+ *
+ * This is the same trade §3.3 of the comparison spec made for SVG, one step
+ * further along: there, markup renders through `<img>` because `<img>` runs no
+ * script and fetches nothing beyond itself; here even that fetch is more than a
+ * prose diff needs.
+ */
+renderer.renderer.rules.image = (tokens, index): string => {
+  const token = tokens[index];
+  if (token === undefined) return '';
+  const href = String(token.attrGet('src') ?? '');
+  const label = renderer.renderer.renderInlineAsText(
+    token.children ?? [],
+    renderer.options,
+    {},
+  );
+  const title = String(token.attrGet('title') ?? '');
+  const named = label !== '' ? label : title;
+  const text = named !== '' ? `${named} (${href})` : href;
+  return `<span class="md-image">Image: ${escapeHtml(text)}</span>`;
+};
 
 /**
  * Escape for a text position in HTML.
@@ -179,13 +203,13 @@ export function compareMarkdown(
   let rendered: { before: string; after: string };
   try {
     rendered = {
-      before: renderer.parse(source.before) as string,
-      after: renderer.parse(source.after) as string,
+      before: renderer.render(source.before),
+      after: renderer.render(source.after),
     };
   } catch {
-    // `marked` is forgiving by design and there is no such thing as invalid
-    // Markdown, so this is close to unreachable — but "close to" is not a
-    // reason to let one file take the whole column down.
+    // `markdown-it` is forgiving by design and there is no such thing as
+    // invalid Markdown, so this is close to unreachable — but "close to" is not
+    // a reason to let one file take the whole column down.
     return {
       status: 'too-complex',
       unsafeHtml: null,

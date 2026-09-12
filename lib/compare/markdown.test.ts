@@ -230,3 +230,33 @@ describe('the ceiling', () => {
     expect(result.unsafeHtml).toContain('extraordinary');
   });
 });
+
+describe('markdown-it parity and fixes', () => {
+  // Defect 3.2 of the design: `marked` emitted <del> for strikethrough, which
+  // is the tag htmlDiff marks deletions with, so authored strikethrough was
+  // painted and announced as a deletion.
+  it('renders strikethrough as <s>, never <del>', () => {
+    const result = compareMarkdown('~~struck~~ word', '~~struck~~ other');
+    expect(result.unsafeHtml).toContain('<s>struck</s>');
+  });
+
+  it('still renders GFM tables', () => {
+    const result = compareMarkdown('| a |\n|---|\n| b |', '| a |\n|---|\n| c |');
+    expect(result.unsafeHtml).toContain('<table>');
+  });
+
+  it('still names images rather than loading them', () => {
+    const result = compareMarkdown('![alt](x.png)', '![alt](y.png)');
+    expect(result.unsafeHtml).toContain('md-image');
+    expect(result.unsafeHtml).not.toContain('<img');
+  });
+
+  it('still treats a single newline as a wrap, not a break', () => {
+    const result = compareMarkdown('one\ntwo', 'one\nthree');
+    expect(result.unsafeHtml).not.toContain('<br>');
+  });
+
+  it('still reports two sides that render identically as unchanged', () => {
+    expect(compareMarkdown('# A', 'A\n=').status).toBe('unchanged');
+  });
+});
