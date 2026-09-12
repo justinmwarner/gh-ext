@@ -204,8 +204,19 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
    * that list when its line falls outside the pull request's hunks, or when
    * the diff on screen numbers its side against a different commit; both of
    * those are lines `commentableLines` does not contain either, because the
-   * patch it was built from is the same patch. So the two partitions meet
-   * exactly, and nothing appears twice.
+   * patch it was built from is the same patch and `RichCompare` empties the
+   * set outright for the second. So the two partitions meet, and a thread does
+   * not appear twice.
+   *
+   * **One overlap is known and accepted.** `layoutThreads` has a third
+   * demotion — `whitespace-only`, for a thread whose hunk the local
+   * whitespace recompute took away — and that verdict is about the *drawn*
+   * patch, which nothing here is given: the card is handed GitHub's file
+   * deliberately, so that no comment is ever anchored from a patch this page
+   * rewrote. Such a thread is listed and also drawn under its block. Closing
+   * it would mean carrying the per-file list's verdict into a component that
+   * otherwise needs nothing from it, and the failure it costs is a comment
+   * read twice rather than a comment not read at all.
    *
    * The scan is linear per thread over the blocks rather than a lookup table.
    * A document has hundreds of blocks and a file has a handful of threads, the
