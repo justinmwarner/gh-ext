@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DraftStore, type KeyValueStore, draftKey } from './drafts';
+import { DraftStore, type DraftLocation, type KeyValueStore, draftKey } from './drafts';
+import { fileAnchor } from './selection';
 
 function memoryStore(): KeyValueStore {
   const map = new Map<string, string>();
@@ -11,15 +12,37 @@ function memoryStore(): KeyValueStore {
   };
 }
 
-const loc = { prId: 'PR_1', path: 'src/a.ts', line: 10, side: 'RIGHT' as const };
+const loc: DraftLocation = {
+  prId: 'PR_1',
+  path: 'src/a.ts',
+  anchor: { subject: 'line', line: 10, side: 'RIGHT' },
+};
+
+const onTheFile: DraftLocation = { prId: 'PR_1', path: 'src/a.ts', anchor: fileAnchor() };
 
 describe('draftKey', () => {
   it('is stable and includes every locating field', () => {
+    // Unchanged from the format that shipped, and asserted as a literal rather
+    // than as a shape. A reviewer who updates the extension mid-sentence has a
+    // draft in storage under this exact string.
     expect(draftKey(loc)).toBe('draft:PR_1:src/a.ts:10:RIGHT');
   });
 
   it('distinguishes sides on the same line', () => {
-    expect(draftKey(loc)).not.toBe(draftKey({ ...loc, side: 'LEFT' }));
+    expect(
+      draftKey({ ...loc, anchor: { subject: 'line', line: 10, side: 'LEFT' } }),
+    ).not.toBe(draftKey(loc));
+  });
+
+  it('keeps a comment about the file clear of every line draft', () => {
+    // The last segment of a line key is a `DiffSide`, so `file` is a suffix no
+    // line draft can produce — including on a path that already ends in one,
+    // which is the only way the two families could otherwise meet.
+    expect(draftKey(onTheFile)).toBe('draft:PR_1:src/a.ts:file');
+    expect(draftKey(onTheFile)).not.toBe(draftKey(loc));
+    expect(
+      draftKey({ ...onTheFile, path: 'src/a.ts:10:RIGHT' }),
+    ).not.toBe(draftKey(loc));
   });
 });
 

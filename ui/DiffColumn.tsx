@@ -1294,6 +1294,10 @@ export function DiffColumn({
             unanchored={layouts.get(file.path)?.listed ?? NO_LISTED}
             posting={postings.get(file.path)?.listed ?? NO_POSTING}
             blobs={blobs}
+            /* Derived from `sidesKey` rather than read off `sides`, which is a
+               fresh object every render — and this callback's identity decides
+               whether Pierre rebuilds every annotation row under it. */
+            anchorable={sidesKey === 'ad'}
           />
         );
       }
@@ -1318,6 +1322,7 @@ export function DiffColumn({
       layouts,
       postings,
       blobs,
+      sidesKey,
     ],
   );
 

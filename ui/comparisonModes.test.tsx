@@ -714,7 +714,18 @@ describe('a Markdown file written by an attacker', () => {
     // observable here in either case, and asserting on a global the attack
     // tried to set would be a test that cannot fail. What is asserted is what
     // reached the document, which is the thing the sanitiser controls.
-    for (const element of [view, ...view.querySelectorAll('*')]) {
+    //
+    // Over the sanitised markup rather than the whole card, and the narrowing
+    // is forced rather than chosen: React 19 assigns a no-op `onclick` to a
+    // host element carrying `onClick` and to its parent — `trapClickOnNon-
+    // InteractiveElement` — so the comment button on every block would fail
+    // this sweep while saying nothing about the sanitiser. `.markdown-block-
+    // content` is exactly the markup the pull request wrote.
+    const authored = [...view.querySelectorAll('.markdown-block-content')].flatMap(
+      (content) => [content, ...content.querySelectorAll('*')],
+    );
+    expect(authored.length).toBeGreaterThan(0);
+    for (const element of authored) {
       for (const property of ['onerror', 'onload', 'onmouseover', 'onclick', 'ontoggle']) {
         expect((element as unknown as Record<string, unknown>)[property]).toBeFalsy();
       }

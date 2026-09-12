@@ -36,7 +36,7 @@ const PR_ID = 'PR_kwDOABCD';
 
 const SINGLE: LineAnchor = { subject: 'line', line: 2, side: 'RIGHT' };
 
-const KEY = draftKey({ prId: PR_ID, path: 'src/app.ts', line: 2, side: 'RIGHT' });
+const KEY = draftKey({ prId: PR_ID, path: 'src/app.ts', anchor: SINGLE });
 
 const FAILURE = {
   ok: false,

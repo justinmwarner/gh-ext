@@ -48,9 +48,24 @@ export interface FileBodyProps {
   posting: readonly PostingComment[];
   /** The two commits a rich comparison reads whole files from. */
   blobs: BlobRefs | null;
+  /**
+   * Whether this diff's line numbers are the pull request's own.
+   *
+   * Carried through to `RichCompare`, which is where it decides something: a
+   * rendered Markdown block can be commented on, and under a narrowed scope the
+   * line it names belongs to a different compare. See the prop there.
+   */
+  anchorable: boolean;
 }
 
-export function FileBody({ file, mode, unanchored, posting, blobs }: FileBodyProps) {
+export function FileBody({
+  file,
+  mode,
+  unanchored,
+  posting,
+  blobs,
+  anchorable,
+}: FileBodyProps) {
   const body = fileBody(file);
   const raw = mode === RAW.id;
 
@@ -66,7 +81,7 @@ export function FileBody({ file, mode, unanchored, posting, blobs }: FileBodyPro
         </p>
       )}
 
-      <RichCompare file={file} mode={mode} refs={blobs} />
+      <RichCompare file={file} mode={mode} refs={blobs} anchorable={anchorable} />
 
       {posting.length > 0 && (
         <ul className="unplaceable-posting" data-unplaceable-posting={file.path}>

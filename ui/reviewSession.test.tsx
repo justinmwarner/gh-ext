@@ -23,7 +23,10 @@ import {
 } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore, type KeyValueStore, draftKey } from '@/lib/review/drafts';
-import { fileAnchor } from '@/lib/review/selection';
+import { type LineAnchor, fileAnchor } from '@/lib/review/selection';
+
+/** The line every draft assertion in this file is about. */
+const LINE_TWO: LineAnchor = { subject: 'line', line: 2, side: 'RIGHT' };
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
 import { pullRequestNode, reviewComment, reviewThread } from './prPayload.fixture';
@@ -418,7 +421,7 @@ describe('a comment on its way', () => {
 
   it('is gone once GitHub has it, and so is its draft', async () => {
     const store = memoryStore({
-      [draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', line: 2, side: 'RIGHT' })]:
+      [draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', anchor: LINE_TWO })]:
         'a comment',
     });
     answerByDocument();
@@ -432,7 +435,7 @@ describe('a comment on its way', () => {
     await waitFor(async () => {
       expect(
         await store.get(
-          draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', line: 2, side: 'RIGHT' }),
+          draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', anchor: LINE_TWO }),
         ),
       ).toBeNull();
     });
@@ -479,12 +482,7 @@ describe('a comment on its way', () => {
   });
 
   it('discards a failed comment, and its draft with it', async () => {
-    const key = draftKey({
-      prId: 'PR_kwDOABCD',
-      path: 'src/app.ts',
-      line: 2,
-      side: 'RIGHT',
-    });
+    const key = draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', anchor: LINE_TWO });
     const store = memoryStore({ [key]: 'a comment' });
     answerByDocument({ [START_REVIEW]: REFUSED });
     mount({}, [reviewThread({ path: 'src/app.ts', line: 2 })], store);

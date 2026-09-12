@@ -85,7 +85,11 @@ export function MermaidBlock({ block }: { block: MarkdownBlock }) {
     picture === null ? undefined : block.changed ? 'md-diagram-source' : 'md-diagram-drawn';
 
   return (
-    <div className="markdown-block">
+    // `markdown-block-content`, the same class an ordinary block's markup
+    // carries: a diagram is one block of the document, and the box around it —
+    // with the comment button and the threads in it — belongs to
+    // `MarkdownCompare`, which draws it for every block alike.
+    <div className="markdown-block-content">
       {picture !== null && (
         <figure className="md-diagram">
           {/* Width and height off the diagram's own `viewBox`, so the space is

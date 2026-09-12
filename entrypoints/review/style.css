@@ -3316,22 +3316,109 @@ button.scope-showing:hover {
 }
 
 /* The first and last blocks sit flush against the padding above and below
-   them. Each block is wrapped in an element of its own now — see
-   `ui/markdownBlocks.ts` — and a margin collapses straight out through a
-   wrapper carrying no border and no padding, so the rule has to reach the
-   element the margin is actually on rather than the box around it. That is one
-   level down for an ordinary block, and one further for a diagram, whose block
-   holds the picture and the source it was drawn from. */
-.markdown-rendered > :first-child,
-.markdown-rendered > :first-child > :first-child,
-.markdown-rendered > :first-child > :first-child > pre:first-child {
+   them. Each block is a box of its own — the markup, the comment button, any
+   threads on it — and a margin collapses straight out through a wrapper
+   carrying no border and no vertical padding, so the rule has to reach the
+   element the margin is actually on rather than the box around it. The class
+   is named rather than walked with `:first-child` because a block's last child
+   is no longer its content: it may be a thread, or the composer.
+
+   Two levels for an ordinary block, three for a diagram, whose content holds
+   the picture and the source it was drawn from. */
+.markdown-rendered > .markdown-block:first-child > .markdown-block-content > :first-child,
+.markdown-rendered
+  > .markdown-block:first-child
+  > .markdown-block-content
+  > :first-child
+  > pre:first-child {
   margin-top: 0;
 }
 
-.markdown-rendered > :last-child,
-.markdown-rendered > :last-child > :last-child,
-.markdown-rendered > :last-child > :last-child > pre:last-child {
+.markdown-rendered > .markdown-block:last-child > .markdown-block-content > :last-child,
+.markdown-rendered
+  > .markdown-block:last-child
+  > .markdown-block-content
+  > :last-child
+  > pre:last-child {
   margin-bottom: 0;
+}
+
+/* The gutter a comment button lives in, which is the same place a reviewer
+   already reaches for on github.com. Left padding rather than a negative
+   offset into the container's own: the card scrolls, and an absolutely
+   positioned control hanging outside it would be clipped the moment it did. */
+.markdown-block {
+  position: relative;
+  padding-left: 24px;
+}
+
+/* `J` and `K` land here, so the ring is the only thing saying where the
+   reviewer is. Inset, because the card is a scrolling box and an outline drawn
+   outside the block is cut off at its edge — the rule DESIGN.md gives for
+   exactly this case. */
+.markdown-block:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+/* Out of the way until it is wanted: one of these sits beside every paragraph
+   of a README, and a column of buttons down the side of a document nobody is
+   commenting on is a column of buttons in the way of reading it.
+
+   Opacity rather than `display` or `visibility`, both of which would take it
+   out of the accessibility tree — it is not in the tab order, so a screen
+   reader's own traversal is the way it is found, and that has to work whether
+   or not a pointer is anywhere near. No transition: DESIGN.md's rule for this
+   page is colour only, and a control that fades in under the cursor is the one
+   kind of motion a reviewer meets hundreds of times. */
+.markdown-comment {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-subtle);
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.markdown-block:hover > .markdown-comment,
+.markdown-block:focus-within > .markdown-comment,
+.markdown-comment:focus {
+  opacity: 1;
+}
+
+.markdown-comment:not(:disabled):hover {
+  background: var(--neutral-hover);
+  color: var(--fg-default);
+}
+
+/* A thread belongs to the paragraph above it and should read as attached to
+   it, which is what the indent says; the composer brings its own border. */
+.markdown-block > .thread,
+.markdown-block > .composer {
+  margin-top: 6px;
+  margin-left: 12px;
+}
+
+/* What a file-level comment is about to do, said before it is written rather
+   than discovered afterwards. Quiet — it is context for the box below it, not
+   a warning — which is why it is Foreground Muted and not the attention pair. */
+.composer-scope {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
 }
 
 .markdown-rendered h1,

@@ -1257,19 +1257,18 @@ export function ReviewSessionProvider({
    *
    * The composer writes the draft before handing the comment over and no
    * longer waits around to clear it, so clearing it is this file's job now.
-   * Built from the same three fields the composer used, which is what makes
-   * the two agree — see `draftKey`.
+   * Built out of the same fields the composer used, which is what makes the
+   * two agree — see `draftKey`.
    *
-   * Null for a comment about the file, because there is no draft to clear: a
-   * draft is keyed by line and side, and the composer that writes one only ever
-   * opens on a line. Inventing a key here instead would settle the storage
-   * format for file drafts in the one place that never writes one.
+   * Total, where it used to answer null for a comment about the file. That
+   * null was a statement that file drafts had no storage key, and the
+   * rendered Markdown view — which writes one every time a reviewer comments
+   * on a block outside the diff — is why they now do. Left as it was, every
+   * such comment would keep its draft after GitHub had the comment, and the
+   * next composer on that file would open holding words already posted.
    */
   const draftFor = useCallback(
-    ({ path, anchor }: NewThreadInput): DraftLocation | null =>
-      anchor.subject === 'file'
-        ? null
-        : { prId, path, line: anchor.line, side: anchor.side },
+    ({ path, anchor }: NewThreadInput): DraftLocation => ({ prId, path, anchor }),
     [prId],
   );
 
@@ -1315,8 +1314,7 @@ export function ReviewSessionProvider({
       // GitHub has the comment, so the draft is a second copy of something
       // already posted. Left behind, it would seed the next composer opened on
       // that line with a comment the reviewer already made.
-      const location = draftFor(input);
-      if (location !== null) void drafts.clear(location).catch(() => undefined);
+      void drafts.clear(draftFor(input)).catch(() => undefined);
       return true;
     },
     [draftFor, drafts, publishThread, queueThread],
@@ -1359,10 +1357,8 @@ export function ReviewSessionProvider({
 
       setPosting((list) => dropPost(list, postId));
       // The saved copy goes too, or the next composer on that line would open
-      // holding the comment the reviewer just threw away. Null is a comment
-      // about the file, which never had one — see `draftFor`.
-      const location = draftFor(entry);
-      if (location !== null) void drafts.clear(location).catch(() => undefined);
+      // holding the comment the reviewer just threw away.
+      void drafts.clear(draftFor(entry)).catch(() => undefined);
     },
     [draftFor, drafts],
   );
