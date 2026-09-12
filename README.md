@@ -243,4 +243,10 @@ how to validate a mutation without performing one.
 - A drawn diagram picks its palette when the renderer first loads, so switching
   the operating system between light and dark mid-review leaves diagrams
   already on screen in the old one until the page is reloaded.
+- A Mermaid diagram written inside a list item or a blockquote is left as its
+  marked-up source rather than drawn. A diagram at the top level of a document —
+  which is where almost all of them are — is drawn as usual. The rendered view
+  is built out of whole blocks so that a comment can be anchored to one, and
+  reaching inside a block to place a picture within it is the DOM surgery that
+  arrangement exists to avoid.
 - github.com only. GitHub Enterprise is a base-URL abstraction away.

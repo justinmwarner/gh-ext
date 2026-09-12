@@ -302,9 +302,32 @@ Three probes, all passing against this tree:
 - `DOMParser` executes no script and fetches nothing — an inert document has no
   browsing context.
 
-**UNVERIFIED:** the second claim rests on one sample. The existing sanitiser
-test suite must be re-run through the split path before this is relied on, and
-that is a task in the plan rather than an assumption here.
+**Verified on 2026-09-12, and the claim now rests on something.** The sanitiser
+corpus moved into `ui/markdownHtml.fixture.ts` so that suite cannot gain an
+attack the split path never sees. Twenty-seven shapes — fifteen attacks, four
+must-survive documents, and eight chosen to straddle the cut, including foreign
+content between blocks, unclosed tags across a boundary, and SVG and MathML
+nested inside a table cell — were compared per-block against whole-document by a
+depth-tagged walk recording tag, sorted attributes and text. **All twenty-seven
+are identical.** A second sweep asserts independently that the output is
+harmless, since the comparison alone would pass if both paths were equally
+broken. Both were mutation-checked.
+
+**The first probe's claim was too strong, and building it found where.**
+"Splitting loses only inter-block whitespace" holds for `markdown-it` output and
+is false for raw HTML: `<div>a</div> and more` is one `html_block` followed by a
+top-level text node, and dropping it would be the rendered view silently losing
+authored text. Non-whitespace top-level text is kept as its own block;
+whitespace-only nodes are still dropped.
+
+**One behaviour was traded rather than preserved.** A Mermaid fence inside a
+list item or a blockquote is no longer drawn — it stays as its marked-up source.
+The old imperative placement could reach anywhere in the subtree; a block-level
+component cannot, and drawing one would mean splitting a block around its own
+descendants, which is the surgery this arrangement exists to remove. Top-level
+fences, which is where almost every diagram is, are unaffected. Accepted rather
+than fixed: the source stays on screen and readable, so nothing becomes
+unknowable, and it is recorded in the README's known limits.
 
 What it buys is a reduction in total machinery, not an addition:
 
@@ -468,8 +491,9 @@ size.
    either way. §7 depends on the answer.
 2. **UNVERIFIED** — `markdown-it` advisory history and behaviour on pathological
    inputs, to the standard §3.7 applied to `marked`.
-3. **UNVERIFIED** — per-block sanitising equals whole-document sanitising in
-   general. One sample is not a proof; the existing suite is.
+3. ~~**UNVERIFIED** — per-block sanitising equals whole-document sanitising.~~
+   **Closed on 2026-09-12.** Twenty-seven shapes compared structurally, all
+   identical, both directions mutation-checked. §6 has the detail.
 4. The +28,474 B is a bundle-size claim about a scratch build. Re-measure with
    `npx wxt build` before and after, the way §2 of the comparison spec did, and
    record the real number.
