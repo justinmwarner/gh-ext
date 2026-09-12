@@ -866,21 +866,42 @@ git commit -m "feat: let a comment be about the file rather than a line"
 
 ### Task 8: The affordance, the composer and the threads
 
-> **Tasks 8 and 9 are deliberately specified as behaviour rather than as code, and that is a departure from this plan's own standard.** Both act on the component shape Task 6 produces, which does not exist yet — exact test code written now would be guessing at DOM that has not been designed. **Before starting Task 8, re-read `ui/MarkdownCompare.tsx` as Task 6 left it and write these tasks out properly, with real code, the way Tasks 1–7 are written.** Treat what follows as the requirements, not as the plan.
+> **Written against the code as Tasks 6 and 7 actually left it**, on 2026-09-12. The decisions below were open when this plan was first drafted and are now taken.
+
+**What exists to build on:**
+
+- `ui/markdownBlocks.ts` — `markdownBlocks(unsafeHtml, nonce): MarkdownBlock[]`, each with `{ key, html, anchor: BlockAnchor | null, changed, text, mermaid }`.
+- `ui/MarkdownCompare.tsx` — takes `{ comparison }` and renders a memoized element per block.
+- `lib/review/commentable.ts` — `commentableLines(patch)`, `isCommentable(lines, anchor)`.
+- `lib/review/selection.ts` — `CommentAnchor = LineAnchor | FileAnchor`, `fileAnchor()`.
+- `useReviewSession()` gives `byPath`, `drafts`, `posting`, `prId` — so threads and posting need no prop drilling.
+
+**Three decisions, now made:**
+
+**1. A file-level draft is keyed `draft:<prId>:<path>:file`.** `ui/Composer.tsx` was narrowed to `LineAnchor | null` in Task 7 precisely because this was unsettled. `DraftLocation` becomes `{ prId, path, anchor: CommentAnchor }` and `draftKey` switches on `anchor.subject`. **The line branch must stay byte-identical** — `draft:${prId}:${path}:${line}:${side}` — so a reviewer's half-written comment from the previous version is still there after they update. Widen `Composer`'s prop back to `CommentAnchor | null` once this holds.
+
+**2. `MarkdownCompare` gains two props and no more:** `path: string` and `commentable: ReadonlySet<string>`. `ui/RichCompare.tsx` passes `file.path` and memoizes `commentableLines(file.patch)`. Everything else comes from the session context. Resist adding a third prop; if you need one, say why in your report.
+
+**3. A block with no anchor gets the file-level path, not a missing control.** §5.1 of the design records that raw `html_block`s never receive an anchor. A README with a hand-written `<table>` must still be commentable, and a control that is simply absent on one block reads as a defect.
 
 **Files:**
-- Modify: `ui/MarkdownCompare.tsx`, `entrypoints/review/style.css`
-- Test: `ui/MarkdownCompare.test.tsx`
+- Modify: `ui/MarkdownCompare.tsx`, `ui/RichCompare.tsx`, `ui/Composer.tsx`, `lib/review/drafts.ts`, `entrypoints/review/style.css`
+- Test: `ui/MarkdownCompare.test.tsx`, `lib/review/drafts.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
 
-Five behaviours, each its own test:
+**Write these against the real component rather than from a sketch.** This plan has twice specified test code that asserted something false — `toHaveAttribute` in a suite with no jest-dom, and an `L1` anchor `htmlDiff` does not emit. Read the component, write the assertion, and **run each test and watch it fail for the right reason** before implementing. A test you did not see fail is not yet a test.
 
-1. Every block carries a comment button.
-2. A block whose anchor is commentable opens the composer with that `LineAnchor` — assert the line and side that reach the composer, not merely that something opened.
-3. A block outside every hunk opens the composer with `fileAnchor()`, shows the sentence explaining it before the reviewer types, and seeds the body with the block's text as a blockquote.
-4. A thread whose line matches a block anchor renders under that block.
-5. An outdated thread — `line: null` — stays in `UnanchoredThreads` with its existing reason.
+Six behaviours, each its own test:
+
+1. Every block carries a comment button — including a raw `html_block` with no anchor.
+2. A block whose anchor is in `commentable` opens the composer anchored to that line. **Assert the line and side that reach the composer**, not merely that something opened.
+3. A block outside every hunk opens the composer on `fileAnchor()`, says so before the reviewer types, and seeds the body with the block's text as a blockquote.
+4. A block with no anchor at all behaves as 3.
+5. A thread whose line matches a block anchor renders under that block.
+6. An outdated thread — `line: null` — stays in `UnanchoredThreads` with its existing reason.
+
+Plus, in `lib/review/drafts.test.ts`: a line draft's key is unchanged from the current format, and a file draft's key cannot collide with any line draft.
 
 - [ ] **Step 2: Implement**
 
