@@ -439,3 +439,24 @@ export function modeIndex(id: string): number {
 
 /** How many distinct indices `modeIndex` can return. */
 export const MODE_SLOTS = ALL_MODE_IDS.length;
+
+/**
+ * The kinds whose mode is a preference rather than a per-file choice.
+ *
+ * Markdown alone, and the narrowness is the point. `ui/ModeSwitcher.tsx`
+ * argues for per-file modes with a case that is true of every other kind here:
+ * two images in one pull request want different modes, because one was redrawn
+ * and wants side by side while the next moved four pixels and wants the
+ * difference blend. A kind-wide preference makes the second choice undo the
+ * first.
+ *
+ * Markdown is the exception because the choice is a property of the reader
+ * rather than of the change. There are two modes, some people read prose
+ * changes as rendered documents and some read them as source, and nobody
+ * changes their mind about that per file.
+ */
+const REMEMBERED_KINDS: ReadonlySet<ComparisonKind> = new Set<ComparisonKind>(['markdown']);
+
+export function isRememberedKind(kind: ComparisonKind): boolean {
+  return REMEMBERED_KINDS.has(kind);
+}
