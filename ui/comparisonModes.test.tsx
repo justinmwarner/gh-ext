@@ -10,8 +10,8 @@
  *   card back where it started
  * - the mode is per file for every kind but Markdown, so two images can be in
  *   different ones at once
- * - and for those kinds nothing survives a mount, which is what the rest of the
- *   interface state on this page does
+ * - and for those kinds nothing survives a mount, as with the rest of the
+ *   interface state on this page
  * - the switcher is operable from the keyboard
  *
  * Layout is not asserted anywhere in this file. jsdom performs none, an `<img>`
@@ -239,7 +239,7 @@ describe('raw as the escape hatch', () => {
  * one was redrawn and wants side by side, the next moved four pixels and wants
  * the difference blend, and neither reviewer press may undo the other.
  */
-describe('the mode is per file, for the kinds it is not a preference for', () => {
+describe('the mode is per file, for every kind but Markdown', () => {
   it('leaves one image alone when another is switched', async () => {
     const user = userEvent.setup();
     mount([

@@ -411,12 +411,13 @@ export function DiffColumn({
    * next moved four pixels and wants the difference blend. A single mode would
    * make each choice undo the last.
    *
-   * Markdown is the one kind that argument does not reach, and it is held in
+   * Markdown is the one kind that argument does not reach, and its mode lives in
    * `modeMemory` instead: there are two modes, and which of them a reviewer
-   * wants is a fact about the reviewer rather than about the file. So no
-   * Markdown path ever lives in here — `changeMode` clears the kind's entries
-   * on its way to remembering the press, because an entry left behind would
-   * outrank the preference and pin one card while its neighbours moved.
+   * wants is a fact about the reviewer rather than about the file. So a Markdown
+   * path is never written here, and `changeMode` keeps it that way rather than
+   * relying on it — the lookup below reads this map first, so an entry that did
+   * get in would outrank the preference and pin one card while its neighbours
+   * moved.
    *
    * Sparse, and deliberately not seeded with every file's default. The default
    * is a function of the file, so writing it down would only create a second
