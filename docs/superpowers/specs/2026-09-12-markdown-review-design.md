@@ -148,6 +148,13 @@ a line and not to a word.
 ### Due diligence
 
 - `markdown-it` 15.0.2, MIT, `time.modified` 2026-09-12. Actively maintained.
+- **No `@types/markdown-it`.** It was installed, found to be redundant, and
+  removed: 15.0.2 ships first-party declarations through its `exports` map, and
+  the DefinitelyTyped package is still on 14.x, so adding it puts a stale-major
+  type surface beside a newer runtime — a trap rather than a safety net.
+  Confirmed by removing it and re-running `tsc --noEmit` clean.
+- **`marked` is removed from `dependencies`.** Nothing imports it once this
+  lands; "replaces" means the old one goes rather than lingering unreferenced.
 - No `eval(` and no `new Function` anywhere in `dist/` or `lib/` — grepped,
   which is the same check §3.7 ran on `marked` for MV3.
 - `npm audit --omit=dev` on a tree containing it: zero.
@@ -173,9 +180,25 @@ becomes a text change, which is something this diff can mark. Two `<img>` tags
 with different `src` attributes are invisible to a word diff that strips
 attributes before comparing." A checkbox is the same shape exactly — state in an
 attribute, invisible to the diff — and it has the additional problem that the
-sanitiser forbids `input` outright, so nothing can reach the page anyway. As a
-text marker the checked state is a character, the diff marks it, and §3.1 is
-fixed rather than papered over.
+sanitiser forbids `input` outright, so nothing can reach the page anyway.
+
+**Correction, made while implementing this on 2026-09-12.** The paragraph above
+originally claimed this rule fixes §3.1, and it does not. `markdown-it` has no
+task-list support at all, so `- [x] ship it` arrives as literal text and the
+renderer swap in decision 1 restores the diff mark on its own — which showed up
+as only one of the two tests for §3.1 failing before the rule was written. What
+the rule actually earns is narrower and still worth having: the marker reads as
+the control it stands in for rather than as stray punctuation, and `[X]` and
+`[x]` normalise to one document so a case change is not drawn as an edit. The
+source comment says the same thing. Decision 1 is load-bearing for §3.1;
+decision 4.1 is not, and the record should not credit it.
+
+The marker is ASCII `[ ]` and `[x]`, not the ballot-box characters this section
+first suggested. Two reasons, either sufficient: U+2610 and U+2611 need a symbol
+font the reviewer may not have, and they would make the rendered view disagree
+with the Raw view one press away, on a card whose whole purpose is flipping
+between the two. The brackets also diff better — `htmlDiff` marks the single
+interior character that carries the state and leaves the brackets standing.
 
 ---
 
