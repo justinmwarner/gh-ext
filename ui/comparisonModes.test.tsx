@@ -8,8 +8,9 @@
  *
  * - raw is reachable from every file, and going back to it really does put the
  *   card back where it started
- * - the mode is per file, so two images can be in different ones at once
- * - nothing is remembered across a mount, which is what every other piece of
+ * - the mode is per file for every kind but Markdown, so two images can be in
+ *   different ones at once
+ * - and for those kinds nothing survives a mount, which is what the rest of the
  *   interface state on this page does
  * - the switcher is operable from the keyboard
  *
@@ -20,8 +21,10 @@
 
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { browser } from 'wxt/browser';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
+import { MODE_MEMORY_KEY } from '@/lib/settings';
 import { DraftStore } from '@/lib/review/drafts';
 import { DiffColumn } from './DiffColumn';
 import { request } from './background';
@@ -84,6 +87,20 @@ beforeEach(() => {
     URL.createObjectURL = () => 'blob:stub';
     URL.revokeObjectURL = () => {};
   }
+});
+
+/**
+ * The Markdown preference, which one press below writes and every later mount
+ * would otherwise read.
+ *
+ * `ui/testSetup.ts` installs one fake storage area per test *file* rather than
+ * per test, so pressing Raw on a `.md` card leaves every `.md` card after it
+ * opening raw — including the two sanitiser tests at the bottom, which mount a
+ * document expecting to find it rendered. The failure they produce says nothing
+ * about sanitising and names the wrong test.
+ */
+afterEach(async () => {
+  await browser.storage.local.remove(MODE_MEMORY_KEY);
 });
 
 function mount(files: readonly ReviewFile[]) {
@@ -213,7 +230,16 @@ describe('raw as the escape hatch', () => {
   });
 });
 
-describe('the mode is per file', () => {
+/**
+ * Both claims below are about the kinds whose mode is a per-file choice, which
+ * is every kind but Markdown — `lib/compare/modes.ts` names the exception and
+ * `ui/DiffColumn.test.tsx` asserts it, beside the storage it is held in.
+ *
+ * Images are what the rule was written for, so they are what it is checked on:
+ * one was redrawn and wants side by side, the next moved four pixels and wants
+ * the difference blend, and neither reviewer press may undo the other.
+ */
+describe('the mode is per file, for the kinds it is not a preference for', () => {
   it('leaves one image alone when another is switched', async () => {
     const user = userEvent.setup();
     mount([
@@ -227,7 +253,7 @@ describe('the mode is per file', () => {
     expect(modeButton('b.png', 'Side by side')).toHaveProperty('ariaPressed', 'true');
   });
 
-  it('remembers nothing across a mount, like every other control here', async () => {
+  it('puts an image back to its default at the next mount', async () => {
     const user = userEvent.setup();
     const first = mount([file({ path: 'a.png', isBinary: true, patch: '' })]);
     await user.click(modeButton('a.png', 'Raw'));

@@ -584,8 +584,9 @@ export function DiffColumn({
    * A file marked viewed is the third, and it is the one that also fires
    * mid-review: ticking the box folds the card on the spot, and a reload finds
    * it folded because GitHub remembers the tick. It is not a persisted
-   * interface preference — nothing here persists one, see `ModeSwitcher` — it
-   * is read off the same state the checkbox draws itself from.
+   * interface preference — the one of those is the Markdown mode above, and
+   * `ModeSwitcher` argues for why it is allowed to be the only one — it is read
+   * off the same state the checkbox draws itself from.
    *
    * A file the rewrite merely *shortened* is not folded. There is still a diff
    * in it worth reading, and it is already marked.
