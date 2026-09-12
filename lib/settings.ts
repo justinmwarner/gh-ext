@@ -8,6 +8,7 @@
  * browser to prove it.
  */
 
+import { type ComparisonKind, isRememberedKind, modesFor } from './compare/modes';
 import { THEME_FOLLOWS_PAGE, isDiffTheme } from './compare/themes';
 
 /** Where a review opens. */
@@ -109,6 +110,21 @@ export const SETTINGS_KEY = 'settings';
 export const CARD_COLLAPSED_KEY = 'card-collapsed';
 
 /**
+ * `storage.local` key holding the mode each remembered kind opens in.
+ *
+ * Its own key rather than a field on {@link Settings}, and for the same reason
+ * {@link CARD_COLLAPSED_KEY} is: the review page writes this on every press
+ * while the options page writes the settings object, and two writers doing
+ * read-modify-write on one key will eventually lose one of the two edits.
+ */
+export const MODE_MEMORY_KEY = 'mode-memory';
+
+/** Which mode each remembered kind opens in. Absent means "the kind's default". */
+export type ModeMemory = Readonly<Partial<Record<ComparisonKind, string>>>;
+
+export const EMPTY_MODE_MEMORY: ModeMemory = {};
+
+/**
  * `new-tab` rather than the `same-tab` this extension used to do unconditionally.
  *
  * Replacing the pull request page is a surprising amount to do in response to
@@ -187,6 +203,37 @@ export function parseSettings(raw: unknown): Settings {
       ? stored.diffTheme
       : DEFAULT_SETTINGS.diffTheme,
   };
+}
+
+/**
+ * Read a stored mode memory, dropping per entry.
+ *
+ * Three things can make an entry unusable, and all three are ordinary rather
+ * than exceptional: a build that remembers more kinds than this one wrote it, a
+ * mode id has since been withdrawn, or the id belongs to a different kind
+ * entirely. Each would put a control on a card that the file cannot answer, so
+ * each is dropped — and dropped one at a time, like {@link parseSettings}, so
+ * one bad entry does not discard a neighbouring good one.
+ */
+export function parseModeMemory(raw: unknown): ModeMemory {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return EMPTY_MODE_MEMORY;
+  }
+
+  const stored = raw as Record<string, unknown>;
+  const memory: Partial<Record<ComparisonKind, string>> = {};
+
+  for (const [kind, mode] of Object.entries(stored)) {
+    if (typeof mode !== 'string') continue;
+    if (!isRememberedKind(kind as ComparisonKind)) continue;
+    // Asked of the kind rather than of a file: this is read before any file
+    // list exists, and `resolveModeForFile` narrows it again per file.
+    const offered = modesFor(kind as ComparisonKind, 'both');
+    if (!offered.some((candidate) => candidate.id === mode)) continue;
+    memory[kind as ComparisonKind] = mode;
+  }
+
+  return memory;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   DEFAULT_SETTINGS,
   autoOpenAvailable,
   isOpenIn,
+  parseModeMemory,
   parseSettings,
 } from './settings';
 
@@ -201,6 +202,39 @@ describe('how a diff is drawn', () => {
     expect(parseSettings({ splitView: true, ignoreWhitespace: 'yes' })).toEqual({
       ...DEFAULT_SETTINGS,
       splitView: true,
+    });
+  });
+});
+
+describe('parseModeMemory', () => {
+  it('reads a remembered markdown mode', () => {
+    expect(parseModeMemory({ markdown: 'raw' })).toEqual({ markdown: 'raw' });
+  });
+
+  it.each([null, undefined, 'raw', 42, []])('falls back on %p', (raw) => {
+    expect(parseModeMemory(raw)).toEqual({});
+  });
+
+  // A kind this build does not remember, written by a later one.
+  it('drops a kind that is not remembered', () => {
+    expect(parseModeMemory({ image: 'image:swipe' })).toEqual({});
+  });
+
+  // A mode id from a later build, or one that has since been withdrawn.
+  it('drops an unknown mode id', () => {
+    expect(parseModeMemory({ markdown: 'markdown:side-by-side' })).toEqual({});
+  });
+
+  // A real mode, but not one this kind offers. Storing it would put a control
+  // on the card that the file cannot answer.
+  it('drops a mode belonging to another kind', () => {
+    expect(parseModeMemory({ markdown: 'image:swipe' })).toEqual({});
+  });
+
+  // Per field, like parseSettings: one bad entry must not discard a good one.
+  it('keeps a good entry beside a bad one', () => {
+    expect(parseModeMemory({ markdown: 'raw', image: 'nonsense' })).toEqual({
+      markdown: 'raw',
     });
   });
 });
