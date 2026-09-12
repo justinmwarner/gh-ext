@@ -122,6 +122,16 @@ export const MODE_MEMORY_KEY = 'mode-memory';
 /** Which mode each remembered kind opens in. Absent means "the kind's default". */
 export type ModeMemory = Readonly<Partial<Record<ComparisonKind, string>>>;
 
+/**
+ * Nothing remembered, as one shared object.
+ *
+ * Exported, and the shared identity is the reason rather than a side effect.
+ * `ui/useModeMemory.ts` seeds both its state and its ref with this, and a fresh
+ * `{}` on each render would be a new identity every time — which is a re-render
+ * of every card in the column to say that nothing has changed. That is safe
+ * only because the hook never writes to it, and {@link parseModeMemory} spreads
+ * rather than returning it, so no caller is handed the instance to keep.
+ */
 export const EMPTY_MODE_MEMORY: ModeMemory = {};
 
 /**
@@ -211,18 +221,24 @@ export function parseSettings(raw: unknown): Settings {
  * Four things can make an entry unusable, and all four are ordinary rather than
  * exceptional: the value is not a string at all, the kind is one a later build
  * remembers and this one does not, the mode id has since been withdrawn, or the
- * id is real but belongs to a different kind. Each would put a control on a card
- * that the file cannot answer, so each is dropped — and dropped one at a time,
- * like {@link parseSettings}, so one bad entry does not discard a neighbouring
- * good one.
+ * id is real but belongs to a different kind.
+ *
+ * What dropping them buys is that the returned memory means one thing wherever
+ * it is read. The card is not the thing being protected — `resolveModeForFile`
+ * already narrows a mode a file cannot offer, and says so where it does it. The
+ * hazard here is upstream of that: an entry for a kind this build deliberately
+ * does not remember is a *later build's policy* arriving in storage, and
+ * honouring it would make images behave the way some future version decided
+ * they should while this one still argues they should not.
+ *
+ * Dropped one at a time, like {@link parseSettings}, so one bad entry does not
+ * discard a neighbouring good one.
  */
 export function parseModeMemory(raw: unknown): ModeMemory {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    // Spread rather than the constant itself, matching what {@link parseSettings}
-    // does on the same path. `Readonly` stops a caller reassigning a field, but
-    // it is a compile-time claim about this codebase rather than a property of
-    // the object, and handing every fallback the same one makes a single
-    // mutation through a cast everybody's problem.
+    // A fresh object, as {@link parseSettings} returns on the same path: the
+    // `Readonly` on {@link ModeMemory} is a claim about this codebase rather
+    // than a property of the object.
     return { ...EMPTY_MODE_MEMORY };
   }
 
@@ -231,12 +247,16 @@ export function parseModeMemory(raw: unknown): ModeMemory {
 
   for (const [kind, mode] of Object.entries(stored)) {
     if (typeof mode !== 'string') continue;
-    if (!isRememberedKind(kind as ComparisonKind)) continue;
+    // Narrows `kind` from `string` for the rest of the loop, which is why the
+    // two reads below need no cast.
+    if (!isRememberedKind(kind)) continue;
     // Asked of the kind rather than of a file: this is read before any file
-    // list exists, and `resolveModeForFile` narrows it again per file.
-    const offered = modesFor(kind as ComparisonKind, 'both');
+    // list exists, and `resolveModeForFile` narrows it again per file. That is
+    // what lets a remembered `markdown:rendered` survive here and still fall
+    // back on a one-sided `.md`, where the mode is not offered at all.
+    const offered = modesFor(kind, 'both');
     if (!offered.some((candidate) => candidate.id === mode)) continue;
-    memory[kind as ComparisonKind] = mode;
+    memory[kind] = mode;
   }
 
   return memory;
