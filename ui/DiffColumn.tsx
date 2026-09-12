@@ -53,7 +53,7 @@ import type {
   LineAnnotation,
   SelectedLineRange,
 } from '@pierre/diffs';
-import { RAW, resolveModeForFile } from '@/lib/compare/modes';
+import { RAW, comparisonKind, isRememberedKind, resolveModeForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnchorableSides } from '@/lib/review/diffScope';
@@ -98,6 +98,7 @@ import {
   renderedLines,
   sourceLines,
 } from './reviewThreads';
+import { useModeMemory } from './useModeMemory';
 
 /**
  * Reading one file without its whitespace, on demand and never by default.
@@ -410,6 +411,13 @@ export function DiffColumn({
    * next moved four pixels and wants the difference blend. A single mode would
    * make each choice undo the last.
    *
+   * Markdown is the one kind that argument does not reach, and it is held in
+   * `modeMemory` instead: there are two modes, and which of them a reviewer
+   * wants is a fact about the reviewer rather than about the file. So no
+   * Markdown path ever lives in here — `changeMode` clears the kind's entries
+   * on its way to remembering the press, because an entry left behind would
+   * outrank the preference and pin one card while its neighbours moved.
+   *
    * Sparse, and deliberately not seeded with every file's default. The default
    * is a function of the file, so writing it down would only create a second
    * copy to keep in step with the first — and the file list is replaced
@@ -419,6 +427,7 @@ export function DiffColumn({
   const [chosenModes, setChosenModes] = useState<ReadonlyMap<string, string>>(
     () => new Map(),
   );
+  const [modeMemory, rememberMode] = useModeMemory();
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
   const [expansionError, setExpansionError] = useState<string | null>(null);
@@ -861,18 +870,44 @@ export function DiffColumn({
   const modes = useMemo(() => {
     const built = new Map<string, string>();
     for (const file of files) {
-      built.set(file.path, resolveModeForFile(file, chosenModes.get(file.path)));
+      // Per-file first, then the remembered preference for the kind, then the
+      // file's own default. A remembered mode the file cannot offer — a one-sided
+      // `.md`, where `markdown:rendered` is `needsBothSides` — falls back inside
+      // `resolveModeForFile` rather than here.
+      const chosen = chosenModes.get(file.path) ?? modeMemory[comparisonKind(file)];
+      built.set(file.path, resolveModeForFile(file, chosen));
     }
     return built;
-  }, [files, chosenModes]);
+  }, [files, chosenModes, modeMemory]);
 
-  const changeMode = useCallback((path: string, mode: string) => {
-    setChosenModes((previous) => {
-      const next = new Map(previous);
-      next.set(path, mode);
-      return next;
-    });
-  }, []);
+  const changeMode = useCallback(
+    (path: string, mode: string) => {
+      const pressed = files.find((file) => file.path === path);
+      const kind = pressed === undefined ? 'none' : comparisonKind(pressed);
+
+      if (isRememberedKind(kind)) {
+        // The press is a preference rather than a choice about this one file, so
+        // the per-file entries for the kind are forgotten: left in place they
+        // would outrank the preference and the other cards would not move.
+        setChosenModes((previous) => {
+          const next = new Map(previous);
+          for (const file of files) {
+            if (comparisonKind(file) === kind) next.delete(file.path);
+          }
+          return next;
+        });
+        rememberMode(kind, mode);
+        return;
+      }
+
+      setChosenModes((previous) => {
+        const next = new Map(previous);
+        next.set(path, mode);
+        return next;
+      });
+    },
+    [files, rememberMode],
+  );
 
   /**
    * Which cards have something to put in a body besides a comparison.

@@ -18,12 +18,14 @@ import type { ReactNode } from 'react';
 import { type CodeViewItem, parsePatchFiles } from '@pierre/diffs';
 import { CodeView } from '@pierre/diffs/react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { browser } from 'wxt/browser';
 import { ADD_THREAD, START_REVIEW } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
+import { MODE_MEMORY_KEY } from '@/lib/settings';
 import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
 import { request } from './background';
 import { fileDiffFor, fileDiffSignature } from './diffItems';
@@ -1762,5 +1764,62 @@ describe('DiffColumn, folding generated files', () => {
     expect(
       within(card(BUNDLE)).queryByRole('button', { name: /whitespace/i }),
     ).toBeNull();
+  });
+});
+
+describe('remembering how markdown is compared', () => {
+  // The fake storage area in ui/testSetup.ts lives on globalThis for the whole
+  // file. Without this, the first test here decides what every later test in
+  // the file sees, and the failure names the wrong test.
+  afterEach(async () => {
+    await browser.storage.local.remove(MODE_MEMORY_KEY);
+  });
+
+  const pressed = (path: string, label: string): string | null =>
+    within(card(path)).getByRole('button', { name: label }).getAttribute('aria-pressed');
+
+  it('pressing a mode on one markdown card flips the others', async () => {
+    mount([
+      file({ path: 'docs/a.md' }),
+      file({ path: 'docs/b.md' }),
+      file({ path: 'assets/logo.png', isBinary: true }),
+    ]);
+    // The column's opening read of the preference resolves a tick after mount,
+    // and it is entitled to overwrite what is held — it was issued first. A
+    // press made inside that tick would therefore be undone by an empty read,
+    // which is a fact about how fast a test can click rather than about the
+    // feature. `ui/useModeMemory.test.tsx` waits here for the same reason.
+    await act(async () => {});
+
+    fireEvent.click(within(card('docs/a.md')).getByRole('button', { name: 'Raw' }));
+
+    for (const path of ['docs/a.md', 'docs/b.md']) {
+      await waitFor(() => {
+        expect(pressed(path, 'Raw')).toBe('true');
+      });
+    }
+
+    // The rule is Markdown-only. An image in the same column must not move.
+    expect(pressed('assets/logo.png', 'Side by side')).toBe('true');
+  });
+
+  it('a per-file choice on an unremembered kind still stands alone', async () => {
+    mount([
+      file({ path: 'assets/a.png', isBinary: true }),
+      file({ path: 'assets/b.png', isBinary: true }),
+    ]);
+
+    fireEvent.click(within(card('assets/a.png')).getByRole('button', { name: 'Onion skin' }));
+
+    expect(pressed('assets/b.png', 'Side by side')).toBe('true');
+  });
+
+  it('a remembered mode decides how the next review opens', async () => {
+    await browser.storage.local.set({ [MODE_MEMORY_KEY]: { markdown: 'raw' } });
+    mount([file({ path: 'docs/a.md' })]);
+
+    await waitFor(() => {
+      expect(pressed('docs/a.md', 'Raw')).toBe('true');
+    });
   });
 });
