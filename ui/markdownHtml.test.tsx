@@ -19,6 +19,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ANCHOR_ATTRIBUTE } from '@/lib/compare/markdownAnchors';
 import { sanitizeMarkdownHtml } from './markdownHtml';
 
 /** The sanitised string, parsed the way the browser will parse it. */
@@ -161,7 +162,8 @@ describe('the attacks a .md file can carry', () => {
     // `querySelectorAll('[data-thread]')`, `Shell` finds a reply box with
     // `querySelector('[data-reply-for="…"]')` and casts the result to a
     // textarea. Content that can mint either of those can make the page act on
-    // an element a pull request supplied.
+    // an element a pull request supplied. Exactly one name is exempt, for
+    // reasons set out at the bottom of this file and in the config itself.
     const host = parse(
       '<p data-thread="1" data-reply-for="99" data-file-card="src/app.ts">x</p>',
     );
@@ -243,5 +245,44 @@ describe('what has to survive for the mode to be worth having', () => {
     const host = parse('<a href="./CONTRIBUTING.md">contributing</a>');
 
     expect(host.querySelector('a')?.getAttribute('href')).toBe('./CONTRIBUTING.md');
+  });
+});
+
+describe('the anchor attribute', () => {
+  it('survives, because the affordance depends on it', () => {
+    expect(sanitizeMarkdownHtml(`<p ${ANCHOR_ATTRIBUTE}="n-R1">x</p>`)).toContain(
+      ANCHOR_ATTRIBUTE,
+    );
+  });
+
+  // The reason ALLOW_DATA_ATTR was false, and it must stay true of everything
+  // except the one name above. DiffColumn finds threads with [data-thread] and
+  // Shell finds a reply box with [data-reply-for] and casts it to a textarea.
+  it.each(['data-thread', 'data-reply-for', 'data-file-card', 'data-unanchored'])(
+    'still strips %s',
+    (attribute) => {
+      expect(sanitizeMarkdownHtml(`<p ${attribute}="x">y</p>`)).not.toContain(attribute);
+    },
+  );
+
+  // One name, matched whole. A future reader reaching for a prefix — so that a
+  // second anchor-ish attribute could be added without touching the config —
+  // would be handing back most of what `ALLOW_DATA_ATTR: false` was defending,
+  // since the page's own queries are all `data-` names too.
+  it.each([`${ANCHOR_ATTRIBUTE}-extra`, `x-${ANCHOR_ATTRIBUTE}`, 'data-md'])(
+    'admits no name that merely resembles it, such as %s',
+    (attribute) => {
+      expect(sanitizeMarkdownHtml(`<p ${attribute}="x">y</p>`)).not.toContain(attribute);
+    },
+  );
+
+  // Admitted, not believed. What the value *says* is checked by `parseAnchor`
+  // against a nonce minted after the document was written; this layer's job
+  // ends at letting the string through, and a test that asserted otherwise
+  // would be asserting the wrong file's promise.
+  it('does not judge the value, only the name', () => {
+    const forged = sanitizeMarkdownHtml(`<p ${ANCHOR_ATTRIBUTE}="not-a-real-nonce-R7">x</p>`);
+
+    expect(forged).toContain('not-a-real-nonce-R7');
   });
 });

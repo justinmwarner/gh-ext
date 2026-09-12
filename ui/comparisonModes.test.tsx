@@ -23,6 +23,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { browser } from 'wxt/browser';
+import { ANCHOR_ATTRIBUTE } from '@/lib/compare/markdownAnchors';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
 import { MODE_MEMORY_KEY } from '@/lib/settings';
 import { DraftStore } from '@/lib/review/drafts';
@@ -685,7 +686,14 @@ describe('a Markdown file written by an attacker', () => {
     for (const element of [view, ...view.querySelectorAll('*')]) {
       for (const attribute of element.attributes) {
         expect(attribute.name).not.toMatch(/^on/i);
-        expect(attribute.name).not.toMatch(/^data-/);
+        // One data attribute is admitted by name — the source anchor the
+        // rendered mode writes on every block — so the sweep exempts that one
+        // and nothing else. `data-thread` and `data-reply-for` are both in the
+        // document above and both still have to go, which is the half of this
+        // assertion that was ever protecting anything.
+        if (attribute.name !== ANCHOR_ATTRIBUTE) {
+          expect(attribute.name).not.toMatch(/^data-/);
+        }
         expect(attribute.name).not.toBe('id');
         expect(attribute.name).not.toBe('style');
       }
