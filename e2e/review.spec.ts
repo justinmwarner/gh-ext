@@ -2575,6 +2575,60 @@ test('a Mermaid diagram in a .md file is drawn rather than left as its source', 
 });
 
 /**
+ * Commenting on rendered Markdown, in a browser that lays the page out.
+ *
+ * The unit tests reach the button through the accessibility tree, which says
+ * nothing about whether a reviewer could get at it: the affordance is hidden
+ * until the block it belongs to is hovered, and jsdom applies no stylesheet, so
+ * "it is in the document" and "it can be pressed" are the same claim there and
+ * different claims here. The gutter it sits in is `padding-left` on the block,
+ * which is also only real once something is doing layout.
+ */
+test('a rendered Markdown block can be commented on', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+
+  const card = fileBody(page, MARKDOWN_FILE);
+  await expect(card.locator('.markdown-rendered')).toBeVisible();
+
+  // Every block, not most of them: a control missing from one paragraph reads
+  // as a defect, and a raw HTML block is the one that would be missing it.
+  const blocks = card.locator('.markdown-rendered > .markdown-block');
+  const buttons = card.locator('.markdown-rendered > .markdown-block > .markdown-comment');
+  expect(await buttons.count()).toBe(await blocks.count());
+
+  // Out of the way until it is wanted, and then there. Playwright counts an
+  // element at zero opacity as visible, so the reveal is asserted on the
+  // computed value — left to the click it would pass either way and say
+  // nothing about what a reviewer can see.
+  //
+  // The hover and the assertion retry together because the card is still
+  // settling: it draws two Mermaid diagrams after its first paint and the
+  // column re-measures around them, so a block can move out from under a
+  // pointer that was over it a moment ago. Hovering once and then waiting
+  // fails perhaps one run in two.
+  const first = blocks.first();
+  const button = first.locator('.markdown-comment');
+  await expect(button).toHaveCSS('opacity', '0');
+  await expect(async () => {
+    await first.hover();
+    await expect(button).toHaveCSS('opacity', '1', { timeout: 1000 });
+  }).toPass();
+
+  await button.click();
+
+  await expect(card.locator('.composer')).toBeVisible();
+  await expect(card.locator('.composer-input')).toBeFocused();
+});
+
+/**
  * The other `.md` file in the column, and the one nothing here presses.
  *
  * Named here rather than in the fixture because nothing else wants it. Its
