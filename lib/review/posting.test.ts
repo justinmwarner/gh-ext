@@ -12,7 +12,7 @@ import {
 const INPUT = {
   path: 'src/app.ts',
   body: 'This allocates once per row.',
-  anchor: { line: 12, side: 'RIGHT' as const },
+  anchor: { subject: 'line' as const, line: 12, side: 'RIGHT' as const },
 };
 
 const one = (): readonly PostingComment[] => beginPost([], 'p1', INPUT);

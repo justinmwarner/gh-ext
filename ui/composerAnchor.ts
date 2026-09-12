@@ -10,7 +10,7 @@
 
 import type { SelectedLineRange } from '@pierre/diffs';
 import type { AnchorableSides } from '@/lib/review/diffScope';
-import type { CommentAnchor } from '@/lib/review/selection';
+import type { LineAnchor } from '@/lib/review/selection';
 import { normalizeSelection } from '@/lib/review/selection';
 import type { AnnotationSide } from '@/lib/review/threads';
 
@@ -23,8 +23,16 @@ export interface ComposerTarget {
   side: AnnotationSide;
   /** The Pierre line the composer's annotation attaches to. */
   lineNumber: number;
-  /** What to post, or null when the selection cannot be posted at all. */
-  anchor: CommentAnchor | null;
+  /**
+   * What to post, or null when the selection cannot be posted at all.
+   *
+   * A `LineAnchor` rather than a `CommentAnchor`, which this could widen to
+   * now that a comment may be about the file instead. It stays narrow because
+   * every gesture that reaches here came off a gutter, and a gutter is made of
+   * lines: widening would hand every reader of a composer target a case that
+   * this function cannot produce.
+   */
+  anchor: LineAnchor | null;
   rejection: ComposerRejection | null;
 }
 

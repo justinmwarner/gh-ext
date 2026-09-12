@@ -802,6 +802,17 @@ export function DiffColumn({
       const listed: PostingComment[] = [];
 
       for (const entry of entries) {
+        // A comment about the file names no line, so there is no row to hang an
+        // annotation on. It goes in the body list, which is where its thread
+        // will appear once GitHub answers it — not a fallback, the same place.
+        // The alternative, skipping it, would take the reviewer's words off the
+        // screen for the length of the post, which is the single failure
+        // `lib/review/posting.ts` exists to prevent.
+        if (entry.anchor.subject === 'file') {
+          listed.push(entry);
+          continue;
+        }
+
         const side = entry.anchor.side === 'LEFT' ? 'deletions' : 'additions';
         const { line } = entry.anchor;
         // Expanded context counts, exactly as it does for a thread: those rows

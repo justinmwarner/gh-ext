@@ -29,7 +29,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { DraftLocation } from '@/lib/review/drafts';
-import type { CommentAnchor } from '@/lib/review/selection';
+import type { LineAnchor } from '@/lib/review/selection';
 import type { ComposerRejection } from './composerAnchor';
 import { useReviewSession } from './reviewSession';
 import { useShortcutTarget } from './shortcutTargets';
@@ -40,15 +40,24 @@ export const DRAFT_DEBOUNCE_MS = 600;
 
 export interface ComposerProps {
   path: string;
-  /** Null when the selection cannot be expressed as a GitHub comment. */
-  anchor: CommentAnchor | null;
+  /**
+   * Null when the selection cannot be expressed as a GitHub comment.
+   *
+   * Narrowed to a line anchor deliberately, though a comment may now be about
+   * the file. The box is opened from the gutter and nowhere else, so a file
+   * anchor cannot reach it — and a draft is keyed by `prId:path:line:side`, so
+   * accepting one would mean inventing a storage key for a composer nothing
+   * can open. That key is worth deciding once there is an affordance to test
+   * it against, rather than here.
+   */
+  anchor: LineAnchor | null;
   rejection: ComposerRejection | null;
   /** The source text of the selected lines, for seeding a suggestion. */
   selectedLines: readonly string[];
   onClose: () => void;
 }
 
-const positionLabel = (anchor: CommentAnchor): string =>
+const positionLabel = (anchor: LineAnchor): string =>
   anchor.startLine !== undefined && anchor.startLine !== anchor.line
     ? `Lines ${anchor.startLine}-${anchor.line}`
     : `Line ${anchor.line}`;

@@ -9,15 +9,62 @@ export interface SelectedLineRange {
   endSide?: AnnotationSide;
 }
 
-export interface CommentAnchor {
+/** A comment on one line, or on the range ending at one. */
+export interface LineAnchor {
+  subject: 'line';
   line: number;
   side: DiffSide;
   startLine?: number;
   startSide?: DiffSide;
 }
 
+/**
+ * A comment on the file rather than on a line.
+ *
+ * GitHub has always taken these — `subjectType: FILE` — and this application
+ * has always *read* them; `ui/reviewThreads.ts` labels them "Whole file". It
+ * has never posted one, because until now every comment started from a gutter
+ * and a gutter is made of lines.
+ *
+ * The rendered Markdown view is what needs it: it draws the whole document, so
+ * most of what is on screen is outside every hunk, and a block that cannot take
+ * a line comment can still take this one.
+ */
+export interface FileAnchor {
+  subject: 'file';
+}
+
+/**
+ * Discriminated, rather than a line anchor whose `line` may be null.
+ *
+ * The nullable shape is the one GitHub's own thread carries, and it is the
+ * reason `ReviewThread` needs `subjectType` beside it to be read at all: a null
+ * line means "on the file" and also "outdated, we lost the number". Copying it
+ * here would leave `.line` legal to write at every site and answer nothing, so
+ * the first file comment would reach the screen as the word `undefined` in a
+ * sentence. The discriminant makes the typechecker ask instead.
+ */
+export type CommentAnchor = LineAnchor | FileAnchor;
+
+/**
+ * The file anchor, made rather than written out.
+ *
+ * A constructor for a field-less object looks like ceremony until it gains a
+ * field — a position within the rendered document, say, so two file comments
+ * can be told apart. Then it is one edit rather than a search for every
+ * `subject: 'file'` in the tree.
+ */
+export const fileAnchor = (): FileAnchor => ({ subject: 'file' });
+
+/**
+ * Widening the success case to `CommentAnchor` would suggest this could answer
+ * "about the file", and it cannot: it is handed a range of lines and lines are
+ * the only thing it can honestly return. Nor is a selection it refuses thereby
+ * a comment about the file — whether the reviewer meant one is a question, and
+ * nothing down here is in a position to ask it.
+ */
 export type NormalizeResult =
-  | { ok: true; value: CommentAnchor }
+  | { ok: true; value: LineAnchor }
   | { ok: false; reason: 'cross-side' | 'invalid-range' };
 
 const toDiffSide = (s: AnnotationSide): DiffSide =>
@@ -45,10 +92,10 @@ export function normalizeSelection(range: SelectedLineRange): NormalizeResult {
   const hi = Math.max(range.start, range.end);
   const ghSide = toDiffSide(side);
 
-  if (lo === hi) return { ok: true, value: { line: hi, side: ghSide } };
+  if (lo === hi) return { ok: true, value: { subject: 'line', line: hi, side: ghSide } };
 
   return {
     ok: true,
-    value: { line: hi, side: ghSide, startLine: lo, startSide: ghSide },
+    value: { subject: 'line', line: hi, side: ghSide, startLine: lo, startSide: ghSide },
   };
 }

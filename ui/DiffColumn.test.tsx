@@ -25,6 +25,7 @@ import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
+import { fileAnchor } from '@/lib/review/selection';
 import { MODE_MEMORY_KEY } from '@/lib/settings';
 import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
 import { request } from './background';
@@ -119,11 +120,30 @@ function Poster({ line }: { line: number }) {
         void session.postThread({
           path: 'src/app.ts',
           body: 'Written before the diff moved.',
-          anchor: { line, side: 'RIGHT' },
+          anchor: { subject: 'line', line, side: 'RIGHT' },
         });
       }}
     >
       post off-hunk
+    </button>
+  );
+}
+
+/** The same, for a comment that is about the file and names no line at all. */
+function FilePoster() {
+  const session = useReviewSession();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void session.postThread({
+          path: 'src/app.ts',
+          body: 'The introduction reads as if it were still a draft.',
+          anchor: fileAnchor(),
+        });
+      }}
+    >
+      post on file
     </button>
   );
 }
@@ -1089,6 +1109,36 @@ describe('starting a comment from the gutter', () => {
     expect(listed?.textContent).toMatch(/line 10/i);
     expect(screen.getByText('Written before the diff moved.')).toBeDefined();
     // And exactly once — not both listed and anchored.
+    expect(document.querySelectorAll('[data-posting]')).toHaveLength(1);
+  });
+
+  it('lists a comment in flight that is about the file and not a line', async () => {
+    // The body is where such a comment belongs rather than where it ended up:
+    // its thread will arrive `subjectType: FILE` and be listed in the same
+    // place. What is being guarded against is the sentence above it, which
+    // names a line number — a comment that has none must not be introduced as
+    // having been written on line `undefined`.
+    requestMock.mockReturnValue(new Promise(() => {}));
+    mount(
+      [file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })],
+      {},
+      [],
+      <FilePoster />,
+    );
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'post on file' }));
+    });
+
+    const listed = document.querySelector('[data-unplaceable-posting="src/app.ts"]');
+    expect(listed?.textContent).toContain('on the file as a whole');
+    expect(listed?.textContent).not.toContain('undefined');
+    // The words `threadPosition` will use for the thread that replaces it.
+    expect(listed?.textContent).toContain('Whole file');
+    expect(
+      screen.getByText('The introduction reads as if it were still a draft.'),
+    ).toBeDefined();
     expect(document.querySelectorAll('[data-posting]')).toHaveLength(1);
   });
 

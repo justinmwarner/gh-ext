@@ -73,8 +73,15 @@ export function FileBody({ file, mode, unanchored, posting, blobs }: FileBodyPro
           {posting.map((entry) => (
             <li key={entry.id}>
               <p className="unanchored-reason">
-                {`This comment was written on line ${entry.anchor.line}, which the ` +
-                  'diff on screen is not showing. It is here so it is not lost.'}
+                {/* A file comment is not stranded here, it lives here: this is
+                    where its thread will land once GitHub answers, beside the
+                    file-level threads `UnanchoredThreads` lists below. So it
+                    borrows that list's sentence rather than the apology, which
+                    would tell the reviewer something had gone wrong. */}
+                {entry.anchor.subject === 'file'
+                  ? 'Left on the file as a whole rather than on a line.'
+                  : `This comment was written on line ${entry.anchor.line}, which the ` +
+                    'diff on screen is not showing. It is here so it is not lost.'}
               </p>
               <PostingCard postId={entry.id} />
             </li>

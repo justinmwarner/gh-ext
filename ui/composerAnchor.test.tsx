@@ -22,7 +22,7 @@ describe('composerFor', () => {
       path: 'src/app.ts',
       side: 'additions',
       lineNumber: 4,
-      anchor: { line: 4, side: 'RIGHT' },
+      anchor: { subject: 'line', line: 4, side: 'RIGHT' },
       rejection: null,
     });
   });
@@ -38,7 +38,7 @@ describe('composerFor', () => {
       path: 'src/app.ts',
       side: 'deletions',
       lineNumber: 4,
-      anchor: { line: 4, side: 'LEFT' },
+      anchor: { subject: 'line', line: 4, side: 'LEFT' },
       rejection: null,
     });
   });
@@ -52,6 +52,7 @@ describe('composerFor', () => {
     );
 
     expect(placed?.anchor).toEqual({
+      subject: 'line',
       line: 9,
       side: 'RIGHT',
       startLine: 5,
@@ -137,7 +138,7 @@ describe('composerFor', () => {
         OLDER_HEAD,
       );
 
-      expect(placed?.anchor).toEqual({ line: 4, side: 'LEFT' });
+      expect(placed?.anchor).toEqual({ subject: 'line', line: 4, side: 'LEFT' });
       expect(placed?.rejection).toBeNull();
     });
 

@@ -1045,19 +1045,40 @@ export function ReviewSessionProvider({
     return opened;
   }, [findOpenReview, openReview]);
 
+  /**
+   * Both shapes of comment, told apart by what is left out.
+   *
+   * The rule is the same one `ADD_THREAD` documents and it is why the file case
+   * works at all: an unsupplied variable is dropped from the coerced input,
+   * whereas an explicit null is sent as a null. A thread about the file has no
+   * line and no side, and GitHub reads their *absence* beside
+   * `subjectType: FILE`; sending `line: null` would be a statement about a line
+   * rather than silence about one.
+   *
+   * `subjectType` is left unsupplied for a line comment, which is what every
+   * comment this page has ever posted did — and every one of them came back a
+   * LINE thread, so GitHub's default is not in doubt. Sending `'LINE'`
+   * explicitly would make the two branches symmetric and state on the wire what
+   * the request means, which is a real argument. It loses to the fact that
+   * `line` and `side` already state it: a second field carrying the same fact
+   * is a field that can contradict the first, and adding it would change every
+   * request the existing path makes in order to change nothing.
+   */
   const addThread = useCallback(
     (reviewId: string, { path, body, anchor }: NewThreadInput) =>
       mutate(ADD_THREAD, {
         pullRequestReviewId: reviewId,
         path,
         body,
-        line: anchor.line,
-        side: anchor.side,
-        // Left out entirely rather than sent null: an unsupplied variable is
-        // dropped from the coerced input, an explicit null is sent as a null.
-        ...(anchor.startLine !== undefined && anchor.startSide !== undefined
-          ? { startLine: anchor.startLine, startSide: anchor.startSide }
-          : {}),
+        ...(anchor.subject === 'file'
+          ? { subjectType: 'FILE' }
+          : {
+              line: anchor.line,
+              side: anchor.side,
+              ...(anchor.startLine !== undefined && anchor.startSide !== undefined
+                ? { startLine: anchor.startLine, startSide: anchor.startSide }
+                : {}),
+            }),
       }),
     [mutate],
   );
@@ -1238,14 +1259,17 @@ export function ReviewSessionProvider({
    * longer waits around to clear it, so clearing it is this file's job now.
    * Built from the same three fields the composer used, which is what makes
    * the two agree — see `draftKey`.
+   *
+   * Null for a comment about the file, because there is no draft to clear: a
+   * draft is keyed by line and side, and the composer that writes one only ever
+   * opens on a line. Inventing a key here instead would settle the storage
+   * format for file drafts in the one place that never writes one.
    */
   const draftFor = useCallback(
-    ({ path, anchor }: NewThreadInput): DraftLocation => ({
-      prId,
-      path,
-      line: anchor.line,
-      side: anchor.side,
-    }),
+    ({ path, anchor }: NewThreadInput): DraftLocation | null =>
+      anchor.subject === 'file'
+        ? null
+        : { prId, path, line: anchor.line, side: anchor.side },
     [prId],
   );
 
@@ -1291,7 +1315,8 @@ export function ReviewSessionProvider({
       // GitHub has the comment, so the draft is a second copy of something
       // already posted. Left behind, it would seed the next composer opened on
       // that line with a comment the reviewer already made.
-      void drafts.clear(draftFor(input)).catch(() => undefined);
+      const location = draftFor(input);
+      if (location !== null) void drafts.clear(location).catch(() => undefined);
       return true;
     },
     [draftFor, drafts, publishThread, queueThread],
@@ -1334,8 +1359,10 @@ export function ReviewSessionProvider({
 
       setPosting((list) => dropPost(list, postId));
       // The saved copy goes too, or the next composer on that line would open
-      // holding the comment the reviewer just threw away.
-      void drafts.clear(draftFor(entry)).catch(() => undefined);
+      // holding the comment the reviewer just threw away. Null is a comment
+      // about the file, which never had one — see `draftFor`.
+      const location = draftFor(entry);
+      if (location !== null) void drafts.clear(location).catch(() => undefined);
     },
     [draftFor, drafts],
   );
