@@ -46,7 +46,7 @@
  * changes the document.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { MarkdownComparison } from '@/lib/compare/markdown';
 import type { DiffSide, ReviewThread } from '@/lib/github/types';
 import { isCommentable } from '@/lib/review/commentable';
@@ -57,6 +57,7 @@ import { type MarkdownBlock, markdownBlocks } from './markdownBlocks';
 import { MermaidBlock } from './MermaidBlock';
 import { PostingCard } from './PostingCard';
 import { useReviewSession } from './reviewSession';
+import { useShortcutTarget } from './shortcutTargets';
 import { ThreadCard } from './ThreadCard';
 
 export interface MarkdownCompareProps {
@@ -185,6 +186,16 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
   const [writing, setWriting] = useState<string | null>(null);
 
   /**
+   * Which block `J` last stopped on, and therefore which one `c` is about.
+   *
+   * A ref rather than state: nothing on screen is drawn from it — the browser's
+   * own focus is what shows where the reviewer is — and a render per keystroke
+   * would re-run the document memo's dependents for a cursor move.
+   */
+  const cursor = useRef(-1);
+  const nodes = useRef(new Map<string, HTMLDivElement>());
+
+  /**
    * The threads and the comments in flight that belong under a block.
    *
    * Placement is gated on `commentable` as well as on the anchor matching, and
@@ -243,6 +254,64 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
     return placed;
   }, [blocks, commentable, path, session.byPath, session.posting]);
 
+  /**
+   * A changed block is this view's hunk, and this is where that is decided.
+   *
+   * `J` and `K` are `next-hunk` and `previous-hunk`, and a rendered document
+   * has no hunks: the card is handed a diff with none so that no rows are drawn
+   * under it. What it has instead is blocks the word diff marked, which is the
+   * same thing the reviewer means by "the next change" — the part of the page
+   * the pull request altered. So the two actions keep their names and their
+   * keys and stop here rather than at the column, which would otherwise send
+   * `J` to the first hunk of some other file.
+   */
+  const marked = useMemo(
+    () => blocks.flatMap((block, index) => (block.changed ? [index] : [])),
+    [blocks],
+  );
+
+  const focusBlock = (index: number): void => {
+    cursor.current = index;
+    const block = blocks[index];
+    if (block !== undefined) nodes.current.get(block.key)?.focus();
+  };
+
+  /**
+   * Clamped rather than wrapped, which is what `goToHunk` does one file over.
+   * Pressing `J` past the last change should stop, not silently start again at
+   * the top of a document the reviewer has just finished reading.
+   */
+  const step = (direction: 1 | -1): void => {
+    if (marked.length === 0) return;
+    const at = cursor.current;
+    const next =
+      direction > 0
+        ? (marked.find((index) => index > at) ?? marked[marked.length - 1])
+        : (marked.findLast((index) => index < at) ?? marked[0]);
+    if (next !== undefined) focusBlock(next);
+  };
+
+  /**
+   * `c` acts on the block `J` last stopped on.
+   *
+   * With no cursor it takes the first changed block, and failing that the first
+   * block of the document — a reviewer who presses `c` having pressed nothing
+   * else means "comment on this file", and the alternative is a key that does
+   * nothing until some other key has been pressed first.
+   */
+  const commentOnCurrent = (): void => {
+    const index = cursor.current >= 0 ? cursor.current : (marked[0] ?? 0);
+    const block = blocks[index];
+    if (block === undefined) return;
+    focusBlock(index);
+    setWriting(block.key);
+  };
+
+  const live = blocks.length > 0;
+  useShortcutTarget('next-hunk', live ? () => step(1) : null, path);
+  useShortcutTarget('previous-hunk', live ? () => step(-1) : null, path);
+  useShortcutTarget('comment-on-line', live ? commentOnCurrent : null, path);
+
   if (comparison.unsafeHtml === null) {
     // Every non-`ok` status carries its own sentence, because "this looks
     // empty" and "this refused" are indistinguishable in a card otherwise, and
@@ -268,23 +337,33 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
             <div
               key={block.key}
               className="markdown-block"
+              /* Focusable, and only programmatically. `J` has to be able to put
+                 the reviewer on a block so that `c` knows which one they mean;
+                 a tab stop per block would make a README of two hundred of them
+                 unreachable by keyboard in any other way. */
+              tabIndex={-1}
+              ref={(node) => {
+                if (node !== null) nodes.current.set(block.key, node);
+                return () => {
+                  nodes.current.delete(block.key);
+                };
+              }}
             >
               {rendered[index]}
 
               {/* After the content in source order and drawn beside it, so the
                   first child of a block is still the markup the document wrote
                   — which is what the margin rules in the stylesheet reach for.
-
-                  Out of the tab order, and that is the decision rather than an
-                  oversight: a README is hundreds of blocks, and one tab stop
-                  each would make the document unusable by keyboard in every
-                  other way. */}
+                  Out of the tab order for the reason above. */}
               <button
                 type="button"
                 className="markdown-comment"
                 tabIndex={-1}
                 aria-label={affordanceLabel(block, index, path)}
-                onClick={() => setWriting(block.key)}
+                onClick={() => {
+                  cursor.current = index;
+                  setWriting(block.key);
+                }}
               >
                 <span aria-hidden="true">+</span>
               </button>

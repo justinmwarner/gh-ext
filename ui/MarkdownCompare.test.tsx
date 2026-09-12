@@ -16,7 +16,7 @@
  * and a source, and only the source half folds away.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { compareMarkdown } from '@/lib/compare/markdown';
@@ -30,6 +30,11 @@ import { memoryStore } from './memoryStore.fixture';
 import { renderMermaid } from './mermaid';
 import { pullRequestNode, reviewThread } from './prPayload.fixture';
 import { ReviewSessionProvider } from './reviewSession';
+import {
+  type ShortcutTargets,
+  ShortcutTargetsProvider,
+  useShortcutTargets,
+} from './shortcutTargets';
 import { UnanchoredThreads } from './UnanchoredThreads';
 
 vi.mock('./mermaid', async () => {
@@ -64,6 +69,21 @@ const DIAGRAM = 'graph TD\n  A[Start] --> B[Stop]';
 const doc = (diagram: string, prose = 'Some prose.'): string =>
   `# Title\n\n${prose}\n\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`;
 
+/**
+ * The review keyboard, as the shell holds it.
+ *
+ * `J`, `K` and `c` are claimed by the card rather than handled by the shell, so
+ * a test that wants to press one has to be the thing that asks. Captured out of
+ * the provider because that is the only way in — the registry is a ref, not
+ * state, and nothing renders from it.
+ */
+let targets: ShortcutTargets | null = null;
+
+function CaptureTargets() {
+  targets = useShortcutTargets();
+  return null;
+}
+
 interface MountOptions {
   path?: string;
   /** Which lines a comment can name. Defaults to none, as an unpatched file. */
@@ -75,18 +95,21 @@ interface MountOptions {
 function mount(before: string, after: string, options: MountOptions = {}) {
   const { path = PATH, patch = '', threads = [], store = memoryStore() } = options;
   const view = render(
-    <ReviewSessionProvider
-      pullRequest={pullRequestNode()}
-      prRef={PR_REF}
-      threads={[...threads]}
-      drafts={new DraftStore(store)}
-    >
-      <MarkdownCompare
-        comparison={compareMarkdown(before, after, NONCE)}
-        path={path}
-        commentable={commentableLines(patch)}
-      />
-    </ReviewSessionProvider>,
+    <ShortcutTargetsProvider>
+      <CaptureTargets />
+      <ReviewSessionProvider
+        pullRequest={pullRequestNode()}
+        prRef={PR_REF}
+        threads={[...threads]}
+        drafts={new DraftStore(store)}
+      >
+        <MarkdownCompare
+          comparison={compareMarkdown(before, after, NONCE)}
+          path={path}
+          commentable={commentableLines(patch)}
+        />
+      </ReviewSessionProvider>
+    </ShortcutTargetsProvider>,
   );
   return { ...view, store };
 }
@@ -229,22 +252,25 @@ describe('the document as React sees it', () => {
     await untilDrawn();
 
     rerender(
-      <ReviewSessionProvider
-        pullRequest={pullRequestNode()}
-        prRef={PR_REF}
-        threads={[]}
-        drafts={new DraftStore(memoryStore())}
-      >
-        <MarkdownCompare
-          comparison={compareMarkdown(
-            doc(DIAGRAM),
-            doc(DIAGRAM, 'Some other prose.'),
-            'c4e2d1ef-0000-4000-8000-000000000000',
-          )}
-          path={PATH}
-          commentable={commentableLines('')}
-        />
-      </ReviewSessionProvider>,
+      <ShortcutTargetsProvider>
+        <CaptureTargets />
+        <ReviewSessionProvider
+          pullRequest={pullRequestNode()}
+          prRef={PR_REF}
+          threads={[]}
+          drafts={new DraftStore(memoryStore())}
+        >
+          <MarkdownCompare
+            comparison={compareMarkdown(
+              doc(DIAGRAM),
+              doc(DIAGRAM, 'Some other prose.'),
+              'c4e2d1ef-0000-4000-8000-000000000000',
+            )}
+            path={PATH}
+            commentable={commentableLines('')}
+          />
+        </ReviewSessionProvider>
+      </ShortcutTargetsProvider>,
     );
 
     expect(diagram()).not.toBeNull();
@@ -429,19 +455,21 @@ describe('threads on a rendered document', () => {
     // below. `layoutThreads` calls this `outdated`; the list says why.
     const outdated = reviewThread({ path: PATH, line: null, isOutdated: true });
     render(
-      <ReviewSessionProvider
-        pullRequest={pullRequestNode()}
-        prRef={PR_REF}
-        threads={[outdated]}
-        drafts={new DraftStore(memoryStore())}
-      >
-        <MarkdownCompare
-          comparison={compareMarkdown(BEFORE, AFTER, NONCE)}
-          path={PATH}
-          commentable={commentableLines(PATCH)}
-        />
-        <UnanchoredThreads path={PATH} threads={[{ thread: outdated, reason: 'outdated' }]} />
-      </ReviewSessionProvider>,
+      <ShortcutTargetsProvider>
+        <ReviewSessionProvider
+          pullRequest={pullRequestNode()}
+          prRef={PR_REF}
+          threads={[outdated]}
+          drafts={new DraftStore(memoryStore())}
+        >
+          <MarkdownCompare
+            comparison={compareMarkdown(BEFORE, AFTER, NONCE)}
+            path={PATH}
+            commentable={commentableLines(PATCH)}
+          />
+          <UnanchoredThreads path={PATH} threads={[{ thread: outdated, reason: 'outdated' }]} />
+        </ReviewSessionProvider>
+      </ShortcutTargetsProvider>,
     );
 
     expect(document.querySelectorAll('[data-thread]')).toHaveLength(1);
@@ -449,5 +477,61 @@ describe('threads on a rendered document', () => {
       document.querySelector('.markdown-rendered [data-thread]'),
     ).toBeNull();
     expect(document.querySelector('.unanchored [data-thread]')).not.toBeNull();
+  });
+});
+
+describe('the keyboard, on a document that has no hunks', () => {
+  const press = (action: 'next-hunk' | 'previous-hunk' | 'comment-on-line'): boolean => {
+    let handled = false;
+    act(() => {
+      handled = targets?.run(action, PATH) ?? false;
+    });
+    return handled;
+  };
+
+  it('steps J through the blocks the diff marked', () => {
+    // A changed block is what a hunk is in a rendered document: it is the part
+    // of the page the pull request altered, and it is what `J` has always
+    // meant. Only the paragraph that moved qualifies here.
+    mount(BEFORE, AFTER, { patch: PATCH });
+
+    expect(press('next-hunk')).toBe(true);
+    expect(document.activeElement?.closest('.markdown-block')).toBe(
+      affordance(/Comment on “Three\.”/).closest('.markdown-block'),
+    );
+  });
+
+  it('steps K back to where J came from', () => {
+    const twoChanges = '# Title\n\nAlpha.\n\nTwo.\n\n<table><tr><td>raw</td></tr></table>\n';
+    const after = '# Heading\n\nAlpha.\n\nThree.\n\n<table><tr><td>raw</td></tr></table>\n';
+    mount(twoChanges, after, { patch: PATCH });
+
+    press('next-hunk');
+    press('next-hunk');
+    expect(press('previous-hunk')).toBe(true);
+    expect(document.activeElement?.closest('.markdown-block')).toBe(
+      affordance(/Comment on “Heading”/).closest('.markdown-block'),
+    );
+  });
+
+  it('opens the composer on the block c was pressed over', async () => {
+    mount(BEFORE, AFTER, { patch: PATCH });
+
+    press('next-hunk');
+    expect(press('comment-on-line')).toBe(true);
+
+    await waitFor(() => expect(screen.getByText('Line 5')).toBeDefined());
+  });
+
+  it('answers for its own file and nobody else’s', () => {
+    mount(BEFORE, AFTER, { patch: PATCH });
+
+    let handled = true;
+    act(() => {
+      handled = targets?.run('next-hunk', 'src/other.ts') ?? false;
+    });
+    // The shell falls back to the diff column, which is where every card that
+    // is not this one still navigates from.
+    expect(handled).toBe(false);
   });
 });
