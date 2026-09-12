@@ -2572,6 +2572,70 @@ test('a Mermaid diagram in a .md file is drawn rather than left as its source', 
   expect(second).not.toContain('Reject');
 });
 
+/**
+ * The other `.md` file in the column, and the one nothing here presses.
+ *
+ * Named here rather than in the fixture because nothing else wants it. Its
+ * whole job is to be a Markdown card the reviewer never touched, which is what
+ * tells a preference apart from a choice about one file. `MARKDOWN_FILE` is
+ * served real Markdown and this one is not, and that is fine: the claim made
+ * of it is about which button is pressed, not about what the body draws.
+ */
+const SECOND_MARKDOWN_FILE = 'docs/changelog.md';
+
+/**
+ * The Markdown mode, across a reload.
+ *
+ * The only honest check there is of it. The preference lives in
+ * `browser.storage.local`, and every unit test of that hands the code a fake —
+ * so "it persists" has so far been a claim about a `Map` in the test process
+ * rather than about a browser profile. The pair that has never run is the one
+ * that matters: a write from an extension page, and a read back by a page that
+ * was loaded from nothing.
+ */
+test('the markdown mode outlives the page', async ({ context, extensionId, api }) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Through the tree rather than by scrolling. The column virtualizes and this
+  // card is far enough down it that nothing has mounted it yet, so there is no
+  // card to scroll into view until a row puts one there.
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+  const raw = page
+    .locator(`[data-file-card="${MARKDOWN_FILE}"]`)
+    .getByRole('button', { name: 'Raw', exact: true });
+  // The rendered document is a separate element from the card — see `fileBody`
+  // — so it is the only thing that can say the card itself moved.
+  const prose = fileBody(page, MARKDOWN_FILE).locator('.markdown-rendered');
+
+  // Where a `.md` card opens when nobody has ever said otherwise.
+  await expect(raw).toHaveAttribute('aria-pressed', 'false');
+  await expect(prose).toBeVisible();
+
+  await raw.click();
+  await expect(raw).toHaveAttribute('aria-pressed', 'true');
+  await expect(prose).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator('.shell')).toBeVisible();
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+
+  // Nothing was pressed on this page, and the card is raw anyway.
+  await expect(raw).toHaveAttribute('aria-pressed', 'true');
+  await expect(prose).toHaveCount(0);
+
+  // And so is the `.md` file that was never pressed on either page, which is
+  // the half a per-file memory would fail: remembering the *file* would bring
+  // this one back rendered and still satisfy everything above.
+  await page.locator(`[data-path="${SECOND_MARKDOWN_FILE}"]`).click();
+  await expect(
+    page
+      .locator(`[data-file-card="${SECOND_MARKDOWN_FILE}"]`)
+      .getByRole('button', { name: 'Raw', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('the syntax theme is the reviewer\'s, and choosing one lets it colour the diff', async ({
   context,
   extensionId,
