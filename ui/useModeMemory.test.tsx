@@ -38,12 +38,17 @@ beforeEach(async () => {
   await browser.storage.local.remove(MODE_MEMORY_KEY);
 });
 
+/** Put the storage area's `get` back, for the one test that holds it open. */
+let restoreGet: (() => void) | null = null;
+
 afterEach(() => {
   Object.defineProperty(browser.storage, 'onChanged', {
     value: original,
     writable: true,
     configurable: true,
   });
+  restoreGet?.();
+  restoreGet = null;
 });
 
 /** What another review tab does when the reviewer presses a mode in it. */
@@ -105,6 +110,63 @@ describe('useModeMemory', () => {
     });
 
     announce({ markdown: 'raw' });
+
+    expect(shown()).toBe('raw');
+  });
+
+  /**
+   * The reviewer's own press outranks a read issued before they made it.
+   *
+   * The opening read resolves a tick after mount, and until this was pinned it
+   * was entitled to overwrite whatever it landed on — so a press made inside
+   * that tick turned the cards and then let them turn back, with nothing on
+   * screen to say why. `storage.onChanged` fires on this page's own writes and
+   * would have healed it a moment later, which is exactly what makes it the
+   * kind of flicker nobody reports and nobody can reproduce.
+   *
+   * The read is held open by stubbing the storage area rather than the store,
+   * keeping this file's rule that it tests the real `lib/settings-store`.
+   */
+  it('does not let the opening read clobber a press made during it', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const real = browser.storage.local.get.bind(browser.storage.local);
+    Object.defineProperty(browser.storage.local, 'get', {
+      // Read at call time and delivered late, which is the shape of the race.
+      // Awaiting the gate *before* reading would see what the press has since
+      // written and hand back the same value either way — a test that passes
+      // whether or not the bug is there.
+      value: async (key: string) => {
+        const snapshot = await real(key);
+        await held;
+        return snapshot;
+      },
+      writable: true,
+      configurable: true,
+    });
+    restoreGet = () => {
+      Object.defineProperty(browser.storage.local, 'get', {
+        value: real,
+        writable: true,
+        configurable: true,
+      });
+    };
+
+    render(<Probe />);
+    expect(shown()).toBe('unset');
+
+    act(() => {
+      remember('markdown', 'raw');
+    });
+    expect(shown()).toBe('raw');
+
+    // The read now answers, with what storage held before the press.
+    await act(async () => {
+      release();
+      await held;
+    });
 
     expect(shown()).toBe('raw');
   });

@@ -1784,11 +1784,14 @@ describe('remembering how markdown is compared', () => {
       file({ path: 'docs/b.md' }),
       file({ path: 'assets/logo.png', isBinary: true }),
     ]);
-    // The column's opening read of the preference resolves a tick after mount,
-    // and it is entitled to overwrite what is held — it was issued first. A
-    // press made inside that tick would therefore be undone by an empty read,
-    // which is a fact about how fast a test can click rather than about the
-    // feature. `ui/useModeMemory.test.tsx` waits here for the same reason.
+    // Settles the column's opening read of the preference, which resolves a
+    // tick after mount, so what is asserted below is the press rather than a
+    // race with it.
+    //
+    // It is no longer load-bearing: a press made inside that tick used to be
+    // undone by the read finishing, and `useModeMemory` now marks itself
+    // superseded so the reviewer's own action outranks a read issued before
+    // they took it. `ui/useModeMemory.test.tsx` pins that directly.
     await act(async () => {});
 
     fireEvent.click(within(card('docs/a.md')).getByRole('button', { name: 'Raw' }));

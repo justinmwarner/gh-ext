@@ -31,6 +31,21 @@ export function useModeMemory(): [ModeMemory, RememberMode] {
    */
   const current = useRef<ModeMemory>(EMPTY_MODE_MEMORY);
 
+  /**
+   * Whether anything newer than the opening read has already decided.
+   *
+   * A ref rather than the flag inside the effect it started as, because
+   * {@link remember} has to be able to set it and cannot reach in there. Left
+   * effect-local, a press made while the first read is still in flight is
+   * overwritten a tick later by a value that was already stale when it was
+   * asked for — the reviewer presses Raw, the cards turn, and then they turn
+   * back on their own.
+   *
+   * `live` stays inside the effect, because that one really is a fact about
+   * this effect's lifetime rather than about the value.
+   */
+  const superseded = useRef(false);
+
   const apply = useCallback((next: ModeMemory) => {
     current.current = next;
     setMemory(next);
@@ -38,17 +53,16 @@ export function useModeMemory(): [ModeMemory, RememberMode] {
 
   useEffect(() => {
     let live = true;
-    let changed = false;
 
     const stop = onModeMemoryChanged((next) => {
       if (!live) return;
-      changed = true;
+      superseded.current = true;
       apply(next);
     });
 
     void readModeMemory()
       .then((stored) => {
-        if (live && !changed) apply(stored);
+        if (live && !superseded.current) apply(stored);
       })
       // Storage that cannot be read leaves every kind on its default, which is
       // what the page would draw anyway.
@@ -63,6 +77,10 @@ export function useModeMemory(): [ModeMemory, RememberMode] {
   const remember = useCallback<RememberMode>(
     (kind, mode) => {
       const next = { ...current.current, [kind]: mode };
+      // Before `apply`, so an opening read that resolves after this press finds
+      // the flag already set. The reviewer's own action outranks a read that
+      // was issued before they took it.
+      superseded.current = true;
       apply(next);
       // Not awaited. The page has already moved; a storage write that fails
       // costs the preference at the next reload and nothing on screen now.
