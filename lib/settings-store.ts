@@ -6,17 +6,20 @@
  * testing lives in a pure module — `lib/settings.ts` — and this is the thin
  * adapter that keeps `browser.storage` out of it.
  *
- * Deliberately untested. There is nothing here but four calls and the parse
- * that `lib/settings.test.ts` already covers; a test would only assert that the
- * mocks were called.
+ * Deliberately untested. There is nothing here but storage calls and the
+ * parses that `lib/settings.test.ts` already covers; a test would only assert
+ * that the mocks were called.
  */
 
 import { browser } from 'wxt/browser';
 import { setLoggingEnabled } from './log';
 import {
   CARD_COLLAPSED_KEY,
+  MODE_MEMORY_KEY,
   SETTINGS_KEY,
+  type ModeMemory,
   type Settings,
+  parseModeMemory,
   parseSettings,
 } from './settings';
 
@@ -93,6 +96,39 @@ export function onSettingsChanged(onChange: (settings: Settings) => void): () =>
     // fields than this one arrives here, and `parseSettings` is what stops an
     // unrecognized value reaching the page.
     onChange(parseSettings(change.newValue));
+  };
+
+  browser.storage.onChanged.addListener(listener);
+  return () => {
+    browser.storage.onChanged.removeListener(listener);
+  };
+}
+
+export async function readModeMemory(): Promise<ModeMemory> {
+  const stored = await browser.storage.local.get(MODE_MEMORY_KEY);
+  return parseModeMemory(stored[MODE_MEMORY_KEY]);
+}
+
+export async function writeModeMemory(memory: ModeMemory): Promise<void> {
+  await browser.storage.local.set({ [MODE_MEMORY_KEY]: memory });
+}
+
+/**
+ * Call back whenever the remembered mode changes, in any extension context.
+ *
+ * The same reason `onSettingsChanged` exists, one step smaller: two review tabs
+ * open on two pull requests should not disagree about how Markdown is drawn
+ * after the reviewer presses Raw in one of them.
+ */
+export function onModeMemoryChanged(onChange: (memory: ModeMemory) => void): () => void {
+  const listener = (
+    changes: Record<string, { newValue?: unknown }>,
+    areaName: string,
+  ): void => {
+    if (areaName !== 'local') return;
+    const change = changes[MODE_MEMORY_KEY];
+    if (change === undefined) return;
+    onChange(parseModeMemory(change.newValue));
   };
 
   browser.storage.onChanged.addListener(listener);
