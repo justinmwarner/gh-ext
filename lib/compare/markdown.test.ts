@@ -260,3 +260,30 @@ describe('markdown-it parity and fixes', () => {
     expect(compareMarkdown('# A', 'A\n=').status).toBe('unchanged');
   });
 });
+
+describe('task lists', () => {
+  // The §3.1 reproduction. This asserted nothing before: the whole document
+  // came back with zero marks for a change the reviewer can see on github.com.
+  it('marks a box being ticked', () => {
+    const result = compareMarkdown('- [ ] ship it\n', '- [x] ship it\n');
+    expect(result.status).toBe('ok');
+    expect(result.unsafeHtml).toMatch(/<(ins|del)\b/);
+  });
+
+  it('renders the state as text rather than as an input', () => {
+    const result = compareMarkdown('- [ ] a\n', '- [x] a\n');
+    expect(result.unsafeHtml).not.toContain('<input');
+    expect(result.unsafeHtml).toContain('md-task');
+  });
+
+  it('leaves a list item that is not a task alone', () => {
+    const result = compareMarkdown('- plain\n', '- plainer\n');
+    expect(result.unsafeHtml).not.toContain('md-task');
+  });
+
+  // A literal bracket pair mid-sentence is not a checkbox.
+  it('only reads a marker at the start of an item', () => {
+    const result = compareMarkdown('- a [ ] b\n', '- a [x] b\n');
+    expect(result.unsafeHtml).not.toContain('md-task');
+  });
+});

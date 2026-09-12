@@ -141,6 +141,8 @@ const renderer = new MarkdownIt({
 renderer.renderer.rules.image = (tokens, index): string => {
   const token = tokens[index];
   if (token === undefined) return '';
+  // `attrGet` is typed `string | number | null` — `attrSet` accepts a number
+  // and nothing narrows it back — so the coercions here are not redundant.
   const href = String(token.attrGet('src') ?? '');
   const label = renderer.renderer.renderInlineAsText(
     token.children ?? [],
@@ -154,13 +156,83 @@ renderer.renderer.rules.image = (tokens, index): string => {
 };
 
 /**
+ * The anchor and the trailing `\s+` are both load-bearing, and between them say
+ * "at the start of the item, and followed by a space". That is GitHub's own
+ * rule, and it is what keeps a bracket pair somebody wrote mid-sentence from
+ * being redrawn as a checkbox.
+ */
+const TASK_MARKER = /^\[([ xX])\]\s+/;
+
+/**
+ * A task list's checkbox is a character, not a control.
+ *
+ * `markdown-it` has no task list rule at all, so `- [x] ship it` already
+ * arrives here as the literal text `[x] ship it`. That on its own is what fixes
+ * §3.1 of the design — the state is in the text, where the word diff can see
+ * it, rather than in an attribute the diff strips and the sanitiser then
+ * discards along with the `<input>` carrying it. The renderer swap fixed that
+ * defect; this rule did not.
+ *
+ * What this rule adds is that the marker reads as the control it stands in for
+ * rather than as a bracket pair somebody happened to type, and that `[X]` and
+ * `[x]` are one document rather than two — the same judgement `compareMarkdown`
+ * makes further down when it compares the rendered forms rather than the
+ * source, because a difference that changes no document is not worth marking.
+ *
+ * It is the image rule's argument one more time. State kept in an attribute is
+ * invisible to a word diff that strips attributes before comparing, and text is
+ * not; a checkbox has the additional problem that `ui/markdownHtml.ts` forbids
+ * `input` outright, so no checkbox could reach the page even if one were drawn.
+ *
+ * A plugin exists and was refused. `markdown-it-task-lists` 2.1.1 was last
+ * modified in 2022 — the dormant-package-with-a-live-publish-key shape this
+ * project already turned down for `toml` and for `htmldiff-js` — and what it
+ * draws is the `<input>` this page cannot use.
+ *
+ * The marker is written the way the author wrote it: `[ ]` and `[x]`, ASCII. A
+ * ballot box, U+2610 and U+2611, was the obvious alternative and was rejected
+ * twice over. It depends on a symbol font a reviewer may not have, and it would
+ * make this view disagree with the Raw view beside it, in a card whose point is
+ * that you can flip between the two and see the same document. Written as
+ * brackets, the diff marks the one character that carries the state and leaves
+ * the brackets around it still.
+ *
+ * `markdown-it` emits `list_item_open`, `paragraph_open`, `inline`, so the item
+ * an inline token belongs to is two tokens back.
+ */
+renderer.core.ruler.push('task-list-text', (state): void => {
+  for (const [index, token] of state.tokens.entries()) {
+    if (token.type !== 'inline') continue;
+    if (state.tokens[index - 2]?.type !== 'list_item_open') continue;
+
+    const matched = TASK_MARKER.exec(token.content);
+    if (matched === null) continue;
+
+    // Checked before anything is mutated, so that a bail-out here cannot leave
+    // the marker stripped from `content` and still present in the children the
+    // item is actually rendered from.
+    const first = token.children?.[0];
+    if (first === undefined || first.type !== 'text') continue;
+
+    token.content = token.content.slice(matched[0].length);
+    first.content = first.content.replace(TASK_MARKER, '');
+
+    const ticked = matched[1] !== ' ';
+    const marker = new state.Token('html_inline', '', 0);
+    marker.content = `<span class="md-task">${ticked ? '[x]' : '[ ]'}</span> `;
+    token.children?.unshift(marker);
+  }
+});
+
+/**
  * Escape for a text position in HTML.
  *
  * Belt and braces: the sanitiser downstream would catch anything this let
- * through, but the string being built here is the one place this module writes
- * markup of its own, and a renderer override that interpolates an attacker's
- * `alt` text into it unescaped would be handing the diff step a tag to work
- * with rather than the text it was told to show.
+ * through, but the string being built here is the only markup this module
+ * writes with anything of the document's in it — the task marker above is a
+ * fixed string — and a renderer override that interpolates an attacker's `alt`
+ * text unescaped would be handing the diff step a tag to work with rather than
+ * the text it was told to show.
  */
 function escapeHtml(text: string): string {
   return text

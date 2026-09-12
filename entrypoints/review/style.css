@@ -3471,6 +3471,25 @@ button.scope-showing:hover {
   font-size: 0.9em;
 }
 
+/* A task list's checkbox is drawn as the `[ ]` or `[x]` the author typed — see
+   the core rule in `lib/compare/markdown.ts`. Monospace so the brackets hold
+   one width whichever state they are in, which keeps a column of items on one
+   left edge and stops the words after a ticked box shifting sideways. Muted,
+   because the marker stands in for a control rather than for prose, and at the
+   same 0.9em the inline `<code>` pill uses, since a monospace face set at the
+   body size reads larger than the text around it.
+
+   No chip behind it, deliberately, and this is where it parts company with
+   `.md-image` above. The whole point of the marker is that a box being ticked
+   lands *inside* these brackets as an `<ins>` and a `<del>`, and those carry
+   backgrounds of their own; a third one underneath would be the one place on
+   this card where the diff colours have to compete to be seen. */
+.markdown-rendered .md-task {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--fg-muted);
+}
+
 /* The marks. `<ins>` and `<del>` carry the meaning on their own — a screen
    reader announces them — so colour is the second channel and the line through
    a deletion is the third. `diffmod` is both halves of one replacement and is
