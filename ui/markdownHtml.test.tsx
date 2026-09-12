@@ -14,6 +14,13 @@
  * scheme are all the same element once parsed and three different strings
  * before it — and the parser's opinion is the only one that matters.
  *
+ * The strings themselves live in `./markdownHtml.fixture.ts` rather than in
+ * this file, and that is not tidiness. `markdownBlocks.test.tsx` runs the same
+ * corpus through the per-block split — where the document is cut into its
+ * top-level elements and each one is sanitised on its own — and the whole of
+ * that design rests on the two paths agreeing. Sharing the strings is what
+ * stops an attack added here from being one the split path never sees.
+ *
  * Named `.tsx` deliberately: the `ui` project only collects `ui/**` + `.test.tsx`,
  * and a file named `.test.ts` here would be silently skipped forever.
  */
@@ -21,6 +28,7 @@
 import { describe, expect, it } from 'vitest';
 import { ANCHOR_ATTRIBUTE } from '@/lib/compare/markdownAnchors';
 import { sanitizeMarkdownHtml } from './markdownHtml';
+import { ATTACKS, DOCUMENTS } from './markdownHtml.fixture';
 
 /** The sanitised string, parsed the way the browser will parse it. */
 const parse = (unsafe: string): HTMLElement => {
@@ -45,7 +53,7 @@ const tagsOf = (root: HTMLElement): string[] =>
 
 describe('the attacks a .md file can carry', () => {
   it('defuses the image error handler, the classic one', () => {
-    const host = parse('<p>hello<img src=x onerror="alert(1)"></p>');
+    const host = parse(ATTACKS.imageErrorHandler);
 
     expect(tagsOf(host)).not.toContain('img');
     expect(attributesOf(host).join(' ')).not.toMatch(/onerror/i);
@@ -55,14 +63,14 @@ describe('the attacks a .md file can carry', () => {
   });
 
   it('removes a script element and its contents', () => {
-    const host = parse('<p>a</p><script>alert(1)</script>');
+    const host = parse(ATTACKS.scriptElement);
 
     expect(tagsOf(host)).not.toContain('script');
     expect(host.textContent).not.toContain('alert');
   });
 
   it('removes a javascript: href but keeps the link text', () => {
-    const host = parse('<a href="javascript:alert(1)">click</a>');
+    const host = parse(ATTACKS.javascriptHref);
 
     const hrefs = [...host.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
     for (const href of hrefs) expect(href.toLowerCase()).not.toContain('javascript:');
@@ -70,13 +78,13 @@ describe('the attacks a .md file can carry', () => {
   });
 
   it('removes an iframe', () => {
-    const host = parse('<iframe src="https://evil.test/"></iframe>');
+    const host = parse(ATTACKS.iframe);
 
     expect(tagsOf(host)).not.toContain('iframe');
   });
 
   it('removes object and embed, which are iframes wearing a hat', () => {
-    const host = parse('<object data="x"></object><embed src="y">');
+    const host = parse(ATTACKS.objectAndEmbed);
 
     expect(tagsOf(host)).not.toContain('object');
     expect(tagsOf(host)).not.toContain('embed');
@@ -88,20 +96,20 @@ describe('the attacks a .md file can carry', () => {
     // renders through `<img>` and never inline, precisely so that none of it is
     // ever parsed as part of this document. Naming the html profile is what
     // turns the default off.
-    const host = parse('<svg><script>alert(1)</script></svg><svg onload="alert(1)"></svg>');
+    const host = parse(ATTACKS.inlineSvg);
 
     expect(tagsOf(host)).not.toContain('svg');
     expect(attributesOf(host).join(' ')).not.toMatch(/onload/i);
   });
 
   it('removes MathML, for the same reason', () => {
-    const host = parse('<math><mtext><table><mglyph><style><!--</style></mglyph></table></mtext></math>');
+    const host = parse(ATTACKS.mathMl);
 
     expect(tagsOf(host)).not.toContain('math');
   });
 
   it('removes an event handler from a tag it otherwise keeps', () => {
-    const host = parse('<p onmouseover="alert(1)" onclick="alert(2)">text</p>');
+    const host = parse(ATTACKS.eventHandlers);
 
     expect(tagsOf(host)).toContain('p');
     const attributes = attributesOf(host).join(' ');
@@ -112,13 +120,7 @@ describe('the attacks a .md file can carry', () => {
   it('leaves no on* attribute anywhere, whatever the shape of the input', () => {
     // A sweep rather than a list, so that a handler nobody thought of is caught
     // by the same test.
-    const host = parse(
-      '<p onfocus=alert(1) autofocus>a</p>' +
-        '<details ontoggle=alert(1) open>b</details>' +
-        '<div onpointerover=alert(1)>c</div>' +
-        '<video onerror=alert(1)><source onerror=alert(1)></video>' +
-        '<body onload=alert(1)>',
-    );
+    const host = parse(ATTACKS.everyShapeOfHandler);
 
     for (const attribute of attributesOf(host)) {
       expect(attribute).not.toMatch(/^on/i);
@@ -129,15 +131,13 @@ describe('the attacks a .md file can carry', () => {
     // The card body is light DOM, not a shadow root, so a `<style>` from a pull
     // request is a stylesheet for this entire application — enough to hide the
     // real controls and draw convincing fake ones over them.
-    const host = parse('<style>body { display: none }</style><p>a</p>');
+    const host = parse(ATTACKS.styleElement);
 
     expect(tagsOf(host)).not.toContain('style');
   });
 
   it('removes a style attribute, which is the same attack one element at a time', () => {
-    const host = parse(
-      '<p style="position:fixed;inset:0;z-index:99999;background:#fff">Sign in again</p>',
-    );
+    const host = parse(ATTACKS.styleAttribute);
 
     expect(attributesOf(host).join(' ')).not.toMatch(/style=/i);
   });
@@ -146,10 +146,7 @@ describe('the attacks a .md file can carry', () => {
     // A rendered README has no use for an input box, and this page is the one
     // place a fake "your session expired, paste your token" prompt would look
     // completely at home.
-    const host = parse(
-      '<form action="https://evil.test/"><input name="token"><textarea></textarea>' +
-        '<select><option>x</option></select><button>Sign in</button></form>',
-    );
+    const host = parse(ATTACKS.formControls);
 
     const tags = tagsOf(host);
     for (const tag of ['form', 'input', 'textarea', 'select', 'button']) {
@@ -164,9 +161,7 @@ describe('the attacks a .md file can carry', () => {
     // textarea. Content that can mint either of those can make the page act on
     // an element a pull request supplied. Exactly one name is exempt, for
     // reasons set out at the bottom of this file and in the config itself.
-    const host = parse(
-      '<p data-thread="1" data-reply-for="99" data-file-card="src/app.ts">x</p>',
-    );
+    const host = parse(ATTACKS.dataAttributes);
 
     const attributes = attributesOf(host).join(' ');
     expect(attributes).not.toContain('data-thread');
@@ -175,20 +170,13 @@ describe('the attacks a .md file can carry', () => {
   });
 
   it('removes id, which this page also queries by', () => {
-    const host = parse('<p id="view-tab-files">x</p><p id="root">y</p>');
+    const host = parse(ATTACKS.ids);
 
     expect(attributesOf(host).join(' ')).not.toMatch(/(^| )id=/);
   });
 
   it('survives the shapes that are meant to slip past a naive filter', () => {
-    const host = parse(
-      '<img src=x onerror=alert(1)//>' +
-        '<scr<script>ipt>alert(1)</scr</script>ipt>' +
-        '<a href="jav&#x09;ascript:alert(1)">x</a>' +
-        '<a href="JaVaScRiPt:alert(1)">y</a>' +
-        '<a href="&#106;avascript:alert(1)">z</a>' +
-        '<p><![CDATA[<script>alert(1)</script>]]></p>',
-    );
+    const host = parse(ATTACKS.naiveFilterBypasses);
 
     expect(tagsOf(host)).not.toContain('script');
     expect(tagsOf(host)).not.toContain('img');
@@ -205,10 +193,7 @@ describe('what has to survive for the mode to be worth having', () => {
     // copy of the marks. A configuration that stripped `<ins>`, `<del>` or
     // their classes would leave a rendered preview — the mode this feature
     // exists instead of — and nothing would fail except the point.
-    const host = parse(
-      '<p>a <del class="diffdel">gone</del> <ins class="diffins">new</ins> ' +
-        '<del class="diffmod">old</del><ins class="diffmod">fresh</ins></p>',
-    );
+    const host = parse(DOCUMENTS.diffMarks);
 
     expect(host.querySelectorAll('del')).toHaveLength(2);
     expect(host.querySelectorAll('ins')).toHaveLength(2);
@@ -217,13 +202,7 @@ describe('what has to survive for the mode to be worth having', () => {
   });
 
   it('keeps the structures a README is made of', () => {
-    const host = parse(
-      '<h1>T</h1><h2>S</h2><p>text with <strong>bold</strong> and <em>italic</em> and ' +
-        '<code>code</code></p><ul><li>a</li></ul><ol><li>b</li></ol>' +
-        '<blockquote><p>q</p></blockquote><pre><code>x</code></pre>' +
-        '<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>d</td></tr></tbody></table>' +
-        '<hr><a href="https://example.test/page">link</a>',
-    );
+    const host = parse(DOCUMENTS.readmeStructures);
 
     const tags = tagsOf(host);
     for (const tag of [
@@ -236,13 +215,13 @@ describe('what has to survive for the mode to be worth having', () => {
   });
 
   it('keeps the class the image placeholder is styled by', () => {
-    const host = parse('<span class="md-image">Image: logo (a.png)</span>');
+    const host = parse(DOCUMENTS.imagePlaceholder);
 
     expect(host.querySelector('.md-image')?.textContent).toContain('a.png');
   });
 
   it('keeps a relative link, which is broken but harmless and honest', () => {
-    const host = parse('<a href="./CONTRIBUTING.md">contributing</a>');
+    const host = parse(DOCUMENTS.relativeLink);
 
     expect(host.querySelector('a')?.getAttribute('href')).toBe('./CONTRIBUTING.md');
   });

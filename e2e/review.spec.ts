@@ -2553,13 +2553,15 @@ test('a Mermaid diagram in a .md file is drawn rather than left as its source', 
   expect(first).toContain('Render');
 
   // The unchanged diagram folds its source away, because the source is then
-  // the picture written out longhand.
-  await expect(card.locator('pre.md-diagram-drawn')).toHaveCount(1);
+  // the picture written out longhand. The fold class is on the element holding
+  // the source rather than on the `<pre>`: a diagram's block is a picture and a
+  // source, and only the source half folds.
+  await expect(card.locator('.md-diagram-drawn pre')).toHaveCount(1);
 
   // The changed one keeps it, because a drawn diagram carries no marks and
   // the old version is not on screen — the marked-up source below it is the
   // only place the change is visible.
-  const kept = card.locator('pre.md-diagram-source');
+  const kept = card.locator('.md-diagram-source pre');
   await expect(kept).toHaveCount(1);
   await expect(kept.locator('ins')).toContainText('Accept');
   await expect(kept.locator('del')).toContainText('Reject');

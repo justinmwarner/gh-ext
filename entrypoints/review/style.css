@@ -3315,11 +3315,22 @@ button.scope-showing:hover {
   overflow-wrap: anywhere;
 }
 
-.markdown-rendered > :first-child {
+/* The first and last blocks sit flush against the padding above and below
+   them. Each block is wrapped in an element of its own now — see
+   `ui/markdownBlocks.ts` — and a margin collapses straight out through a
+   wrapper carrying no border and no padding, so the rule has to reach the
+   element the margin is actually on rather than the box around it. That is one
+   level down for an ordinary block, and one further for a diagram, whose block
+   holds the picture and the source it was drawn from. */
+.markdown-rendered > :first-child,
+.markdown-rendered > :first-child > :first-child,
+.markdown-rendered > :first-child > :first-child > pre:first-child {
   margin-top: 0;
 }
 
-.markdown-rendered > :last-child {
+.markdown-rendered > :last-child,
+.markdown-rendered > :last-child > :last-child,
+.markdown-rendered > :last-child > :last-child > pre:last-child {
   margin-bottom: 0;
 }
 

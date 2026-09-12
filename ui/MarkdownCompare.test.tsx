@@ -9,6 +9,11 @@
  *
  * Everything above the mock is real: the Markdown is rendered and diffed by
  * the actual pipeline and sanitised by the actual sanitiser.
+ *
+ * The diagram assertions reach for `.md-diagram-drawn` and `.md-diagram-source`
+ * without naming a tag, because the fold class sits on the element holding the
+ * source rather than on the `<pre>` itself. A diagram's block is now a picture
+ * and a source, and only the source half folds away.
  */
 
 import { render, screen, waitFor } from '@testing-library/react';
@@ -84,7 +89,7 @@ describe('a Mermaid diagram in a rendered Markdown diff', () => {
     mount(doc(DIAGRAM), doc(DIAGRAM, 'Some other prose.'));
 
     await untilDrawn();
-    expect(document.querySelector('pre.md-diagram-drawn')).not.toBeNull();
+    expect(document.querySelector('.md-diagram-drawn pre')).not.toBeNull();
     expect(document.querySelector('figcaption')).toBeNull();
   });
 
@@ -96,8 +101,8 @@ describe('a Mermaid diagram in a rendered Markdown diff', () => {
     mount(doc(DIAGRAM), doc(after));
 
     await untilDrawn();
-    expect(document.querySelector('pre.md-diagram-source')).not.toBeNull();
-    expect(document.querySelector('pre.md-diagram-drawn')).toBeNull();
+    expect(document.querySelector('.md-diagram-source pre')).not.toBeNull();
+    expect(document.querySelector('.md-diagram-drawn')).toBeNull();
     expect(document.querySelector('figcaption')?.textContent).toMatch(/source below/i);
     // And the new version is what was drawn.
     expect(renderMock).toHaveBeenCalledWith(after);
@@ -127,7 +132,7 @@ describe('a Mermaid diagram in a rendered Markdown diff', () => {
     expect(document.querySelector('.md-diagram-error')?.textContent).toMatch(
       /parse error/i,
     );
-    expect(document.querySelector('pre.md-diagram-drawn')).toBeNull();
+    expect(document.querySelector('.md-diagram-drawn')).toBeNull();
     expect(document.querySelector('pre')?.textContent).toContain('graph TD');
   });
 
@@ -146,6 +151,48 @@ describe('a Mermaid diagram in a rendered Markdown diff', () => {
 
     await waitFor(() => expect(screen.getByText(/title/i)).toBeDefined());
     expect(renderMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('the document as React sees it', () => {
+  it('gives every block an element of its own', async () => {
+    // The structural claim the rest of the feature is built on: a thread card
+    // or a composer beside one paragraph is an ordinary sibling, not a portal
+    // into a placeholder somebody inserted by hand.
+    mount('# Title\n\nOne.\n\nTwo.\n', '# Title\n\nOne.\n\nThree.\n');
+
+    await waitFor(() => expect(screen.getByText(/title/i)).toBeDefined());
+    const blocks = document.querySelectorAll('.markdown-rendered > .markdown-block');
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]?.firstElementChild?.tagName).toBe('H1');
+  });
+
+  it('keeps a drawn diagram when the document around it is rebuilt', async () => {
+    // The failure this rewrite exists to remove, in the only shape a test can
+    // reach. The diagrams used to be written into the subtree belonging to a
+    // single `dangerouslySetInnerHTML`, and React replaces every child of that
+    // element whenever it re-applies the prop — so the figures were wiped
+    // moments after they were placed, with no error and no effect re-run, and
+    // nothing but a real browser ever showed it.
+    //
+    // A second comparison of the same two documents differs only in its nonce,
+    // which is enough to make every block's markup a new string and have React
+    // re-apply all of it. The figure is React's own element now, so it is not
+    // inside anything being replaced: it is still on screen in the same tick.
+    const { rerender } = mount(doc(DIAGRAM), doc(DIAGRAM, 'Some other prose.'));
+    await untilDrawn();
+
+    rerender(
+      <MarkdownCompare
+        comparison={compareMarkdown(
+          doc(DIAGRAM),
+          doc(DIAGRAM, 'Some other prose.'),
+          'c4e2d1ef-0000-4000-8000-000000000000',
+        )}
+      />,
+    );
+
+    expect(diagram()).not.toBeNull();
   });
 });
 
