@@ -49,7 +49,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { MarkdownComparison } from '@/lib/compare/markdown';
 import type { DiffSide, ReviewThread } from '@/lib/github/types';
-import { isCommentable } from '@/lib/review/commentable';
+import { firstCommentableLine, isCommentable } from '@/lib/review/commentable';
 import type { PostingComment } from '@/lib/review/posting';
 import { type CommentAnchor, fileAnchor } from '@/lib/review/selection';
 import { Composer } from './Composer';
@@ -124,11 +124,18 @@ function blockQuote(text: string): string {
  * post against the file. A control that is present on three paragraphs and
  * missing on the fourth reads as a defect, and the reviewer has no way to know
  * which of the two reasons they are looking at.
+ *
+ * The line is whichever of the block's own lines is in the diff, which
+ * `firstCommentableLine` decides and this does not second-guess. A block spans
+ * a range, and the line it starts on is frequently not the line the pull
+ * request changed — a wrapped paragraph reworded in its middle is the ordinary
+ * case — so posting against the start would either land outside the diff or
+ * fall back to the file for a block that had a perfectly good line in it.
  */
 function anchorFor(block: MarkdownBlock, commentable: ReadonlySet<string>): CommentAnchor {
-  return block.anchor !== null && isCommentable(commentable, block.anchor)
-    ? { subject: 'line', line: block.anchor.line, side: block.anchor.side }
-    : fileAnchor();
+  if (block.anchor === null) return fileAnchor();
+  const line = firstCommentableLine(commentable, block.anchor);
+  return line === null ? fileAnchor() : { subject: 'line', line, side: block.anchor.side };
 }
 
 /** What belongs under one block, beside the words it was written about. */
@@ -229,14 +236,36 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
     const posting = session.posting.filter((entry) => entry.path === path);
     if (threads.length === 0 && posting.length === 0) return placed;
 
-    const keyFor = (line: number, side: DiffSide): string | null =>
-      blocks.find(
-        (block) =>
-          block.anchor !== null &&
-          block.anchor.line === line &&
-          block.anchor.side === side &&
-          isCommentable(commentable, block.anchor),
-      )?.key ?? null;
+    /**
+     * Which block a comment on this line belongs under, if any.
+     *
+     * **The two conditions are about different lines, and that is the whole of
+     * it.** Placement is containment — a block holds a comment when the comment
+     * sits anywhere in the range the block occupies, which is how a thread on
+     * the second line of a wrapped paragraph finds the paragraph it was written
+     * about. The gate against drawing a second copy is about the *comment's*
+     * own line, because that is the line `layoutThreads` judged when it decided
+     * between an annotation and the per-file list. Gating on the block's range
+     * instead would draw a thread here that the list is already showing, and
+     * asking about the block's first line — which is what these two used to be,
+     * indistinguishably, when a block was one line — loses the thread from both
+     * places at once.
+     *
+     * Ranges are disjoint and in document order, so the first block containing
+     * the line is the only one, and no comment can be placed twice.
+     */
+    const keyFor = (line: number, side: DiffSide): string | null => {
+      if (!isCommentable(commentable, side, line)) return null;
+      return (
+        blocks.find(
+          (block) =>
+            block.anchor !== null &&
+            block.anchor.side === side &&
+            block.anchor.line <= line &&
+            line <= block.anchor.endLine,
+        )?.key ?? null
+      );
+    };
 
     const at = (key: string): BlockComments => {
       const held = placed.get(key);

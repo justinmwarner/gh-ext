@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { commentableLines, isCommentable } from './commentable';
+import { commentableLines, firstCommentableLine, isCommentable } from './commentable';
 
 const PATCH = [
   '@@ -1,3 +1,4 @@',
@@ -179,8 +179,8 @@ describe('the shapes that break a naive walk', () => {
 describe('isCommentable', () => {
   it('reads the set for one side and line', () => {
     const lines = commentableLines(PATCH);
-    expect(isCommentable(lines, { side: 'RIGHT', line: 2 })).toBe(true);
-    expect(isCommentable(lines, { side: 'RIGHT', line: 400 })).toBe(false);
+    expect(isCommentable(lines, 'RIGHT', 2)).toBe(true);
+    expect(isCommentable(lines, 'RIGHT', 400)).toBe(false);
   });
 
   it('keeps the two sides apart', () => {
@@ -188,15 +188,56 @@ describe('isCommentable', () => {
     // Line 2 is the removed line on the left and an added line on the right.
     // Both are commentable, and a set that had merged the sides would say the
     // same thing while being wrong about every deletion in the file.
-    expect(isCommentable(lines, { side: 'LEFT', line: 2 })).toBe(true);
-    expect(isCommentable(lines, { side: 'LEFT', line: 4 })).toBe(false);
-    expect(isCommentable(lines, { side: 'RIGHT', line: 4 })).toBe(true);
+    expect(isCommentable(lines, 'LEFT', 2)).toBe(true);
+    expect(isCommentable(lines, 'LEFT', 4)).toBe(false);
+    expect(isCommentable(lines, 'RIGHT', 4)).toBe(true);
   });
 
-  it('says no to every block of a document with no patch', () => {
+  it('says no to every line of a document with no patch', () => {
     // The common case on a rendered README: the file is drawn whole and most of
     // it is outside every hunk, which is the reason this predicate exists.
     const lines = commentableLines('');
-    expect(isCommentable(lines, { side: 'RIGHT', line: 1 })).toBe(false);
+    expect(isCommentable(lines, 'RIGHT', 1)).toBe(false);
+  });
+});
+
+/**
+ * The question a rendered block actually asks, which is not the one above.
+ *
+ * A block occupies a range, and `PATCH` covers lines 1 to 4 on the right. The
+ * cases that matter are the ones where the range's first line is not the answer
+ * — because that is the whole of the defect this function exists to close.
+ */
+describe('firstCommentableLine', () => {
+  const lines = commentableLines(PATCH);
+
+  it('takes a block whose first line is in the diff at its first line', () => {
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 2, endLine: 4 })).toBe(2);
+  });
+
+  it('takes a block by a later line when its first is outside every hunk', () => {
+    // The defect in one assertion. Judged by line 5 this block is outside the
+    // diff and every comment on it silently becomes a file-level comment; line
+    // 4 is inside, so it has a line and this is the one to post against.
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 5, endLine: 8 })).toBeNull();
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 4, endLine: 8 })).toBe(4);
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 3, endLine: 8 })).toBe(3);
+  });
+
+  it('refuses a block no line of which is in a hunk', () => {
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 40, endLine: 48 })).toBeNull();
+  });
+
+  it('is the plain lookup for a block occupying one line', () => {
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 2, endLine: 2 })).toBe(2);
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 9, endLine: 9 })).toBeNull();
+  });
+
+  it('keeps the two sides apart across a whole range', () => {
+    // The left has three lines and the right four, so a range reaching line 4
+    // answers on one side and not the other. A range that had merged the sides
+    // would post a comment about the new file against the old one.
+    expect(firstCommentableLine(lines, { side: 'LEFT', line: 4, endLine: 6 })).toBeNull();
+    expect(firstCommentableLine(lines, { side: 'RIGHT', line: 4, endLine: 6 })).toBe(4);
   });
 });

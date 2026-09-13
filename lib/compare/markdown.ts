@@ -258,11 +258,12 @@ interface AnchorEnv {
 }
 
 /**
- * Every block says which line of which document it came from.
+ * Every block says which lines of which document it came from.
  *
  * This is what makes the mode commentable at all. See `./markdownAnchors.ts`
- * for the format and for why the value carries a nonce; the decision worth
- * recording here is the shape of the mechanism rather than the format.
+ * for the format and for why the value carries a nonce and a whole range rather
+ * than a line; the decision worth recording here is the shape of the mechanism
+ * rather than the format.
  *
  * **Pushed once, not per render.** The side and the nonce travel in the `env`
  * that `render(src, env)` threads through to the core rules, so one rule serves
@@ -308,12 +309,33 @@ renderer.core.ruler.push('source-anchors', (state): void => {
   for (const token of state.tokens) {
     if (token.map === null || token.nesting === -1 || token.type === 'inline') continue;
 
-    const line = token.map[0];
-    if (line === undefined) continue;
+    const from = token.map[0];
+    const to = token.map[1];
+    if (from === undefined || to === undefined) continue;
 
-    // `map` counts from zero; GitHub counts from one, and so does every line
-    // number elsewhere in this project.
-    token.attrSet(ANCHOR_ATTRIBUTE, anchorValue(stamp.nonce, stamp.side, line + 1));
+    // **The two ends do not convert the same way, and the asymmetry is real.**
+    // `map` counts from zero, where GitHub counts from one and so does every
+    // line number elsewhere in this project; and `map`'s end is *exclusive*,
+    // where an anchor's is inclusive. So the start gains one, and the end gains
+    // one for the numbering and loses one for the bound, which cancel. A
+    // paragraph on source lines 3, 4 and 5 has `map === [2, 5]` and must anchor
+    // as `R3-5`; the same paragraph on line 3 alone has `map === [2, 3]` and
+    // anchors as `R3-3`. Adding one to both would claim every block reached a
+    // line belonging to whatever follows it, and a comment on the last line of
+    // a paragraph would be offered by two blocks at once.
+    //
+    // `Math.max` covers a token whose end is not past its start, which every
+    // block rule `markdown-it` ships makes unreachable because each consumes at
+    // least the line it began on. A token that managed it would be stamped with
+    // an inverted range, `parseAnchor` would refuse it on arrival, and the block
+    // would lose its comment button for a reason nothing on screen could
+    // explain. Clamping anchors it to its own first line instead, which is what
+    // it had before this range existed.
+    const line = from + 1;
+    token.attrSet(
+      ANCHOR_ATTRIBUTE,
+      anchorValue(stamp.nonce, stamp.side, line, Math.max(to, line)),
+    );
   }
 });
 
@@ -342,7 +364,7 @@ const tooLarge = (nonce: string, reason: string): MarkdownComparison => ({
   nonce,
 });
 
-/** One side, rendered with every block told which line of it it came from. */
+/** One side, rendered with every block told which lines of it it came from. */
 const renderSide = (source: string, nonce: string, side: DiffSide): string =>
   renderer.render(source, { mdAnchor: { nonce, side } } satisfies AnchorEnv);
 

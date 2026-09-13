@@ -40,8 +40,11 @@
  * a hunk is exactly the forgery that matters and validation would pass it.
  *
  * Line numbers here are one-based, as GitHub counts them and as the rest of
- * `lib/review/` does. `markdown-it`'s `map` is zero-based, and the one place
- * that conversion happens is the caller in `./markdown.ts`.
+ * `lib/review/` does, and a range is inclusive at both ends. `markdown-it`'s
+ * `map` agrees with neither: it is zero-based and its end is exclusive, so the
+ * two ends of a range do not convert the same way. The one place either
+ * conversion happens is the caller in `./markdown.ts`, which sets out the
+ * arithmetic; nothing downstream of here should be doing it a second time.
  */
 
 import type { DiffSide } from '../github/types';
@@ -54,10 +57,25 @@ import type { DiffSide } from '../github/types';
  */
 export const ANCHOR_ATTRIBUTE = 'data-md-anchor';
 
-/** One block's origin: which of the two documents, and which line of it. */
+/**
+ * One block's origin: which of the two documents, and which lines of it.
+ *
+ * A range rather than a line, and inclusive at both ends. A block carrying only
+ * its first line was the shape this started as and it lost comments twice over:
+ * a thread written on the second line of a wrapped paragraph matched no block
+ * and was drawn nowhere at all, and a paragraph whose *later* lines were the
+ * ones the pull request touched was judged to be outside the diff entirely. A
+ * README is wrapped prose, so both are the ordinary case rather than the edge.
+ *
+ * `endLine` is never less than `line`; a block that occupies one line has the
+ * two equal. That invariant is enforced where anchors are read as well as where
+ * they are written, because the reader's input is a string a pull request may
+ * have chosen.
+ */
 export interface BlockAnchor {
   side: DiffSide;
   line: number;
+  endLine: number;
 }
 
 /**
@@ -80,8 +98,22 @@ const MARKER: Record<DiffSide, string> = { LEFT: 'L', RIGHT: 'R' };
  */
 const LINE_NUMBER = /^[1-9][0-9]*$/;
 
-export function anchorValue(nonce: string, side: DiffSide, line: number): string {
-  return `${nonce}-${MARKER[side]}${line}`;
+/**
+ * The value a block carries: a nonce, a side, and the range it occupies.
+ *
+ * `<nonce>-R3-5` for a block on lines three to five, and `<nonce>-R3-3` for one
+ * on line three alone. The second is not abbreviated to `<nonce>-R3`, tempting
+ * though it is on a document where most blocks are one line: a format with two
+ * shapes needs two parsers, and the reader of this one runs over markup a
+ * stranger wrote.
+ */
+export function anchorValue(
+  nonce: string,
+  side: DiffSide,
+  line: number,
+  endLine: number,
+): string {
+  return `${nonce}-${MARKER[side]}${line}-${endLine}`;
 }
 
 /**
@@ -99,6 +131,11 @@ export function anchorValue(nonce: string, side: DiffSide, line: number): string
  * and dropped: no caller can do anything different with the second, and a
  * shape that invites a caller to handle it is a shape that invites a caller to
  * handle it wrongly.
+ *
+ * The range is split at the first hyphen after the marker rather than the last,
+ * which is unambiguous because `LINE_NUMBER` admits no hyphen on either side of
+ * it — so `R1-2-3` is refused rather than read as either of the two ranges it
+ * could be mistaken for.
  */
 export function parseAnchor(value: string, nonce: string): BlockAnchor | null {
   // An empty nonce would make the prefix a bare `-`, which is to say it would
@@ -112,10 +149,25 @@ export function parseAnchor(value: string, nonce: string): BlockAnchor | null {
 
   const rest = value.slice(prefix.length);
   const marker = rest.slice(0, 1);
-  const digits = rest.slice(1);
+  const range = rest.slice(1);
 
   if (marker !== MARKER.LEFT && marker !== MARKER.RIGHT) return null;
-  if (!LINE_NUMBER.test(digits)) return null;
 
-  return { side: marker === MARKER.LEFT ? 'LEFT' : 'RIGHT', line: Number(digits) };
+  const divider = range.indexOf('-');
+  if (divider === -1) return null;
+
+  const start = range.slice(0, divider);
+  const end = range.slice(divider + 1);
+  if (!LINE_NUMBER.test(start) || !LINE_NUMBER.test(end)) return null;
+
+  const line = Number(start);
+  const endLine = Number(end);
+  // A range that ends before it begins is a range containing nothing. Nothing
+  // in this codebase mints one, so a value carrying one came from the document
+  // — and refusing rather than repairing is the rule the rest of this file
+  // follows. It also lets every caller take `line <= endLine` as given, which
+  // is what keeps a containment test from silently matching nothing.
+  if (endLine < line) return null;
+
+  return { side: marker === MARKER.LEFT ? 'LEFT' : 'RIGHT', line, endLine };
 }

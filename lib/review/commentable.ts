@@ -65,10 +65,9 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * choose a set before it can ask, which is a branch at every call site instead
  * of a template string here.
  *
- * Not exported. `isCommentable` is the whole of the read side, and its argument
- * is structurally what `CommentAnchor` already is, so nothing outside this file
- * has ever needed to spell a key — and a key spelled elsewhere is a second
- * definition of the format.
+ * Not exported. `isCommentable` and `firstCommentableLine` are the whole of the
+ * read side between them, so nothing outside this file has ever needed to spell
+ * a key — and a key spelled elsewhere is a second definition of the format.
  */
 const lineKey = (side: DiffSide, line: number): string => `${side}:${line}`;
 
@@ -145,12 +144,63 @@ export function commentableLines(patch: string): ReadonlySet<string> {
 }
 
 /**
- * May a comment be attached where this block came from?
+ * May a comment name this exact line, on this side?
  *
  * Takes the set rather than the patch, so that a document with several hundred
  * blocks walks the patch once instead of once per block. The set is the thing
  * worth memoizing and this function is the thing worth calling in a loop.
+ *
+ * **This is not the question to ask about a block.** A block occupies a range
+ * of source lines, and one asked about the line it happens to begin on answers
+ * for a paragraph's first line while the pull request changed its third. Ask
+ * `firstCommentableLine` instead, which is the reason this one takes a bare
+ * side and line rather than a `BlockAnchor`: the type no longer offers a block
+ * to whoever reaches for the convenient answer. What it is still exactly right
+ * for is a line somebody already named — a thread's, a draft's — where there
+ * is no range to consider.
  */
-export function isCommentable(lines: ReadonlySet<string>, anchor: BlockAnchor): boolean {
-  return lines.has(lineKey(anchor.side, anchor.line));
+export function isCommentable(
+  lines: ReadonlySet<string>,
+  side: DiffSide,
+  line: number,
+): boolean {
+  return lines.has(lineKey(side, line));
+}
+
+/**
+ * Which line a comment on this block would actually be posted against, or null.
+ *
+ * A block is commentable if **any** line it occupies is inside a hunk, and it
+ * anchors to the first such line. Both halves matter and they were both wrong
+ * when a block knew only where it began: a paragraph whose second line was the
+ * one the pull request touched was judged to be outside the diff altogether, so
+ * every comment on it quietly became a file-level comment — correct on the wire,
+ * and the reviewer loses the anchor they were looking at with nothing saying
+ * why.
+ *
+ * **The line and the verdict are one answer, not two.** The obvious shape was a
+ * predicate beside the existing one, leaving the caller to work out which line
+ * it had just been told yes about; that is two walks of the same range and two
+ * chances to disagree, and the way it disagrees is by posting a comment against
+ * a line the reviewer did not choose. Returning the line makes `!== null` the
+ * predicate and leaves nothing to derive.
+ *
+ * The *first* line in the range rather than, say, the one nearest the middle of
+ * the block: it is the one a reviewer reading the patch beside this page would
+ * pick, it is stable as the block's later lines change, and where the whole
+ * block is inside a hunk — the common case — it is the block's own start, which
+ * is what this anchored to before the range existed.
+ *
+ * Linear in the block's length and called once per block per render. A
+ * paragraph is a handful of lines; the alternative, indexing the set by range,
+ * costs more to build than the whole document costs to scan.
+ */
+export function firstCommentableLine(
+  lines: ReadonlySet<string>,
+  anchor: BlockAnchor,
+): number | null {
+  for (let line = anchor.line; line <= anchor.endLine; line += 1) {
+    if (isCommentable(lines, anchor.side, line)) return line;
+  }
+  return null;
 }

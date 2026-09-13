@@ -30,13 +30,13 @@ describe('markdownBlocks', () => {
     expect(blocks.map((b) => b.html)).toEqual(['<h1>A</h1>', '<p>B</p>']);
   });
 
-  it('reads each block anchor', () => {
-    const blocks = markdownBlocks(`<p ${ANCHOR_ATTRIBUTE}="${NONCE}-R7">x</p>`, NONCE);
-    expect(blocks[0]?.anchor).toEqual({ side: 'RIGHT', line: 7 });
+  it('reads each block anchor, range and all', () => {
+    const blocks = markdownBlocks(`<p ${ANCHOR_ATTRIBUTE}="${NONCE}-R7-9">x</p>`, NONCE);
+    expect(blocks[0]?.anchor).toEqual({ side: 'RIGHT', line: 7, endLine: 9 });
   });
 
   it('leaves a forged anchor unanchored', () => {
-    const blocks = markdownBlocks(`<p ${ANCHOR_ATTRIBUTE}="forged-R7">x</p>`, NONCE);
+    const blocks = markdownBlocks(`<p ${ANCHOR_ATTRIBUTE}="forged-R7-9">x</p>`, NONCE);
     expect(blocks[0]?.anchor).toBeNull();
   });
 
@@ -138,14 +138,16 @@ describe('a document that has been through the real pipeline', () => {
     return markdownBlocks(comparison.unsafeHtml ?? '', comparison.nonce);
   };
 
-  it('anchors each block to the line it was rendered from', () => {
+  it('anchors each block to the lines it was rendered from', () => {
     expect(blocksOf().map((block) => block.anchor)).toEqual([
-      { side: 'RIGHT', line: 1 },
-      { side: 'RIGHT', line: 3 },
+      { side: 'RIGHT', line: 1, endLine: 1 },
+      { side: 'RIGHT', line: 3, endLine: 3 },
       // The fence, whose anchor `markdown-it` prints on the `<code>` rather
       // than on the `<pre>` — which is why the anchor is looked for on the
-      // block and inside it.
-      { side: 'RIGHT', line: 5 },
+      // block and inside it. It runs from its opening ticks to its closing
+      // ones, so a comment left on either line of the diagram inside reaches
+      // this block rather than none.
+      { side: 'RIGHT', line: 5, endLine: 8 },
     ]);
   });
 

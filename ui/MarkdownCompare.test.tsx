@@ -302,6 +302,29 @@ const BEFORE = '# Title\n\nAlpha.\n\nTwo.\n\n<table><tr><td>raw</td></tr></table
 const AFTER = '# Title\n\nAlpha.\n\nThree.\n\n<table><tr><td>raw</td></tr></table>\n';
 const PATCH = '@@ -5 +5 @@\n-Two.\n+Three.\n';
 
+/**
+ * A paragraph occupying three source lines, reworded on the middle one.
+ *
+ * The shape a block's range exists for, and the ordinary shape of prose: a
+ * README is wrapped, so most paragraphs in one span several lines and a
+ * one-line change lands on whichever of them the sentence happened to reach.
+ * The paragraph runs from line 3 to line 5, and the only line of it the patch
+ * touches is 4 — neither where the block starts nor anywhere a reader looking
+ * at the rendered page could have guessed.
+ */
+const WRAPPED_BEFORE = '# Title\n\nA paragraph that\nwraps across three\nsource lines.\n';
+const WRAPPED_AFTER = '# Title\n\nA paragraph that\nwraps over three\nsource lines.\n';
+/**
+ * No trailing newline, and it is load-bearing rather than untidy. `split` would
+ * leave an empty last element, which `commentableLines` reads as git's blank
+ * context line — putting line 5 in the set and quietly making the case below,
+ * where line 5 is meant to be outside every hunk, assert nothing.
+ */
+const WRAPPED_PATCH = '@@ -4 +4 @@\n-wraps across three\n+wraps over three';
+
+/** The wrapped paragraph's own button, whatever the words inside it were marked. */
+const WRAPPED = /^Comment on “A paragraph that/;
+
 const affordances = (): HTMLElement[] =>
   screen.getAllByRole('button', { name: /^Comment on/ });
 
@@ -403,6 +426,24 @@ describe('the composer a block opens', () => {
     expect(sent['line']).toBeUndefined();
   });
 
+  it('anchors to the line of the block that is in the diff, not to its first', async () => {
+    // The block begins on line 3 and the patch touches only line 4, so judging
+    // it by where it starts makes every comment on it a file-level one: correct
+    // on the wire, and the reviewer silently loses the anchor they were looking
+    // at. A block is commentable if any line it occupies is, and it posts
+    // against that line.
+    mount(WRAPPED_BEFORE, WRAPPED_AFTER, { patch: WRAPPED_PATCH });
+
+    await userEvent.click(affordance(WRAPPED));
+
+    expect(screen.getByText('Line 4')).toBeDefined();
+    expect(await postComment('this reads better')).toMatchObject({
+      path: PATH,
+      line: 4,
+      side: 'RIGHT',
+    });
+  });
+
   it('treats a block with no anchor exactly as one outside the diff', async () => {
     mount(BEFORE, AFTER, { patch: PATCH });
 
@@ -446,6 +487,39 @@ describe('threads on a rendered document', () => {
     expect(block?.querySelector('[data-thread]')).not.toBeNull();
     // And nowhere else in the document.
     expect(document.querySelectorAll('[data-thread]')).toHaveLength(1);
+  });
+
+  it('renders under the block whose range they fall inside, not only its first line', () => {
+    // The worst outcome this feature has available, and the one a block that
+    // knew only where it started produced. The thread is on line 4, inside a
+    // hunk, so `layoutThreads` makes it an annotation rather than listing it in
+    // `UnanchoredThreads` — and the card that would have drawn the annotation
+    // is handed a diff with no rows. Matched against the block's first line
+    // alone it belongs to no block either, so it is drawn nowhere at all and
+    // the reviewer is never told the comment exists.
+    mount(WRAPPED_BEFORE, WRAPPED_AFTER, {
+      patch: WRAPPED_PATCH,
+      threads: [reviewThread({ path: PATH, line: 4 })],
+    });
+
+    const block = affordance(WRAPPED).closest('.markdown-block');
+    expect(block?.querySelector('[data-thread]')).not.toBeNull();
+    // Once, and under one block. A range that overlapped its neighbour would
+    // draw the same comment twice, which is the other way to get this wrong.
+    expect(document.querySelectorAll('[data-thread]')).toHaveLength(1);
+  });
+
+  it('leaves a thread outside every hunk to the per-file list, range or not', () => {
+    // Line 5 is inside the block's range and outside the patch, so
+    // `layoutThreads` lists it — and drawing it here as well would be the same
+    // comment read twice. The range widens which threads a block can hold; it
+    // does not widen which threads are anchored at all.
+    mount(WRAPPED_BEFORE, WRAPPED_AFTER, {
+      patch: WRAPPED_PATCH,
+      threads: [reviewThread({ path: PATH, line: 5 })],
+    });
+
+    expect(document.querySelectorAll('[data-thread]')).toHaveLength(0);
   });
 
   it('leaves an outdated one in the per-file list it is already in', () => {

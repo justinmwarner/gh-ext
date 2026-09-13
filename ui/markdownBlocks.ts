@@ -143,11 +143,17 @@ export function markdownBlocks(unsafeHtml: string, nonce: string): MarkdownBlock
    * The position alone would be unique and stable, and would also hand a block
    * arriving at the same index from a different line whatever the previous
    * occupant had drawn. Naming the anchor as well means React treats that as a
-   * new element instead. Only the parsed anchor goes in, never the raw
-   * attribute, which is a string a pull request may have written.
+   * new element instead. The whole range goes in, because the origin is the
+   * range: a paragraph that grew a line is a block a comment now reaches
+   * differently, and that is the kind of move this key exists to notice. Only
+   * the parsed anchor goes in, never the raw attribute, which is a string a
+   * pull request may have written.
    */
-  const keyFor = (anchor: BlockAnchor | null): string =>
-    `${blocks.length}:${anchor === null ? '-' : `${anchor.side}${anchor.line}`}`;
+  const keyFor = (anchor: BlockAnchor | null): string => {
+    const origin =
+      anchor === null ? '-' : `${anchor.side}${anchor.line}-${anchor.endLine}`;
+    return `${blocks.length}:${origin}`;
+  };
 
   // A snapshot, because `childNodes` is live and the loop borrows nodes from it.
   for (const node of [...parsed.body.childNodes]) {

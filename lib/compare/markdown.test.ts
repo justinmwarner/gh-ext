@@ -302,15 +302,32 @@ describe('task lists', () => {
 });
 
 describe('anchors', () => {
-  it('stamps every block on the new side with its source line', () => {
+  it('stamps every block on the new side with the lines it came from', () => {
     const result = compareMarkdown('# One\n\npara\n', '# One\n\npara two\n', NONCE);
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1"`);
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R3"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1-1"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R3-3"`);
+  });
+
+  // The off-by-one, pinned against a block that really does occupy three lines.
+  // `map` is zero-based and its end is exclusive, so the two ends of the range
+  // do not convert the same way, and a `+ 1` on both would claim this paragraph
+  // reached line 6 — a line belonging to whatever comes next.
+  it('stamps the whole range a block occupies, not only where it starts', () => {
+    const result = compareMarkdown(
+      '# Title\n\nA paragraph that\nwraps across three\nsource lines.\n',
+      '# Title\n\nA paragraph that\nwraps over three\nsource lines.\n',
+      NONCE,
+    );
+
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R3-5"`);
+    // And a block on one line is that same shape rather than a second one. A
+    // format with two spellings is a format with two parsers.
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1-1"`);
   });
 
   it('stamps list items, not only the list', () => {
     const result = compareMarkdown('- a\n- b\n', '- a\n- c\n', NONCE);
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R2"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R2-2"`);
   });
 
   it('stamps the old side with L', () => {
@@ -322,7 +339,7 @@ describe('anchors', () => {
     // one element on screen is one block of the new document, and it should
     // name the line a comment on it would reach.
     const result = compareMarkdown('gone\n\nkept\n', 'kept\n', NONCE);
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-L1"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-L1-1"`);
   });
 
   it('carries its nonce back to the caller', () => {
@@ -344,9 +361,9 @@ describe('anchors', () => {
       NONCE,
     );
 
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1"`);
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R3"`);
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R7"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1-1"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R3-5"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R7-9"`);
   });
 
   // The two core rules both walk `state.tokens`. Neither inserts or removes a
@@ -358,7 +375,7 @@ describe('anchors', () => {
 
     expect(result.unsafeHtml).toContain('md-task');
     expect(result.unsafeHtml).not.toContain('<input');
-    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1"`);
+    expect(result.unsafeHtml).toContain(`${ANCHOR_ATTRIBUTE}="${NONCE}-R1-1"`);
   });
 
   it('stamps nothing a document could have written itself', () => {
