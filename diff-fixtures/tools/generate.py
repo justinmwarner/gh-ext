@@ -200,6 +200,13 @@ w('docs/guide.md', '''# Reviewing a pull request
 2. Press the review button in the corner.
 3. Read the diff.
 
+```mermaid
+graph TD
+  A[Open the pull request] --> B[Press the review button]
+  B --> C[Read the diff]
+{flow}
+```
+
 > Markdown is drawn as plain text in the review page today.
 
 ```ts
@@ -207,11 +214,29 @@ const review = await open(pullRequest);
 review.submit({{ event: {event} }});
 ```
 
+## Where a comment goes
+
+```mermaid
+flowchart LR
+  Line[A line in the diff] --> Thread[A review thread]
+  Thread --> Remote[(GitHub)]
+```
+
 See [the design](../README.md) for the reasoning.
 '''.format(
     intro=('This guide covers the review page, the commit picker and the rich diff modes.'
            if A else 'This guide covers the review page.'),
     event="'APPROVE'" if A else "'COMMENT'",
+    # The first diagram moves and the second does not, which is the whole point
+    # of having two: a drawn diagram carries no <ins> or <del> and the old one
+    # is not on screen beside it, so the rendered mode keeps the marked-up
+    # source under a diagram that changed and hides it under one that did not.
+    # A file with only the second kind never exercises that decision. The
+    # change is deliberately one relabelled node and two new edges rather than
+    # a new diagram, so the marks land *inside* the fence.
+    flow=('  C --> D[Leave a comment]\n'
+          '  D --> E[Submit the review]\n'
+          '  C --> E' if A else '  C --> D[Submit the review]'),
 ))
 
 w('docs/table.md', '''# Supported types

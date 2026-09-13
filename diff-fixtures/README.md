@@ -66,8 +66,17 @@ outputs can be shown as cells and outputs.
 
 ## Docs — `docs/`
 
-`guide.md` and `table.md`, for the rendered-versus-source question. Markdown is
-drawn as plain text everywhere in the review page today.
+`guide.md` and `table.md`, for the rendered-versus-source question.
+
+`guide.md` carries two Mermaid diagrams, and having two is the point. A drawn
+diagram carries no `<ins>` or `<del>`, and the version it replaced is not on
+screen beside it — so the rendered mode keeps the marked-up source under a
+diagram whose source moved and hides it under one that did not, and a file with
+only the second kind never exercises that decision. The flow under "Getting
+started" moves: one node is relabelled and two edges are added, deliberately
+rather than replacing the diagram outright, so the marks land *inside* the fence
+where the reconstruction has to strip them. The one under "Where a comment goes"
+is identical on both sides.
 
 ## Generated — `generated/`
 
