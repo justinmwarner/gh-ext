@@ -6,11 +6,23 @@
  * chosen from without a mouse, and that the default — the only entry whose
  * contrast is a promise rather than a preference — is still one keystroke away
  * after the list has been narrowed to something else.
+ *
+ * The folds add a second obligation to that list, and it is the one worth
+ * writing tests for. A group that is shut is a third of the themes that are not
+ * in the document: the cursor must not walk into them, the reader must be told
+ * they are there, and every one of them must still be reachable by a reviewer
+ * who never touches a pointer.
  */
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  ACCESSIBLE_THEMES,
+  DARK_THEMES,
+  type DiffTheme,
+  LIGHT_THEMES,
+} from '@/lib/compare/themes';
 import { ThemePicker } from './ThemePicker';
 
 const DEFAULT_LABEL = 'Match the page (default)';
@@ -25,20 +37,38 @@ function mount(value = '') {
 const names = (): string[] =>
   screen.getAllByRole('option').map((option) => option.textContent ?? '');
 
+const groupLabels = (): (string | null)[] =>
+  screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'));
+
+/** The drawn heading, which is the only part of a group a pointer can reach. */
+const header = (name: string): HTMLElement => {
+  const head = screen
+    .getByText(name, { selector: '.theme-group-label' })
+    .closest('.theme-group-name');
+  if (!(head instanceof HTMLElement)) throw new Error(`no heading drawn for ${name}`);
+  return head;
+};
+
+const labels = (themes: readonly DiffTheme[]): string[] =>
+  themes.map((theme) => theme.label);
+
+const firstLabel = (themes: readonly DiffTheme[]): string => themes[0]?.label ?? '';
+
 describe('ThemePicker', () => {
   it('pins the default above the groups it does not belong to', () => {
     mount();
 
     expect(names()[0]).toBe(DEFAULT_LABEL);
-    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
-      'Made for colour vision deficiency',
-      'Light',
-      'Dark',
-    ]);
+    expect(
+      [...document.querySelectorAll('.theme-group-label')].map((node) => node.textContent),
+    ).toEqual(['Made for colour vision deficiency', 'Light', 'Dark']);
   });
 
-  it('offers every theme when nothing has been typed', () => {
-    mount();
+  it('offers every theme once the groups holding them are open', async () => {
+    const { user } = mount();
+
+    await user.click(header('Light'));
+    await user.click(header('Dark'));
 
     // The three groups plus the default. The count is the contract with
     // `lib/compare/themes.ts` rather than a number worth memorising.
@@ -60,9 +90,7 @@ describe('ThemePicker', () => {
 
     await user.type(input, 'dracula');
 
-    expect(
-      screen.getAllByRole('group').map((group) => group.getAttribute('aria-label')),
-    ).toEqual(['Dark']);
+    expect(groupLabels()).toEqual(['Dark']);
   });
 
   it('says so when the filter matches nothing', async () => {
@@ -95,7 +123,9 @@ describe('ThemePicker', () => {
     await user.keyboard('{Escape}');
 
     expect((input as HTMLInputElement).value).toBe('');
-    expect(names().length).toBeGreaterThan(70);
+    // Back to the folds it was left with, not to seventy-six rows. The filter
+    // is picked up and put down; it is not a decision about the arrangement.
+    expect(names()).toEqual([DEFAULT_LABEL, ...labels(ACCESSIBLE_THEMES)]);
   });
 
   it('points at the chosen theme when it opens, not at the top of the list', () => {
@@ -151,6 +181,7 @@ describe('ThemePicker', () => {
   it('chooses a row that is clicked', async () => {
     const { user, onChange } = mount();
 
+    await user.click(header('Dark'));
     await user.click(screen.getByRole('option', { name: 'Nord' }));
 
     expect(onChange).toHaveBeenCalledWith('nord');
@@ -167,7 +198,7 @@ describe('ThemePicker', () => {
   });
 
   it('draws a swatch beside every name, hidden from the reader', () => {
-    mount();
+    mount('nord');
 
     const nord = screen.getByRole('option', { name: 'Nord' });
     const swatch = nord.querySelector('.theme-swatch');
@@ -187,5 +218,160 @@ describe('ThemePicker', () => {
       .querySelector('.theme-swatch');
 
     expect(swatch?.getAttribute('style')).toBeNull();
+  });
+});
+
+describe('ThemePicker folds', () => {
+  it('opens the group holding the chosen theme and leaves the other two shut', () => {
+    mount('nord');
+
+    expect(names()).toEqual([DEFAULT_LABEL, ...labels(DARK_THEMES)]);
+    expect(groupLabels()).toEqual([
+      `Made for colour vision deficiency, ${ACCESSIBLE_THEMES.length} themes, collapsed`,
+      `Light, ${LIGHT_THEMES.length} themes, collapsed`,
+      'Dark',
+    ]);
+  });
+
+  it('opens the accessible group when the value belongs to no group at all', () => {
+    mount();
+
+    // The default is pinned above all three and is in none of them, so the
+    // rule is the first group rather than nothing: three headings with no rows
+    // under any of them reads as a list that failed rather than one that is
+    // folded, and these four are the ones PRODUCT.md says to meet first.
+    expect(names()).toEqual([DEFAULT_LABEL, ...labels(ACCESSIBLE_THEMES)]);
+    expect(groupLabels()[0]).toBe('Made for colour vision deficiency');
+  });
+
+  it('tells the reader a shut group is shut and how much it holds', () => {
+    mount();
+
+    expect(groupLabels()[2]).toBe(`Dark, ${DARK_THEMES.length} themes, collapsed`);
+    // And says the same thing to everybody else, in the heading it draws.
+    expect(header('Dark').textContent).toContain(String(DARK_THEMES.length));
+  });
+
+  it('folds and unfolds a group when its heading is clicked', async () => {
+    const { user } = mount();
+
+    await user.click(header('Dark'));
+    expect(names()).toContain('Dracula');
+
+    await user.click(header('Dark'));
+    expect(names()).not.toContain('Dracula');
+  });
+
+  it('keeps the keyboard in the search box when a heading is clicked', async () => {
+    const { input, user } = mount();
+
+    input.focus();
+    await user.click(header('Dark'));
+
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('folds the group the cursor is in on ArrowLeft, and opens it on ArrowRight', async () => {
+    const { input, user } = mount('nord');
+
+    // Two groups open, so shutting one leaves a row at its seam for the cursor
+    // to rest on — which is the position the two keys are inverses about.
+    await user.click(header('Light'));
+    input.focus();
+    expect(names()).toContain('Solarized light');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(names()).not.toContain('Solarized light');
+    expect(names()).toContain('Nord');
+
+    await user.keyboard('{ArrowRight}');
+    expect(names()).toContain('Solarized light');
+    // On the first row the group brought back with it, which is the seam the
+    // cursor was left sitting on.
+    expect(input.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('option', { name: firstLabel(LIGHT_THEMES) }).id,
+    );
+  });
+
+  it('opens a group again after the last one shut took the seam with it', async () => {
+    const { input, user } = mount('nord');
+
+    input.focus();
+    await user.keyboard('{ArrowLeft}');
+
+    // Every group shut, so the cursor is back on the pinned default above all
+    // three and there is no seam left to point at. ArrowRight is still a key
+    // that opens something rather than one that has gone dead.
+    expect(names()).toEqual([DEFAULT_LABEL]);
+
+    await user.keyboard('{ArrowRight}');
+    expect(names()).toEqual([DEFAULT_LABEL, ...labels(ACCESSIBLE_THEMES)]);
+  });
+
+  it('reaches a shut group the cursor is not in', async () => {
+    const { input, user } = mount();
+
+    input.focus();
+    // Two of the three arrive shut and the cursor is on the pinned default, so
+    // without a search downward there is no key that reaches either of them.
+    await user.keyboard('{ArrowRight}');
+    expect(names()).toContain('Solarized light');
+
+    await user.keyboard('{ArrowRight}');
+    expect(names()).toContain('Dracula');
+    expect(names().length).toBeGreaterThan(70);
+  });
+
+  it('never leaves the cursor on a row a fold has taken off the page', async () => {
+    const { input, user } = mount('nord');
+
+    input.focus();
+    await user.keyboard('{ArrowLeft}');
+
+    const at = input.getAttribute('aria-activedescendant');
+    expect(at).not.toBeNull();
+    expect(document.getElementById(at ?? '')).not.toBeNull();
+  });
+
+  it('forces every group open while filtering and restores the folds after', async () => {
+    const { input, user } = mount();
+
+    await user.type(input, 'e');
+    expect(groupLabels().every((label) => label?.includes('collapsed') !== true)).toBe(
+      true,
+    );
+
+    await user.keyboard('{Escape}');
+    expect(groupLabels()[2]).toContain('collapsed');
+  });
+
+  it('leaves ArrowLeft and ArrowRight to the caret while there is text to move through', async () => {
+    const { input, user } = mount();
+
+    await user.type(input, 'dark');
+    await user.keyboard('{ArrowLeft}{ArrowLeft}{ArrowRight}');
+    await user.keyboard('{Escape}');
+
+    // Unchanged, because those keystrokes went to the caret in a box the
+    // reviewer was typing in rather than to folds the filter had opened anyway.
+    expect(names()).toEqual([DEFAULT_LABEL, ...labels(ACCESSIBLE_THEMES)]);
+  });
+
+  it('does not re-seed when the reviewer changes theme mid-session', async () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<ThemePicker value="" onChange={onChange} />);
+    const user = userEvent.setup();
+
+    await user.click(header('Dark'));
+    expect(names()).toContain('Dracula');
+
+    rerender(<ThemePicker value="dracula" onChange={onChange} />);
+
+    // Both groups the reviewer had open are still open, and the one they left
+    // shut is still shut. Re-seeding here would shut the group they were
+    // reading to tell them something they had just said.
+    expect(names()).toContain('Dracula');
+    expect(names()).toContain(firstLabel(ACCESSIBLE_THEMES));
+    expect(groupLabels()[1]).toContain('collapsed');
   });
 });

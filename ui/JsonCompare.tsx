@@ -22,6 +22,7 @@ import { MultiFileDiff } from '@pierre/diffs/react';
 import type { FileDiffOptions } from '@pierre/diffs';
 import type { JsonComparison } from '@/lib/compare/structured';
 import { SYNTAX_NAMES, type StructuredSyntax, formatStructured } from '@/lib/compare/syntax';
+import type { DiffStyle } from './DiffColumn';
 
 /**
  * How much re-indented JSON to hand the diff renderer, per side.
@@ -32,14 +33,6 @@ import { SYNTAX_NAMES, type StructuredSyntax, formatStructured } from '@/lib/com
  * paths are both cheaper and more useful.
  */
 const MAX_FORMATTED_CHARS = 250_000;
-
-const DIFF_OPTIONS: FileDiffOptions<undefined, undefined> = {
-  diffStyle: 'unified',
-  // Deliberately absent, exactly as in `DiffColumn`: `preferredHighlighter` is
-  // never set, because the default `shiki-js` touches no WebAssembly and the
-  // wasm path dies silently in a build with no CSP key.
-  disableLineNumbers: false,
-};
 
 export function JsonKeyPaths({ comparison }: { comparison: JsonComparison }) {
   if (comparison.status !== 'ok') {
@@ -92,17 +85,52 @@ export function JsonFormatted({
   syntax,
   before,
   after,
+  syntaxTheme,
+  diffStyle,
 }: {
   path: string;
   syntax: StructuredSyntax;
   before: string | null;
   after: string | null;
+  /** The reviewer's syntax theme, empty when they have not chosen one. */
+  syntaxTheme: string;
+  /** Unified or side by side, so this diff matches the column around it. */
+  diffStyle: DiffStyle;
 }) {
   const formatted = useMemo(() => {
     const one = before === null ? null : formatStructured(before, syntax);
     const two = after === null ? null : formatStructured(after, syntax);
     return { before: one, after: two };
   }, [before, after, syntax]);
+
+  /**
+   * The reviewer's two diff settings, in the shape Pierre takes them.
+   *
+   * This was a module constant naming `unified` and no theme at all, which
+   * meant a re-indented document was drawn in Pierre's own light pair inside a
+   * card the reviewer had turned dark — the same fault `NotebookCompare` had,
+   * for the same reason, and it is worth knowing that any component on this
+   * page that mounts a `<diffs-container>` of its own has to be told.
+   *
+   * Memoized because it now depends on props and so cannot be hoisted, and
+   * because the identity is handed to a layout effect that runs on every
+   * render of the card. There is one diff here rather than a notebook's forty,
+   * so this is habit rather than a measurement.
+   */
+  const options = useMemo<FileDiffOptions<undefined, undefined>>(
+    () => ({
+      diffStyle,
+      // Deliberately absent, exactly as in `DiffColumn`: `preferredHighlighter`
+      // is never set, because the default `shiki-js` touches no WebAssembly and
+      // the wasm path dies silently in a build with no CSP key.
+      disableLineNumbers: false,
+      // Omitted rather than passed empty, also as in `DiffColumn`: Pierre falls
+      // back to its own light/dark pair only when the key is absent, so an
+      // empty string would be a theme named '' and nothing would highlight.
+      ...(syntaxTheme === '' ? {} : { theme: syntaxTheme }),
+    }),
+    [diffStyle, syntaxTheme],
+  );
 
   if (
     (before !== null && formatted.before === null) ||
@@ -149,21 +177,21 @@ export function JsonFormatted({
           // given and the null tells it there is nothing on the other.
           oldFile={oldFile as { name: string; contents: string }}
           newFile={null}
-          options={DIFF_OPTIONS}
+          options={options}
           disableWorkerPool
         />
       ) : oldFile === null ? (
         <MultiFileDiff
           oldFile={null}
           newFile={newFile}
-          options={DIFF_OPTIONS}
+          options={options}
           disableWorkerPool
         />
       ) : (
         <MultiFileDiff
           oldFile={oldFile}
           newFile={newFile}
-          options={DIFF_OPTIONS}
+          options={options}
           disableWorkerPool
         />
       )}

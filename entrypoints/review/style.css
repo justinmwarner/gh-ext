@@ -1205,21 +1205,59 @@ button.scope-showing:hover {
   font-size: 11px;
 }
 
-/* Amber rather than a fourth blue: the row already carries green and red
+/* A bubble and a number, which this was a 7px dot for as long as the mark has
+   existed. The dot could say that something had been said on a file and could
+   not say how much, and at that size in a 26px row of checkbox, chevron, name,
+   status letter and two counts it was the first thing a reviewer stopped
+   seeing. A file carrying one stray nit and a file carrying eleven are not the
+   same file to come back to.
+
+   Amber rather than a fourth blue: the row already carries green and red
    counts and a coloured status letter, and this is the page's one "needs your
-   attention" hue. Hollow once everything on the file is resolved — shape as
-   well as colour, so the two states differ without relying on hue. */
+   attention" hue. It has to be legible as text now rather than as a 7px
+   graphic, which is a higher bar — 3:1 for a graphical object against 4.5:1
+   for an 11px number — and it clears it, at 4.87:1 light and 7.50:1 dark
+   against the page. Those are the same two figures the rail's Conversations
+   badge is measured at, from the other side.
+
+   `flex: 0 0 auto` for the reason `.tree-status` and `.tree-counts` have it.
+   `.tree-name` is the one thing on this row licensed to shrink, and the rail
+   drags down to 180px: a deep path there has to lose its middle to the
+   ellipsis rather than squeeze the count to nothing or push the bubble off the
+   end of the row. `line-height: 1` because the glyph is 12px inside an 11px
+   line and the row's 26px is already spoken for. */
 .tree-comment {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--attention-fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--attention-fg);
 }
 
+.tree-comment svg {
+  fill: currentColor;
+}
+
+/* Settled: the same contour drawn as an outline, and muted rather than amber.
+   Shape as well as colour, so the two states differ without relying on hue —
+   and the same shape either way, so a file whose last thread gets resolved
+   changes how loudly it is speaking rather than what it is.
+
+   `--fg-muted`, not the `--fg-subtle` the hollow dot was drawn in. Subtle
+   measures 3.04:1, which is the bar for a graphical object and is not the bar
+   for text, and half of this mark is text now. */
 .tree-comment[data-tone='resolved'] {
-  background: none;
-  box-shadow: inset 0 0 0 1.5px var(--fg-subtle);
+  color: var(--fg-muted);
+}
+
+.tree-comment[data-tone='resolved'] svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
 }
 
 .rail-resizer {

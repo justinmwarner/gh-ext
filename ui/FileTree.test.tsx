@@ -287,6 +287,75 @@ describe('what a row says about its file', () => {
     expect(mark?.getAttribute('data-tone')).toBe('resolved');
   });
 
+  it('counts what is unresolved while anything is', () => {
+    // The mark was a 7px dot and could only say that something had been said
+    // here. The number is what makes it worth a second look: one stray nit and
+    // eleven open threads are not the same file to come back to.
+    const { container } = mount({
+      comments: new Map([['src/app.ts', { total: 5, unresolved: 2 }]]),
+    });
+
+    const mark = container.querySelector('[data-path="src/app.ts"] .tree-comment');
+    expect(mark?.textContent).toBe('2');
+    expect(mark?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('counts everything said once nothing is left open', () => {
+    // The other half of what the two tones already distinguish. On a file with
+    // nothing outstanding the useful figure is how much was said, because that
+    // is what decides whether it is worth reading again.
+    const { container } = mount({
+      comments: new Map([['src/app.ts', { total: 3, unresolved: 0 }]]),
+    });
+
+    expect(
+      container.querySelector('[data-path="src/app.ts"] .tree-comment')?.textContent,
+    ).toBe('3');
+  });
+
+  it('says what the number counts rather than leaving a digit in the row’s name', () => {
+    // A bare number in the accessible name arrives as "app.ts 2 +12 −3": three
+    // numbers running together, two about lines and one about conversations,
+    // with nothing to say which is which. The mark is one image with a
+    // sentence for a label, so the row is named in words.
+    mount({ comments: new Map([['src/app.ts', { total: 5, unresolved: 2 }]]) });
+
+    expect(screen.getByRole('treeitem', { name: /2 unresolved comments/ })).toBeDefined();
+  });
+
+  it('says as much for a file whose conversations are all settled', () => {
+    mount({ comments: new Map([['src/app.ts', { total: 3, unresolved: 0 }]]) });
+
+    expect(screen.getByRole('treeitem', { name: /3 comments, all resolved/ })).toBeDefined();
+  });
+
+  it('does not pluralise one comment, and says it the same way twice', () => {
+    // The tooltip and the label are one sentence built in one place. They are
+    // one fact about the file, and a reviewer with a pointer and a reviewer
+    // with a screen reader should not be told it in two different ways.
+    const { container } = mount({
+      comments: new Map([['src/app.ts', { total: 1, unresolved: 1 }]]),
+    });
+
+    const mark = container.querySelector('[data-path="src/app.ts"] .tree-comment');
+    expect(mark?.getAttribute('title')).toBe('1 unresolved comment');
+    expect(mark?.getAttribute('aria-label')).toBe('1 unresolved comment');
+  });
+
+  it('stops the number growing into the file name, and still says the real one', () => {
+    // Width is the constraint in a rail that drags down to 180px, and the name
+    // is what pays for anything else on the row. What is drawn is capped; what
+    // is said is not, so the figure is still reachable.
+    const { container } = mount({
+      comments: new Map([['src/app.ts', { total: 140, unresolved: 120 }]]),
+    });
+
+    expect(
+      container.querySelector('[data-path="src/app.ts"] .tree-comment')?.textContent,
+    ).toBe('99+');
+    expect(screen.getByRole('treeitem', { name: /120 unresolved comments/ })).toBeDefined();
+  });
+
   it('shows the added and removed counts', () => {
     mount();
 
