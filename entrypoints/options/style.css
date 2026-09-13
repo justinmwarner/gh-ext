@@ -335,13 +335,119 @@ select {
   background: var(--canvas-default);
 }
 
+/* ------------------------------------------------------- the example diff */
+
+/* A real diff, drawn from the settings around it.
+
+   A `figure` because that is what it is — a picture with a caption, set beside
+   the prose rather than inside it — and the caption is what a reader gets,
+   since `ui/DiffPreview.tsx` hides the drawing itself and argues there why.
+
+   It sits directly under its heading rather than at the foot of the section:
+   the controls below are what the reviewer came to press, and a picture
+   underneath them would be a thing they had to scroll away from what they were
+   pressing to see. */
+.diff-preview {
+  margin: 0 0 16px;
+}
+
+.diff-preview-caption {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* Bounded, for the reason `.embedded-diff` is bounded on the review page: this
+   owns its own shadow root and its own scrollport and nothing virtualizes it,
+   so without a ceiling a sample that grew would push the controls it is
+   demonstrating off the bottom of the page. The sample is nine lines and this
+   is not close to being reached — it is here so that editing the sample cannot
+   quietly cost the section its controls. */
+.diff-preview-body {
+  max-height: 15rem;
+  overflow: auto;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  /* The one surface on this page whose background is not the page's own. A
+     chosen theme paints its own canvas inside the shadow root, and a seam
+     against `--canvas-default` is how the reviewer can see that it has. */
+  background: var(--canvas-default);
+}
+
 /* Not an eyebrow: sentence case at label size in muted, which is how every
-   other grouping label in this product is set. */
+   other grouping label in this product is set.
+
+   It is also the fold, for anyone holding a pointer. Not a button and not
+   focusable — a focusable child inside a listbox takes the keyboard away from
+   the combobox that drives it — so it is a plain row that happens to be
+   clickable, hidden from the reader, and answered for the keyboard by
+   ArrowLeft and ArrowRight in `ui/ThemePicker.tsx`. */
 .theme-group-name {
-  margin: 10px 6px 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 10px 2px 4px;
+  padding: 2px 4px;
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-muted);
+  border-radius: 6px;
+  transition: background-color 0.12s ease;
+}
+
+/* Only while there is a fold to move. A filtered list is every group open, and
+   a header that recorded a fold nobody could see would be a control acting off
+   screen — so under a filter this reads as the plain heading it used to be. */
+.theme-group-name[data-foldable="true"] {
+  cursor: pointer;
+}
+
+.theme-group-name[data-foldable="true"]:hover {
+  background: var(--neutral-hover);
+}
+
+/* The count, and the only thing on a shut group that says how much is behind
+   it. Weight separates it from the name; it keeps the heading's own colour,
+   because nothing quieter than Foreground Muted is permitted for text. */
+.theme-group-count {
+  font-weight: 400;
+}
+
+/* Drawn rather than typed, which is the argument `.tree-chevron` makes on the
+   review page and the same one applies here: the triangle glyphs render at
+   wildly different sizes across the fonts this page falls back through, and at
+   the size a 12px heading wants them they come out as specks. */
+.theme-chevron {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 10px;
+  height: 14px;
+}
+
+.theme-chevron::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border: 3px solid transparent;
+  border-left: 5px solid currentColor;
+  margin-left: 2px;
+  transition: rotate 0.12s ease;
+}
+
+.theme-group[data-open="true"] .theme-chevron::before {
+  rotate: 90deg;
+}
+
+/* The one thing on this page that actually moves. Everything else transitions
+   colour, which reduced motion has no quarrel with — but `rotate` is
+   transform-family, and a reviewer who has asked for less motion should get the
+   chevron's end state without the sweep to it. The review page carries the same
+   block over `.tree-chevron` for the same reason. */
+@media (prefers-reduced-motion: reduce) {
+  .theme-chevron::before {
+    transition: none;
+  }
 }
 
 .theme-option {

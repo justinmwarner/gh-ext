@@ -21,6 +21,7 @@
  * plain text, which is worse to read and finite.
  */
 
+import { useMemo } from 'react';
 import { MultiFileDiff } from '@pierre/diffs/react';
 import type { FileDiffOptions } from '@pierre/diffs';
 import type {
@@ -28,6 +29,7 @@ import type {
   NotebookComparison,
   NotebookOutput,
 } from '@/lib/compare/notebook';
+import type { DiffStyle } from './DiffColumn';
 
 /**
  * How many cells get a rendered diff before the rest fall back to text.
@@ -38,7 +40,8 @@ import type {
  */
 const MAX_RENDERED_DIFFS = 40;
 
-const DIFF_OPTIONS: FileDiffOptions<undefined, undefined> = { diffStyle: 'unified' };
+/** What a cell's diff is drawn with. One object for every cell in the card. */
+type CellDiffOptions = FileDiffOptions<undefined, undefined>;
 
 function OutputView({ output }: { output: NotebookOutput }) {
   if (output.kind === 'image' && output.image !== null) {
@@ -76,16 +79,21 @@ function CellSource({
   cell,
   name,
   rendered,
+  options,
 }: {
   cell: ComparedNotebookCell;
   name: string;
   /** Whether this cell is inside the budget for a real diff. */
   rendered: boolean;
+  options: CellDiffOptions;
 }) {
   const before = cell.before?.source ?? null;
   const after = cell.after?.source ?? null;
 
   if (!rendered) {
+    // Past the budget, and coloured by the page rather than by the highlighter:
+    // `.cell-source` names no colour of its own, so it inherits the card's,
+    // which is a token and therefore already the reviewer's theme.
     return <pre className="cell-source">{after ?? before ?? ''}</pre>;
   }
 
@@ -96,7 +104,7 @@ function CellSource({
         <MultiFileDiff
           oldFile={null}
           newFile={{ name, contents: after ?? '' }}
-          options={DIFF_OPTIONS}
+          options={options}
           disableWorkerPool
         />
       </div>
@@ -108,7 +116,7 @@ function CellSource({
         <MultiFileDiff
           oldFile={{ name, contents: before }}
           newFile={null}
-          options={DIFF_OPTIONS}
+          options={options}
           disableWorkerPool
         />
       </div>
@@ -120,7 +128,7 @@ function CellSource({
       <MultiFileDiff
         oldFile={{ name, contents: before }}
         newFile={{ name, contents: after }}
-        options={DIFF_OPTIONS}
+        options={options}
         disableWorkerPool
       />
     </div>
@@ -133,13 +141,54 @@ export interface NotebookCompareProps {
   languageExtension: string;
   /** Draw each cell's output underneath it. */
   showOutputs: boolean;
+  /**
+   * The reviewer's syntax theme, empty when they have not chosen one.
+   *
+   * Threaded the whole way down from `DiffColumn` rather than defaulted here,
+   * because a cell diff is a `<diffs-container>` of its own and themes itself:
+   * left to Pierre it draws its own light pair inside a card the reviewer has
+   * turned dark.
+   */
+  syntaxTheme: string;
+  /** Unified or side by side, so a cell matches the column around it. */
+  diffStyle: DiffStyle;
 }
 
 export function NotebookCompare({
   comparison,
   languageExtension,
   showOutputs,
+  syntaxTheme,
+  diffStyle,
 }: NotebookCompareProps) {
+  /**
+   * The two settings, in the shape Pierre takes them.
+   *
+   * This was `{ diffStyle: 'unified' }` at module scope, which was two faults
+   * in one line. A cell was drawn unified while the column around it was
+   * split; and, the one somebody reported, it was drawn in Pierre's own light
+   * pair while the card around it wore a chosen theme, so a notebook under
+   * Catppuccin Frappé had black source on a dark cell.
+   *
+   * Built once per notebook rather than once per cell. One object reaches up
+   * to `MAX_RENDERED_DIFFS` mounted diffs, each of which hands it to a layout
+   * effect that runs on every render of the card; Pierre compares options
+   * shallowly and by value, so this is thrift rather than a correctness
+   * argument, but forty objects a render to say one thing is not thrift worth
+   * skipping. The hook sits above the early return because it has to.
+   */
+  const options = useMemo<CellDiffOptions>(
+    () => ({
+      diffStyle,
+      // Omitted rather than passed empty, and `DiffColumn` is where the reason
+      // is written out: Pierre falls back to its own light/dark pair only when
+      // the key is absent, so an empty string would be a theme named '' and
+      // nothing in the cell would highlight at all.
+      ...(syntaxTheme === '' ? {} : { theme: syntaxTheme }),
+    }),
+    [diffStyle, syntaxTheme],
+  );
+
   if (comparison.status !== 'ok') {
     return (
       <p className="file-note" role="note">
@@ -198,7 +247,12 @@ export function NotebookCompare({
                 <span className="cell-type">{source?.type ?? 'cell'}</span>
                 <span className="cell-state">{cell.kind}</span>
               </p>
-              <CellSource cell={cell} name={name} rendered={rendered} />
+              <CellSource
+                cell={cell}
+                name={name}
+                rendered={rendered}
+                options={options}
+              />
               {showOutputs && <Outputs cell={cell} />}
             </li>
           );

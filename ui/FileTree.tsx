@@ -93,6 +93,81 @@ const languageColour = (name: string): string | undefined =>
   LANGUAGE[name.slice(name.lastIndexOf('.') + 1).toLowerCase()];
 
 /**
+ * Past this the number stops being a count and starts being a width.
+ *
+ * The rail's Conversations badge draws the line in the same place. A row has
+ * less room than that badge rather than more: the rail is resizable down to
+ * 180px, and everything the row gains is taken off the file name, which is the
+ * only part of it licensed to truncate. What is said out loud keeps the real
+ * figure — the cap is about what fits, not about what is true.
+ */
+const COMMENT_LIMIT = 99;
+
+/** What a row draws for its conversations, and what it says they are. */
+interface CommentMark {
+  tone: 'open' | 'resolved';
+  /** The figure as drawn, which above `COMMENT_LIMIT` is not the figure. */
+  count: string;
+  said: string;
+}
+
+/**
+ * How much conversation a file is carrying, in a number and in a sentence.
+ *
+ * The number is the unresolved count while there is one and the total once
+ * there is not, which is the split the two tones have drawn since the mark was
+ * a dot. A reviewer working down this rail is asking what is left of the
+ * review, so what is left is the number; on a file where nothing is left, the
+ * useful figure is how much was said, because that is what decides whether the
+ * file is worth reading again before approving.
+ *
+ * The sentence is built here rather than at the two attributes that carry it,
+ * so the tooltip and the accessible name cannot drift apart. They are one
+ * fact, and a reviewer with a pointer and a reviewer with a screen reader
+ * should be told it in the same words.
+ */
+function commentMark(talk: FileComments): CommentMark {
+  const open = talk.unresolved > 0;
+  const count = open ? talk.unresolved : talk.total;
+  const noun = count === 1 ? 'comment' : 'comments';
+
+  return {
+    tone: open ? 'open' : 'resolved',
+    count: count > COMMENT_LIMIT ? `${COMMENT_LIMIT}+` : `${count}`,
+    said: open ? `${count} unresolved ${noun}` : `${count} ${noun}, all resolved`,
+  };
+}
+
+/**
+ * A speech bubble, at the size a 26px row has for it.
+ *
+ * The same silhouette the rail draws for the Conversations view, because a
+ * product that means one thing by a speech bubble should draw one bubble — but
+ * deliberately not the same path. That one is a compound path, an outer
+ * contour with a counter cut out of it, which is how it reads as an outline at
+ * 20px; at 12px the counter is a hairline hole inside a hairline ring and the
+ * whole glyph silts up on any display not drawing at 2x. This is that path's
+ * outer contour on its own, with the hole left out.
+ *
+ * The hole is what the two tones now spend instead: filled while something is
+ * outstanding, and the same contour drawn as an outline once everything on the
+ * file is settled. `fill` and `stroke` are set from the stylesheet rather than
+ * declared here, because which of the two a tone uses is a colour decision and
+ * colours live in one place.
+ *
+ * Drawn rather than imported, for the reason the rail's five glyphs are: this
+ * project takes no new dependencies, and a sixth 16px glyph is not a reason to
+ * break that.
+ */
+function CommentGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+      <path d="M2.75 2h10.5A1.75 1.75 0 0 1 15 3.75v7A1.75 1.75 0 0 1 13.25 12.5H8.06l-3.03 2.28A.75.75 0 0 1 3.83 14.2V12.5h-1.08A1.75 1.75 0 0 1 1 10.75v-7A1.75 1.75 0 0 1 2.75 2Z" />
+    </svg>
+  );
+}
+
+/**
  * A copy is a new file at its destination, so it reads as `added`; `CHANGED` is
  * GitHub's word for a content change it declined to classify further, which is
  * `modified`. Everything else maps across by name.
@@ -384,6 +459,7 @@ export function FileTree({
         const file = byPath.get(row.path);
         const state = checkState(row, states);
         const talk = row.kind === 'file' ? comments?.get(row.path) : undefined;
+        const mark = talk === undefined || talk.total === 0 ? null : commentMark(talk);
 
         return (
           <div
@@ -440,17 +516,33 @@ export function FileTree({
 
             <span className="tree-name">{row.name}</span>
 
-            {talk !== undefined && talk.total > 0 && (
+            {mark !== null && (
+              /* `role="img"` carrying the sentence, where this used to be
+                 `aria-hidden`. Hiding it was right while it was a 7px dot: a
+                 dot is decoration, the `title` was a pointer affordance, and
+                 the row's name lost nothing by not mentioning it. A number is
+                 not decoration. Left hidden it would be a fact only sighted
+                 reviewers get, and left plain it would land in the row's
+                 accessible name as a bare digit — "app.ts 2 +12 −3", three
+                 numbers running together, two of them about lines and one
+                 about conversations, with nothing to say which is which. So
+                 the bubble and the digit are declared as one image and the
+                 label replaces both with what they mean. `ReviewerAvatars`
+                 does the same for an avatar that is a letter.
+
+                 The `title` stays, because `aria-label` is not a tooltip and
+                 a pointer user reading a capped "99+" has nowhere else to
+                 find the real number. */
               <span
                 className="tree-comment"
-                data-tone={talk.unresolved > 0 ? 'open' : 'resolved'}
-                title={
-                  talk.unresolved > 0
-                    ? `${talk.unresolved} unresolved ${talk.unresolved === 1 ? 'comment' : 'comments'}`
-                    : `${talk.total} ${talk.total === 1 ? 'comment' : 'comments'}, all resolved`
-                }
-                aria-hidden="true"
-              />
+                data-tone={mark.tone}
+                title={mark.said}
+                role="img"
+                aria-label={mark.said}
+              >
+                <CommentGlyph />
+                {mark.count}
+              </span>
             )}
 
             {file !== undefined && (

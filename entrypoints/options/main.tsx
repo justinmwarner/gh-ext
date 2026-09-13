@@ -49,6 +49,7 @@ import {
 } from '@/lib/settings';
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
 import { summarizeDiagnosis } from '@/ui/diagnosisSummary';
+import { DiffPreview } from '@/ui/DiffPreview';
 import { platformString } from '@/ui/platform';
 import { ThemePicker } from '@/ui/ThemePicker';
 import { browser } from 'wxt/browser';
@@ -508,6 +509,16 @@ function ReadingADiff({ settings, update, result }: SectionProps) {
     <section className="settings">
       <h2>Reading a diff</h2>
 
+      {/* Three of the four controls below are claims about what a diff will
+          look like, and two of them — the intra-line highlight, and which
+          lines whitespace hiding removes — are differences of a few pixels
+          that no sentence renders faithfully. So the sentence is kept and the
+          picture put above it. */}
+      <DiffPreview
+        settings={settings}
+        caption="An example, drawn with the settings below."
+      />
+
       <Check
         label="Show the old and new file side by side"
         hint="Two columns instead of one."
@@ -580,6 +591,16 @@ function Appearance({ settings, update, result }: SectionProps) {
   return (
     <section className="settings">
       <h2>Appearance</h2>
+
+      {/* A second copy rather than one shared with the section above, because
+          the two are answering different questions and a reviewer choosing
+          among seventy-six themes should not have to scroll to another heading
+          to see what one does. The swatch beside each row is four colours; this
+          is those colours doing their job. */}
+      <DiffPreview
+        settings={settings}
+        caption="An example, drawn in the theme chosen below."
+      />
 
       <div className="setting">
         <ThemePicker

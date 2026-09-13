@@ -24,6 +24,7 @@ import { RAW } from '@/lib/compare/modes';
 import type { PostingComment } from '@/lib/review/posting';
 import { type WhitespaceDiff, whitespaceNotice } from '@/lib/review/whitespace';
 import type { BlobRefs } from './blobLoader';
+import type { DiffStyle } from './DiffColumn';
 import { NOTHING_UNPLACED, type UnplacedComments } from './MarkdownCompare';
 import { PostingCard } from './PostingCard';
 import { RichCompare } from './RichCompare';
@@ -58,6 +59,16 @@ export interface FileBodyProps {
    * line it names belongs to a different compare. See the prop there.
    */
   anchorable: boolean;
+  /**
+   * The two settings a comparison that mounts its own diff has to be told.
+   *
+   * Carried rather than read from anywhere here, because this component is
+   * rendered through `renderAnnotation` and has no access to the options page:
+   * `DiffColumn` holds both as props and hands them down. `RichCompare` has
+   * which renderers need them and why.
+   */
+  syntaxTheme: string;
+  diffStyle: DiffStyle;
 }
 
 export function FileBody({
@@ -67,6 +78,8 @@ export function FileBody({
   posting,
   blobs,
   anchorable,
+  syntaxTheme,
+  diffStyle,
 }: FileBodyProps) {
   const body = fileBody(file);
   const raw = mode === RAW.id;
@@ -136,6 +149,8 @@ export function FileBody({
         mode={mode}
         refs={blobs}
         anchorable={anchorable}
+        syntaxTheme={syntaxTheme}
+        diffStyle={diffStyle}
         onUnplaced={report}
       />
 

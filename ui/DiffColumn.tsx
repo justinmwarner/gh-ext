@@ -376,14 +376,36 @@ const anchorSignature = (thread: {
   `${thread.id}#${thread.line ?? 'x'}#${thread.diffSide}#${thread.subjectType}#${thread.isOutdated}`;
 
 /**
- * How many frames to keep looking for a thread the column was asked to reach.
+ * How many frames a scroll this column was asked for keeps trying for.
  *
- * The file has to be scrolled to, virtualized in and rendered before the
- * thread's element exists, and none of that is synchronous. A handful of frames
- * covers it; giving up quietly after that is correct, because the file scroll
- * has already happened and that is most of the answer.
+ * Two of them ask, and both are asking for something that does not exist yet
+ * at the moment of the press. A jump from the Overview has to reach a
+ * *thread*: the file has to be scrolled to, virtualized in and rendered before
+ * that element is in the DOM, and none of that is synchronous. A press on a
+ * card's own control has to reach a card inside a viewer that the same press
+ * has just torn down and rebuilt, and a freshly mounted `CodeView` resolves an
+ * item scroll against its estimated heights until it has measured the real
+ * ones.
+ *
+ * A handful of frames covers both. Giving up quietly after that is the point
+ * rather than a concession: a retry with no deadline is a loop that fights a
+ * reviewer who has started scrolling on their own. For the jump, the file
+ * scroll has already happened by then and that is most of the answer.
  */
-const JUMP_FRAMES = 8;
+const REACH_FRAMES = 8;
+
+/**
+ * A press on a card's own control, and the card it was made on.
+ *
+ * A token rather than a bare path, for exactly the reason {@link ThreadJump}
+ * carries one: pressing the same card's control twice is two requests, and the
+ * second one has to act. A path alone would be the same value both times and
+ * the effect that returns the column would not re-run.
+ */
+interface CardReturn {
+  path: string;
+  token: number;
+}
 
 export function DiffColumn({
   files,
@@ -451,6 +473,12 @@ export function DiffColumn({
     () => new Map(),
   );
   const [modeMemory, rememberMode] = useModeMemory();
+  /**
+   * The card the reviewer last pressed a control on, if the column owes it a
+   * scroll. Null until one has been pressed, and never cleared afterwards —
+   * see the effect below, which reads the token rather than the presence.
+   */
+  const [returnTo, setReturnTo] = useState<CardReturn | null>(null);
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
   const [expansionError, setExpansionError] = useState<string | null>(null);
@@ -918,10 +946,31 @@ export function DiffColumn({
     return built;
   }, [files, chosenModes, modeMemory]);
 
+  /**
+   * Record that a card's own control was pressed, so the column can go back to
+   * it once the press has been rendered.
+   *
+   * Recorded rather than acted on, and the distance between the two is the
+   * whole point: the height of the card under the reviewer's finger changes in
+   * the same commit as the press, so nothing measured here would be measuring
+   * the column they are about to be looking at. The effect below does the
+   * scrolling, after that commit. Stable, because both callers are memoized
+   * against the renders this column does per keystroke elsewhere.
+   */
+  const returnToCard = useCallback((path: string) => {
+    setReturnTo((previous) => ({ path, token: (previous?.token ?? 0) + 1 }));
+  }, []);
+
   const changeMode = useCallback(
     (path: string, mode: string) => {
       const pressed = files.find((file) => file.path === path);
       const kind = pressed === undefined ? 'none' : comparisonKind(pressed);
+
+      // Before the branch, because both branches are the same press. A
+      // remembered kind moves every Markdown card in the column, and the card
+      // the reviewer is owed is still the one they pressed rather than the
+      // first of the set that moved with it.
+      returnToCard(path);
 
       if (isRememberedKind(kind)) {
         // The press is a preference rather than a choice about this one file, so
@@ -944,7 +993,7 @@ export function DiffColumn({
         return next;
       });
     },
-    [files, rememberMode],
+    [files, rememberMode, returnToCard],
   );
 
   /**
@@ -1028,19 +1077,23 @@ export function DiffColumn({
    * override is dropped, because it was recorded against a card that was
    * describing something else.
    */
-  const toggleShown = useCallback((path: string) => {
-    setShown((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(path)) next.add(path);
-      return next;
-    });
-    setFolds((previous) => {
-      if (!previous.has(path)) return previous;
-      const next = new Map(previous);
-      next.delete(path);
-      return next;
-    });
-  }, []);
+  const toggleShown = useCallback(
+    (path: string) => {
+      setShown((previous) => {
+        const next = new Set(previous);
+        if (!next.delete(path)) next.add(path);
+        return next;
+      });
+      setFolds((previous) => {
+        if (!previous.has(path)) return previous;
+        const next = new Map(previous);
+        next.delete(path);
+        return next;
+      });
+      returnToCard(path);
+    },
+    [returnToCard],
+  );
 
   const registerHeader = useCallback((path: string, node: HTMLElement | null) => {
     if (node === null) headers.current.delete(path);
@@ -1329,6 +1382,15 @@ export function DiffColumn({
                fresh object every render — and this callback's identity decides
                whether Pierre rebuilds every annotation row under it. */
             anchorable={sidesKey === 'ad'}
+            /* Handed down because a rich body can mount a diff of its own — a
+               notebook cell, a re-indented JSON document — and such a diff
+               themes and lays itself out from its own options rather than from
+               the ones above. Both are in the dependency list below: they are
+               the reviewer's settings and move about as often as the options
+               page is open, so rebuilding every annotation row when one does is
+               the cheap half of a change they can see. */
+            syntaxTheme={syntaxTheme}
+            diffStyle={diffStyle}
           />
         );
       }
@@ -1354,6 +1416,8 @@ export function DiffColumn({
       postings,
       blobs,
       sidesKey,
+      syntaxTheme,
+      diffStyle,
     ],
   );
 
@@ -1405,17 +1469,21 @@ export function DiffColumn({
   );
 
   /**
-   * Which file the reviewer is looking at, measured rather than counted.
+   * Where the cards are, measured rather than counted.
    *
    * `CodeView` keeps its item offsets private, so the answer comes from where
    * the mounted card headers actually are. Virtualization means only the
    * headers near the viewport exist, which is exactly the set that could be at
    * the top of it.
+   *
+   * Two callers, and they have to measure the same way: one reports which file
+   * the reviewer is looking at, the other asks whether a file the column was
+   * told to go to has arrived. Two spellings of "where is this card" would let
+   * the column decide it had arrived somewhere it was not about to report.
    */
-  const reported = useRef<string | null>(null);
-  const handleScroll = useCallback(() => {
+  const cardTops = useCallback((): CardTop[] => {
     const container = scroller.current;
-    if (container === null) return;
+    if (container === null) return [];
 
     const origin = container.getBoundingClientRect().top;
     const tops: CardTop[] = [];
@@ -1423,15 +1491,19 @@ export function DiffColumn({
       if (!node.isConnected) continue;
       tops.push({ path, top: node.getBoundingClientRect().top - origin });
     }
+    return tops;
+  }, []);
 
-    const path = topmostFile(tops);
+  const reported = useRef<string | null>(null);
+  const handleScroll = useCallback(() => {
+    const path = topmostFile(cardTops());
     // Scroll fires at frame rate and most frames are still on the same file.
     // The reducer would absorb the repeats, but only after React had rendered
     // the shell again to find that out.
     if (path === null || path === reported.current) return;
     reported.current = path;
     onScrollTo(path);
-  }, [onScrollTo]);
+  }, [onScrollTo, cardTops]);
 
   // Follow the tree — and only the tree. Scrolling because the column scrolled
   // is the other half of the feedback loop the origin exists to break. The
@@ -1443,6 +1515,86 @@ export function DiffColumn({
     if (!acts || target === null) return;
     viewer.current?.scrollTo({ type: 'item', id: target, align: 'start' });
   }, [acts, target]);
+
+  /**
+   * A press on a card's own control returns the column to that card.
+   *
+   * Two controls change the height of the very thing the reviewer's finger is
+   * on. `ModeSwitcher` swaps a raw patch for a rendered notebook several times
+   * its height, and the whitespace and generated chip hands a folded card its
+   * whole diff back. Both used to leave the column wherever that height change
+   * had pushed it, which on a long review means the file they just pressed a
+   * button on is no longer on screen.
+   *
+   * The chip was the worse of the two, and for a different reason: `shown`
+   * feeds `drawnFiles`, `drawnFiles` feeds `generation`, and `generation` is
+   * the viewer's `key` — so the press remounts `CodeView` and scroll goes to
+   * zero. Pressing a word on the nineteenth file sent the reviewer to the top
+   * of the first.
+   *
+   * **The remount stays.** The cheaper-looking fix is to hold the key stable
+   * across a whitespace toggle, and it is not taken, because the two comments
+   * in this file that bear on it disagree: the one on `generation` says
+   * `CodeView` keeps the code it first rendered for an item id, and the one on
+   * the `key` itself says 1.4.1 draws the new patch and the key now stays for
+   * a weaker reason. A test pins the second — "draws the new patch, which is
+   * why the remount is no longer load-bearing" — but it pins it about a bare
+   * viewer rather than about this column. If the first is still true here,
+   * holding the key trades a scroll jump for the old rows left on screen under
+   * a header that says they are the whole diff: silent, and about what the
+   * reviewer reads rather than about where the page is. Scrolling back is the
+   * correct behaviour under either reading, which is the point — it does not
+   * need the question settled first.
+   *
+   * Not done in the callbacks, because the card's new height is committed in
+   * the same render as the press. And not done in one shot either: for the
+   * chip, `viewer.current` here is a brand-new handle onto a viewer that has
+   * not measured its items yet, so the first call resolves the card's offset
+   * against estimates. So it is asked again each frame until the column
+   * reports that card as the one at the top — the same question `handleScroll`
+   * answers, deliberately, so "arrived" means what it means everywhere else —
+   * and gives up after {@link REACH_FRAMES} rather than fighting a reviewer
+   * who has started scrolling themselves.
+   *
+   * The feedback loop in `currentFile.ts` is left alone on purpose. This scroll
+   * makes `handleScroll` report the pressed file with origin `scroll`, the tree
+   * selects it, and nothing scrolls back: that is the loop working, and it is
+   * how the tree stays in step with a column that moved without it.
+   */
+  const returnPath = returnTo?.path ?? null;
+  const returnToken = returnTo?.token ?? 0;
+  useEffect(() => {
+    if (returnPath === null) return;
+
+    let frame = 0;
+    let attempts = 0;
+
+    const settle = () => {
+      // Asked before scrolling rather than after, and the order is the whole
+      // of what keeps this from costing the reviewer the press that follows.
+      // `CodeView.suspendScrollInteractions` puts `pointer-events: none` on
+      // the sticky container for 120ms after *any* scroll it is asked for, and
+      // that container holds the card headers — which is to say it holds the
+      // very control that was just pressed. A card already at the top has
+      // nothing to scroll to, so a call made anyway buys nothing and spends
+      // those 120ms making `ModeSwitcher` dead to a second press. Raw then
+      // Grid, quicker than the timer, is a reviewer changing their mind at a
+      // perfectly ordinary speed.
+      if (topmostFile(cardTops()) === returnPath) return;
+      viewer.current?.scrollTo({ type: 'item', id: returnPath, align: 'start' });
+      attempts += 1;
+      if (attempts >= REACH_FRAMES) return;
+      frame = requestAnimationFrame(settle);
+    };
+
+    // The first attempt before paint rather than on the next frame, so the
+    // common case — a card that was already measured, a mode press that did
+    // not remount anything — never draws a frame at the wrong offset.
+    settle();
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [returnPath, returnToken, cardTops]);
 
   /**
    * The second half of a jump from the Overview.
@@ -1489,7 +1641,7 @@ export function DiffColumn({
       }
 
       attempts += 1;
-      if (attempts < JUMP_FRAMES) frame = requestAnimationFrame(reach);
+      if (attempts < REACH_FRAMES) frame = requestAnimationFrame(reach);
     };
 
     frame = requestAnimationFrame(reach);

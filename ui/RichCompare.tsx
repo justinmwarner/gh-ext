@@ -35,6 +35,7 @@ import { compareTables, delimiterFor, parseDelimited } from '@/lib/compare/tabul
 import { commentableLines } from '@/lib/review/commentable';
 import { ArchiveCompare } from './ArchiveCompare';
 import type { BlobRefs } from './blobLoader';
+import type { DiffStyle } from './DiffColumn';
 import { useArchiveSides, useImageSides, useTextSides } from './fileSides';
 import { ImageCompare, type ImageVariant } from './ImageCompare';
 import { JsonFormatted, JsonKeyPaths } from './JsonCompare';
@@ -99,6 +100,19 @@ export interface RichCompareProps {
    */
   anchorable: boolean;
   /**
+   * The two diff settings an embedded comparison has to be told about.
+   *
+   * Two of the renderers below mount a `<diffs-container>` of their own — a
+   * notebook's per-cell diff and the formatted view of a JSON document — and a
+   * container themes and lays itself out from its own options rather than from
+   * the one the column is drawn with. Left to their defaults they came out in
+   * Pierre's light pair and always unified, which on a chosen dark theme is
+   * black source inside a dark card. The whole of the rest of this component is
+   * insulated from these by being HTML rather than a diff.
+   */
+  syntaxTheme: string;
+  diffStyle: DiffStyle;
+  /**
    * Where the rendered Markdown view sends the comments it has no block for.
    *
    * A pass-through and nothing more, but it is not optional at either end. The
@@ -114,6 +128,8 @@ export function RichCompare({
   mode,
   refs,
   anchorable,
+  syntaxTheme,
+  diffStyle,
   onUnplaced,
 }: RichCompareProps) {
   const kind = comparisonKind(file);
@@ -294,6 +310,8 @@ export function RichCompare({
         syntax={syntax}
         before={text.before}
         after={text.after}
+        syntaxTheme={syntaxTheme}
+        diffStyle={diffStyle}
       />
     ) : (
       <JsonKeyPaths comparison={structured} />
@@ -306,6 +324,8 @@ export function RichCompare({
         comparison={notebook.comparison}
         languageExtension={notebook.languageExtension}
         showOutputs={mode === 'notebook:outputs'}
+        syntaxTheme={syntaxTheme}
+        diffStyle={diffStyle}
       />
     );
   }

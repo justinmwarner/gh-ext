@@ -15,7 +15,11 @@
  */
 
 import type { ReactNode } from 'react';
-import { type CodeViewItem, parsePatchFiles } from '@pierre/diffs';
+import {
+  CodeView as CodeViewCore,
+  type CodeViewItem,
+  parsePatchFiles,
+} from '@pierre/diffs';
 import { CodeView } from '@pierre/diffs/react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2043,5 +2047,211 @@ describe('remembering how markdown is compared', () => {
     await waitFor(() => {
       expect(pressed('docs/a.md', 'Raw')).toBe('true');
     });
+  });
+});
+
+/**
+ * A press on a card's own control returns the column to that card.
+ *
+ * Two controls on a card change that card's own height: the mode switcher, and
+ * the word saying why a body is being withheld. Both used to leave the column
+ * wherever the height change had pushed it, and the second was worse than
+ * that — `shown` reaches `drawnFiles`, `drawnFiles` reaches `generation`, and
+ * `generation` is the viewer's `key`, so pressing it remounts `CodeView` and
+ * scroll goes to zero. A press on the nineteenth file put the reviewer at the
+ * top of the first.
+ *
+ * What is asserted here is the *request*, not where the column ended up. jsdom
+ * lays nothing out: every rect is zero, the viewer measures every item as
+ * zero-high, and `Element.prototype.scrollTo` is the inert stub `testSetup`
+ * installs. So "did the reviewer end up looking at that file" is a question
+ * only a browser can answer, and `e2e/` is where it is asked; the honest
+ * question here is what the column asked the viewer for.
+ *
+ * The spy is on the vanilla `CodeView` rather than on the React one, because
+ * that is the object the handle delegates to — `@pierre/diffs` and
+ * `@pierre/diffs/react` import the same module, so one prototype covers every
+ * viewer this file mounts, including the one a remount replaces.
+ */
+describe('DiffColumn, returning to the card that was pressed', () => {
+  const spyOnScrollTo = () => vi.spyOn(CodeViewCore.prototype, 'scrollTo');
+  let scrolls: ReturnType<typeof spyOnScrollTo>;
+
+  beforeEach(() => {
+    // Left calling through: a target the library refuses is not a scroll, and
+    // a stub would report one anyway.
+    scrolls = spyOnScrollTo();
+  });
+
+  afterEach(async () => {
+    scrolls.mockRestore();
+    // One press below is on a Markdown card, whose mode is a stored preference
+    // rather than a per-file choice — and `testSetup` gives the whole file one
+    // storage area. See the note on the same hook further up.
+    await browser.storage.local.remove(MODE_MEMORY_KEY);
+  });
+
+  /** Every file the column asked to be brought to the top, in order. */
+  const asked = (): string[] =>
+    scrolls.mock.calls.flatMap(([target]) =>
+      target.type === 'item' && target.align === 'start' ? [target.id] : [],
+    );
+
+  it('asks for nothing until something is pressed', async () => {
+    // The effect is driven by a press rather than by a render, and this is
+    // what says so: a column that scrolled on mount would fight the tree, the
+    // `j` key and the reviewer's own scrolling, all of which arrive as renders.
+    mount([file({ path: 'src/app.ts' }), file({ path: 'data/rows.csv' })]);
+    await untilDrawn('src/app.ts');
+
+    expect(asked()).toEqual([]);
+  });
+
+  it('returns to the file whose comparison mode was pressed', async () => {
+    // The CSV first and the plain source file second. Which one is pressed is
+    // not free on either axis: a `.ts` file offers one comparison and so has
+    // no switcher to press at all, and under this file's zero layout the last
+    // card is where the column already is — see the note on the skip test
+    // below. The card with the control has to be the one that is not.
+    mount([file({ path: 'data/rows.csv' }), file({ path: 'src/app.ts' })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(
+        within(card('data/rows.csv')).getByRole('button', { name: 'Raw' }),
+      );
+    });
+
+    expect(asked()).toContain('data/rows.csv');
+  });
+
+  it('asks for nothing when the card pressed is already the one at the top', async () => {
+    // The scroll is skipped when it would not move anything, and that is not
+    // tidiness. `CodeView.suspendScrollInteractions` puts `pointer-events:
+    // none` on the sticky container for 120ms after any scroll it is asked
+    // for, and that container holds the card headers — so a pointless scroll
+    // spends those 120ms making the very control that was just pressed dead to
+    // a second press. Raw and then Grid, faster than the timer, is a reviewer
+    // changing their mind at an ordinary speed; `ui/comparisonModes.test.tsx`
+    // is where that press pair is driven end to end.
+    //
+    // "Already at the top" is a measurement, and jsdom reports every rect as
+    // zero — which makes `topmostFile` run its whole list without finding one
+    // past `REACHED` and settle on the last card registered. That is not a
+    // position, it is the absence of one, but it is a *consistent* absence:
+    // here the last card is what the column reports itself to be on, so it
+    // stands in for the card a browser would report under a real scrollTop.
+    mount([file({ path: 'src/app.ts' }), file({ path: 'data/rows.csv' })]);
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(
+        within(card('data/rows.csv')).getByRole('button', { name: 'Raw' }),
+      );
+    });
+
+    expect(asked()).toEqual([]);
+  });
+
+  it('returns to the card pressed, not to the others that moved with it', async () => {
+    // Markdown is the one kind whose mode is a preference rather than a
+    // per-file choice, so this press changes every `.md` card in the column.
+    // The card the reviewer is owed is still the one under their finger.
+    mount([file({ path: 'docs/a.md' }), file({ path: 'docs/b.md' })]);
+    // Settles the column's opening read of the preference, so what is asserted
+    // is the press rather than a race with it.
+    await act(async () => {});
+
+    await act(async () => {
+      fireEvent.click(within(card('docs/a.md')).getByRole('button', { name: 'Raw' }));
+    });
+
+    expect(asked()).toContain('docs/a.md');
+    expect(asked()).not.toContain('docs/b.md');
+  });
+
+  it('returns to the file whose whitespace chip was pressed', async () => {
+    // The reported bug. This press remounts the viewer, so the scroll is
+    // being asked of an instance that did not exist when the press was made.
+    mount(
+      [
+        file({ path: 'src/app.ts' }),
+        file({ path: 'lib/util.ts', patch: REINDENTED('lib/util.ts') }),
+      ],
+      IGNORING,
+    );
+    await untilDrawn('lib/util.ts');
+
+    await act(async () => {
+      fireEvent.click(
+        within(card('lib/util.ts')).getByRole('button', { name: /whitespace hidden/i }),
+      );
+    });
+
+    expect(asked()).toContain('lib/util.ts');
+  });
+
+  it('acts on a second press of the same control', async () => {
+    // What the token in `CardReturn` is for. A bare path would be the same
+    // value both times and the effect would not re-run, so the press that puts
+    // the file back the way it was would leave the reviewer wherever undoing
+    // it had pushed them — which is the same bug, one press later.
+    mount(
+      [
+        file({ path: 'src/app.ts' }),
+        file({ path: 'lib/util.ts', patch: REINDENTED('lib/util.ts') }),
+      ],
+      IGNORING,
+    );
+    await untilDrawn('lib/util.ts');
+
+    const flag = () =>
+      within(card('lib/util.ts')).getByRole('button', { name: /whitespace/i });
+
+    await act(async () => {
+      fireEvent.click(flag());
+    });
+    expect(asked()).toContain('lib/util.ts');
+
+    scrolls.mockClear();
+    await act(async () => {
+      fireEvent.click(flag());
+    });
+
+    expect(asked()).toContain('lib/util.ts');
+  });
+
+  it('gives up rather than scrolling for as long as the page is open', async () => {
+    // The retry is there because a remounted viewer has not measured its items
+    // on the first frame. A retry with no deadline is an animation-frame loop
+    // that would out-argue a reviewer who had started scrolling themselves, so
+    // it stops after REACH_FRAMES whether or not the card ever arrived — and
+    // in jsdom, where every card measures as sitting at the top, it does not.
+    mount(
+      [
+        file({ path: 'src/app.ts' }),
+        file({ path: 'lib/util.ts', patch: REINDENTED('lib/util.ts') }),
+      ],
+      IGNORING,
+    );
+    await untilDrawn('lib/util.ts');
+
+    await act(async () => {
+      fireEvent.click(
+        within(card('lib/util.ts')).getByRole('button', { name: /whitespace hidden/i }),
+      );
+      // Comfortably longer than eight frames.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+
+    const settled = asked().length;
+    expect(settled).toBeGreaterThan(0);
+    expect(settled).toBeLessThanOrEqual(8);
+
+    // And having stopped, it stays stopped.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+    expect(asked().length).toBe(settled);
   });
 });
