@@ -4062,89 +4062,6 @@ button.scope-showing:hover {
   background: var(--neutral-hover);
 }
 
-.repos {
-  margin-top: 8px;
-  padding: 12px;
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-  background: var(--canvas-subtle);
-}
-
-.repos-note {
-  margin: 0 0 8px;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.repos-list {
-  list-style: none;
-  margin: 0 0 10px;
-  padding: 0;
-  /* Nineteen repositories is an ordinary answer, and a panel that pushes the
-     pull requests off the page to show them is the wrong trade. */
-  max-height: 260px;
-  overflow-y: auto;
-}
-
-.repos-row + .repos-row {
-  border-top: 1px solid var(--border-muted);
-}
-
-/* Scoped through `.repos` rather than left as a bare class, and that is not
-   tidiness. The picker is drawn inside `FullPage` on a first run, where
-   `.fullpage label` — specificity (0,1,1) — outranks a lone `.repos-label`
-   and takes the row: `display: block` kills the flex layout and the gap,
-   `font-weight: 600` bolds every repository name, and its margin replaces the
-   row padding. The same component then looks like two different controls
-   depending on which screen reached it. Two classes win the cascade honestly;
-   `!important` would win it by shouting. */
-.repos .repos-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 5px 2px;
-  font-size: 13px;
-  font-weight: 400;
-  cursor: pointer;
-}
-
-.repos .repos-name {
-  color: var(--fg-default);
-}
-
-/* A quiet fact about the row, not a status. Outlined rather than filled, which
-   is the chip treatment in DESIGN.md section 5.
-
-   `inline-flex` with its own line-height, because an inline box takes its
-   height from the font's ascent and descent and ignores vertical padding for
-   layout — so the border ended up against the letters and the pill read as a
-   box somebody had squashed. Centring its own content also means the tag stops
-   depending on whatever line-height it inherits. */
-.repos .repos-tag {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  height: 18px;
-  padding: 0 8px;
-  font-size: 11px;
-  line-height: 1;
-  border: 1px solid var(--border-default);
-  border-radius: 999px;
-  color: var(--fg-muted);
-  /* The name beside it can be long enough to wrap the row; the tag must not be
-     the thing that gives way. */
-  white-space: nowrap;
-}
-
-/* Carried as a sentence first. The colour reinforces the words and never
-   replaces them. */
-.repos .repos-refused {
-  font-size: 12px;
-  color: var(--attention-fg);
-}
-
 .dash-search {
   display: flex;
   align-items: center;
@@ -4174,4 +4091,23 @@ button.scope-showing:hover {
   margin-left: 6px;
   font-size: 11px;
   vertical-align: baseline;
+}
+
+
+/* Rail, then the list. Mirrors the options page's `.page` so the two
+   standalone screens put the same strip in the same place. `stretch` so the
+   rail's border runs the whole height rather than stopping under its last
+   item. */
+.dash-page {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.dash-page .dash {
+  /* `margin: 0 auto` centres the list in the window. With a rail beside it the
+     window is no longer what it is centred in, and the auto margins would push
+     it off-centre by exactly the rail's width. */
+  flex: 1 1 auto;
+  margin: 0;
 }

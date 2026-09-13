@@ -18,6 +18,7 @@ import { DashboardView } from './DashboardView';
 import { ErrorState } from './ErrorState';
 import { FullPage } from './FullPage';
 import { LoadingState } from './LoadingState';
+import { NavRail } from './NavRail';
 import { LockedState } from './LockedState';
 import { RepoPicker } from './RepoPicker';
 import { SetupState } from './SetupState';
@@ -64,13 +65,16 @@ export function DashboardState() {
 
   if (state.status === 'unconfigured') {
     return (
-      <FullPage title="Pick the repositories to watch">
+      <div className="dash-page">
+        <NavRail current="dashboard" />
+        <FullPage title="Pick the repositories to watch">
         <p>
           This list reads only the repositories you choose, and only the last ninety
           days. Nothing is fetched until you pick one.
         </p>
-        <RepoPicker {...picker} />
-      </FullPage>
+          <RepoPicker {...picker} />
+        </FullPage>
+      </div>
     );
   }
 
@@ -91,20 +95,23 @@ export function DashboardState() {
   }
 
   return (
-    <DashboardView
-      payload={state.payload}
-      overrides={overrides}
-      stalenessDays={stalenessDays}
-      // Read once per render rather than ticked. The ages on this page are
-      // coarse — minutes, hours, days — so a timer redrawing the whole list
-      // every second would spend the reviewer's battery to move nothing.
-      now={Date.now()}
-      onOverride={override}
-      onRefresh={refresh}
-      repos={picker}
-      search={search}
-      onSearch={runSearch}
-      onClearSearch={clearSearch}
-    />
+    <div className="dash-page">
+      <NavRail current="dashboard" />
+      <DashboardView
+        payload={state.payload}
+        overrides={overrides}
+        stalenessDays={stalenessDays}
+        // Read once per render rather than ticked. The ages on this page are
+        // coarse — minutes, hours, days — so a timer redrawing the whole list
+        // every second would spend the reviewer's battery to move nothing.
+        now={Date.now()}
+        onOverride={override}
+        onRefresh={refresh}
+        repos={picker}
+        search={search}
+        onSearch={runSearch}
+        onClearSearch={clearSearch}
+      />
+    </div>
   );
 }

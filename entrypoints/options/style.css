@@ -35,14 +35,27 @@
 
 body {
   margin: 0;
-  padding: 2rem;
+  /* The padding moved to `main` when the rail arrived. A rail inset from the
+     window edge reads as a floating panel; flush to it, it reads as the edge of
+     the page, which is what the review page's rail does. */
+  padding: 0;
   font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--fg-default);
   background: var(--canvas-default);
 }
 
+/* Rail, then content. `align-items: stretch` so the rail's border runs the
+   whole height rather than stopping under the last item. */
+.page {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
 main {
+  flex: 1 1 auto;
   max-width: 44rem;
+  padding: 2rem;
 }
 
 h1 {

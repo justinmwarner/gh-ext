@@ -443,3 +443,97 @@ test.describe('the picker, drawn inside a full page', () => {
     expect(box?.height ?? 0).toBeGreaterThan(17);
   });
 });
+
+test.describe('the picker, on the options page', () => {
+  /**
+   * The picker is drawn on two documents now, and they load different
+   * stylesheets. Its rules lived in the review page's sheet, so on
+   * options.html it had none at all and fell back to that page's
+   * `label { display: block; font-weight: 600 }` — a bulleted list of bold
+   * names with the private tag run onto the end of one of them.
+   *
+   * Only a browser can see this. jsdom applies no stylesheet, so the unit
+   * suite was green throughout.
+   */
+  const optionsUrl = (extensionId: string) =>
+    `chrome-extension://${extensionId}/options.html`;
+
+  test('keeps its own row layout there too', async ({ page, extensionId, api }) => {
+    void api;
+    await page.goto(optionsUrl(extensionId));
+    const label = page.locator('.repos-label').first();
+    await expect(label).toBeVisible();
+
+    await expect(label).toHaveCSS('display', 'flex');
+  });
+
+  test('does not let the settings form bold the repository names', async ({
+    page,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await page.goto(optionsUrl(extensionId));
+    const name = page.locator('.repos-name').first();
+    await expect(name).toBeVisible();
+
+    await expect(name).not.toHaveCSS('font-weight', '600');
+  });
+
+  test('gives the private tag a pill there too', async ({ page, extensionId, api }) => {
+    void api;
+    await page.goto(optionsUrl(extensionId));
+    const tag = page.getByText('Private');
+    await expect(tag).toBeVisible();
+
+    const box = await tag.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThan(17);
+  });
+});
+
+test.describe('the page rail', () => {
+  test('reaches the dashboard from options', async ({ page, extensionId, api }) => {
+    void api;
+    await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+    const nav = page.getByRole('navigation', { name: 'Pages' });
+    await expect(nav).toBeVisible();
+    await nav.getByRole('link', { name: 'Pull requests' }).click();
+
+    // An absolute extension URL, not a bare fragment: options.html and
+    // review.html are two documents.
+    await expect(page).toHaveURL(/\/review\.html#\/prs$/);
+  });
+
+  test('marks the page you are on, on both of them', async ({
+    page,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await page.goto(`chrome-extension://${extensionId}/options.html`);
+    await expect(
+      page.getByRole('navigation', { name: 'Pages' }).locator('[aria-current="page"]'),
+    ).toHaveText('Options');
+
+    await page.goto(dashboardUrl(extensionId));
+    await expect(
+      page.getByRole('navigation', { name: 'Pages' }).locator('[aria-current="page"]'),
+    ).toHaveText('Pull requests');
+  });
+
+  test('stays put when the page scrolls', async ({ page, extensionId, api }) => {
+    // The options page is a couple of thousand pixels of settings. A rail whose
+    // items live at the top of that is one you cannot reach from the bottom,
+    // which is exactly where somebody stands when they finish configuring.
+    void api;
+    await page.setViewportSize({ width: 1000, height: 600 });
+    await page.goto(`chrome-extension://${extensionId}/options.html`);
+    const nav = page.getByRole('navigation', { name: 'Pages' });
+    await expect(nav).toBeVisible();
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+    await expect(nav.getByRole('link', { name: 'Pull requests' })).toBeInViewport();
+  });
+});

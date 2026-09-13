@@ -17,6 +17,7 @@
  */
 
 import type { DiscoveredRepo } from '@/lib/dashboard/repos';
+import './RepoPicker.css';
 
 export interface RepoPickerProps {
   discovered: readonly DiscoveredRepo[];

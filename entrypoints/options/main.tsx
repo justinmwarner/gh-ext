@@ -50,6 +50,7 @@ import {
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
 import { type DiscoveredRepo, toggleWatched } from '@/lib/dashboard/repos';
 import { FETCH_WINDOW_DAYS } from '@/lib/dashboard/searches';
+import { NavRail } from '@/ui/NavRail';
 import { RepoPicker } from '@/ui/RepoPicker';
 import { summarizeDiagnosis } from '@/ui/diagnosisSummary';
 import { DiffPreview } from '@/ui/DiffPreview';
@@ -1257,44 +1258,50 @@ function App() {
   const tokenFirst = vault === 'empty';
 
   return (
-    <main>
-      <h1>A Better Reviewer</h1>
+    // The rail is a sibling of `main`, not inside it: it is navigation between
+    // pages, and `main` is this page's own content. A screen reader that skips
+    // to the main landmark should land on the settings, not on the way out.
+    <div className="page">
+      <NavRail current="options" />
+      <main>
+        <h1>A Better Reviewer</h1>
 
-      {tokenFirst && tokenSection}
+        {tokenFirst && tokenSection}
 
-      {settings !== null && (
-        <>
-          <Reviewing
+        {settings !== null && (
+          <>
+            <Reviewing
+              settings={settings}
+              update={update}
+              result={resultFor('reviewing')}
+            />
+            <PullRequestList
+              settings={settings}
+              update={update}
+              result={resultFor('reviewing')}
+            />
+            <ReadingADiff settings={settings} update={update} result={resultFor('diff')} />
+            <Appearance
+              settings={settings}
+              update={update}
+              result={resultFor('appearance')}
+            />
+            <Keyboard settings={settings} update={update} result={resultFor('keyboard')} />
+          </>
+        )}
+
+        {!tokenFirst && tokenSection}
+
+        {settings !== null && (
+          <Diagnostics
             settings={settings}
             update={update}
-            result={resultFor('reviewing')}
+            result={resultFor('diagnostics')}
+            rateLimit={rateLimit}
           />
-          <PullRequestList
-            settings={settings}
-            update={update}
-            result={resultFor('reviewing')}
-          />
-          <ReadingADiff settings={settings} update={update} result={resultFor('diff')} />
-          <Appearance
-            settings={settings}
-            update={update}
-            result={resultFor('appearance')}
-          />
-          <Keyboard settings={settings} update={update} result={resultFor('keyboard')} />
-        </>
-      )}
-
-      {!tokenFirst && tokenSection}
-
-      {settings !== null && (
-        <Diagnostics
-          settings={settings}
-          update={update}
-          result={resultFor('diagnostics')}
-          rateLimit={rateLimit}
-        />
-      )}
-    </main>
+        )}
+      </main>
+    </div>
   );
 }
 

@@ -63,6 +63,10 @@ describe('the surfaces', () => {
   const SURFACES = [
     'entrypoints/review/style.css',
     'entrypoints/options/style.css',
+    // Shared by the options page and the dashboard, so it is a surface even
+    // though it does not sit under `entrypoints/`.
+    'ui/NavRail.css',
+    'ui/RepoPicker.css',
     'entrypoints/content/card.ts',
   ];
 

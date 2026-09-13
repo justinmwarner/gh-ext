@@ -1,0 +1,99 @@
+/*
+ * The rail the options page and the dashboard share.
+ *
+ * Its own stylesheet rather than a copy in each of the two page sheets,
+ * because two copies of a rail is how the two rails stop matching. Imported by
+ * the component, so whichever page mounts it gets the rules.
+ *
+ * `ui/tokens.test.tsx` scans this file along with the two page stylesheets: a
+ * literal colour here would be a patch of Primer that cannot follow the
+ * reviewer's chosen theme, exactly as it would be there.
+ *
+ * `.view-tab` is deliberately reused rather than restyled. The review page's
+ * rail already defines the shape — icon over an 11px label, 6px radius, muted
+ * until hovered — and a second definition of "a rail item" would be the thing
+ * that drifts. Only what is different lives here.
+ */
+
+.navrail {
+  flex: 0 0 auto;
+  /* Matches the review rail's strip so the two read as one component seen on
+     two pages rather than as two controls that happen to rhyme. */
+  width: 72px;
+  padding: 8px 0;
+  border-right: 1px solid var(--border-default);
+  background: var(--canvas-inset);
+  /* Both pages this sits on scroll a long way — the options page is some two
+     and a half thousand pixels of settings. A rail whose two items live at the
+     top of that is a rail you cannot reach from the bottom, which is exactly
+     the position somebody is in when they finish configuring and want the list
+     back. Sticky rather than fixed so it still participates in the flex row
+     and keeps the border running the full height. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.navrail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A `span` when it is the current page, an `a` or a `button` otherwise. The
+   shape is the same in all three; only the affordance differs. */
+.navrail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 4px 7px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  color: var(--fg-muted);
+  text-decoration: none;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+}
+
+/* Only the two that go somewhere. The current page is not a control, and
+   giving it a pointer would promise something it cannot do. */
+a.navrail-item,
+button.navrail-item {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+a.navrail-item:hover,
+button.navrail-item:hover {
+  color: var(--fg-default);
+  background: var(--neutral-hover);
+  /* The page stylesheets give every `a` an underline on hover; nothing else in
+     a rail underlines and this must not be the one thing that does. */
+  text-decoration: none;
+}
+
+/* The mark that says where you are. Weight and foreground, not a fill: this is
+   a statement about the page, not a selected control. The review rail's active
+   tab uses the same pairing. */
+.navrail-item[aria-current='page'] {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a.navrail-item,
+  button.navrail-item {
+    transition: none;
+  }
+}
