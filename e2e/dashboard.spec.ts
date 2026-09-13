@@ -14,7 +14,7 @@
 
 import { expect } from '@playwright/test';
 import { DASHBOARD_RESPONSE } from './fixture';
-import { dashboardUrl, test } from './extension';
+import { dashboardUrl, reviewUrl, test } from './extension';
 
 test.describe('the dashboard', () => {
   test('lists every bucket the fixture can reach', async ({ page, extensionId, api }) => {
@@ -129,7 +129,6 @@ test.describe('the dashboard', () => {
 
   test('reaches the list from a review with g p', async ({ page, extensionId, api }) => {
     void api;
-    const { reviewUrl } = await import('./extension');
     await page.goto(reviewUrl(extensionId));
     // Wait for the review to be up before pressing anything, or the keydown
     // lands on a page that has no listener yet.
@@ -155,5 +154,52 @@ test.describe('the dashboard fixture', () => {
     ];
 
     expect(all).toHaveLength(9);
+  });
+});
+
+test.describe('the rail', () => {
+  test('carries a way to the list, and it is not a fourth view', async ({
+    page,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await page.goto(reviewUrl(extensionId));
+    await page.waitForSelector('.topbar');
+
+    const link = page.getByRole('link', { name: 'Pull requests' });
+    await expect(link).toBeVisible();
+
+    // Outside the tablist, so the arrow keys that walk the views cannot land
+    // on it and nothing about it reads as a view.
+    await expect(
+      page.getByRole('tablist').getByRole('link', { name: 'Pull requests' }),
+    ).toHaveCount(0);
+  });
+
+  test('opens the list when pressed', async ({ page, extensionId, api }) => {
+    void api;
+    await page.goto(reviewUrl(extensionId));
+    await page.waitForSelector('.topbar');
+
+    await page.getByRole('link', { name: 'Pull requests' }).click();
+
+    await expect(page).toHaveURL(/#\/prs$/);
+    await expect(page.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
+  });
+
+  test('does not underline on hover, as nothing else in the rail does', async ({
+    page,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await page.goto(reviewUrl(extensionId));
+    await page.waitForSelector('.topbar');
+
+    const link = page.getByRole('link', { name: 'Pull requests' });
+    await link.hover();
+
+    await expect(link).toHaveCSS('text-decoration-line', 'none');
   });
 });

@@ -803,8 +803,19 @@ button.scope-showing:hover {
    column. No rule above it: the distance is the grouping, and a hairline with
    three hundred pixels of nothing over it draws the eye to a boundary that is
    not where the interesting one is. */
-.view-options {
+/* The rail's two ways out, pushed to the bottom as a pair.
+   `margin-top: auto` is on the first of them rather than on each: putting it
+   on both would send Options to the very bottom and leave a gap between two
+   controls that belong together. */
+.view-dashboard {
   margin-top: auto;
+}
+
+/* The dashboard entry is an anchor, so the page's own `a:hover` rule reaches
+   it and outranks `.view-tab` on specificity. Nothing else in this rail
+   underlines on hover and this must not be the one thing that does. */
+.view-dashboard:hover {
+  text-decoration: none;
 }
 
 .view-tab {

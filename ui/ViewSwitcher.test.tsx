@@ -208,3 +208,72 @@ describe('the options button', () => {
     expect(openOptionsMock).toHaveBeenCalledOnce();
   });
 });
+
+describe('the pull requests link', () => {
+  const dashboardLink = () => screen.getByRole('link', { name: 'Pull requests' });
+
+  it('is in the rail', () => {
+    mount();
+
+    expect(dashboardLink()).toBeDefined();
+  });
+
+  it('points at the list route rather than changing the view', async () => {
+    const { onSelect } = mount();
+
+    expect(dashboardLink().getAttribute('href')).toBe('#/prs');
+    await userEvent.click(dashboardLink());
+
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('is a link, not a button', () => {
+    // It goes to a route on this same page. A button that assigns
+    // `location.hash` is a lie to anything reading the page aloud, and it
+    // gives up middle-click and open-in-new-tab for nothing.
+    mount();
+
+    expect(screen.queryByRole('button', { name: 'Pull requests' })).toBeNull();
+  });
+
+  it('is not a tab', () => {
+    // Structural, like the options button beside it: outside the `tablist`, so
+    // nothing about it can be mistaken for a fourth view.
+    mount();
+
+    expect(tabNames()).toEqual(['Files', 'Conversations', 'Overview']);
+    expect(
+      within(screen.getByRole('tablist')).queryByRole('link', { name: 'Pull requests' }),
+    ).toBeNull();
+    expect(dashboardLink().getAttribute('aria-selected')).toBeNull();
+    expect(dashboardLink().getAttribute('aria-controls')).toBeNull();
+  });
+
+  it('is not somewhere the arrow keys can land', async () => {
+    const { onSelect } = mount('overview');
+
+    screen.getByRole('tab', { name: 'Overview' }).focus();
+    await userEvent.keyboard('{ArrowDown}');
+
+    expect(onSelect).toHaveBeenCalledWith('files');
+  });
+
+  it('keeps its own tab stop, which the inactive tabs do not', () => {
+    mount();
+
+    expect(dashboardLink().getAttribute('tabindex')).toBeNull();
+  });
+
+  it('sits above Options, which stays the last way out', () => {
+    // The rail's way out belongs at the bottom, and there are two of them now.
+    // Options is the rarer errand, so it keeps the last slot.
+    mount();
+
+    const rail = dashboardLink().parentElement;
+    const names = [...(rail?.children ?? [])]
+      .map((el) => el.textContent?.trim())
+      .filter((text) => text === 'Pull requests' || text === 'Options');
+
+    expect(names).toEqual(['Pull requests', 'Options']);
+  });
+});
