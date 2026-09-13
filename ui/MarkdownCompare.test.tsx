@@ -461,6 +461,9 @@ describe('the composer a block opens', () => {
     // Seeded, so the comment says which paragraph it is about once it is read
     // on github.com with no paragraph beside it.
     expect(box().value).toBe('> Alpha.\n\n');
+    // And the caret stands on the blank line under it, so the first thing
+    // typed is the reviewer's own paragraph rather than more of the author's.
+    expect(box().selectionStart).toBe('> Alpha.\n\n'.length);
 
     const sent = await postComment('this is out of date');
     expect(sent).toMatchObject({ path: PATH, subjectType: 'FILE' });

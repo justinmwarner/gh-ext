@@ -28,7 +28,7 @@
  * screen if it did not.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { type DraftLocation, draftKey } from '@/lib/review/drafts';
 import type { CommentAnchor } from '@/lib/review/selection';
 import type { ComposerRejection } from './composerAnchor';
@@ -239,6 +239,35 @@ export function Composer({
     usable && !empty ? submit : null,
   );
 
+  /**
+   * Open with the caret at the end, which matters only when there is a seed.
+   *
+   * A seeded box holds a blockquote of the block being commented on, and
+   * without this the caret lands at offset zero — so the reviewer's first
+   * keystroke goes *inside* the quote, and the sentence they are writing is
+   * published as part of the passage they were answering. The quote ends in a
+   * blank line for exactly this reason; the caret has to be standing on it.
+   *
+   * By hand rather than by `autoFocus`, because focusing an element does not
+   * move a caret and nothing else moved it either. React's textarea mount
+   * assigns `defaultValue` — which sets the raw value through the child text
+   * content steps — and then assigns `value` to the same string, and the HTML
+   * spec moves the text entry cursor to the end only when that assignment
+   * *changes* the API value. Both assignments carry the seed, so every browser
+   * skips the step. A later `setBody` is a real change and moves it on its own,
+   * which is why the draft that arrives a tick after mount needs nothing here.
+   *
+   * A callback ref rather than an effect, so it also fires for a box that
+   * appears later, and `useCallback` with no deps so a re-render does not
+   * re-place a caret the reviewer has since moved.
+   */
+  const focusAtEnd = useCallback((box: HTMLTextAreaElement | null) => {
+    if (box === null) return;
+    box.focus();
+    const end = box.value.length;
+    box.setSelectionRange(end, end);
+  }, []);
+
   if (anchor === null || rejection !== null) {
     return (
       <section className="composer composer-rejected" data-composer={path}>
@@ -276,7 +305,7 @@ export function Composer({
         className="composer-input"
         aria-label={`Comment on ${path}, ${positionLabel(anchor).toLowerCase()}`}
         value={body}
-        autoFocus
+        ref={focusAtEnd}
         onChange={(event) => {
           typed.current = true;
           setBody(event.target.value);

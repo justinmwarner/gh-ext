@@ -263,6 +263,41 @@ describe('Composer', () => {
     ).toBe(true);
   });
 
+  /**
+   * The caret opens past the quote, not inside it.
+   *
+   * A seeded box holds a blockquote of the block being commented on, and a
+   * caret left where it starts puts the reviewer's first keystroke *inside*
+   * that quote — so the sentence they are writing is published as part of the
+   * passage they were answering.
+   *
+   * It has to be placed by hand because of how React mounts a textarea:
+   * `initTextarea` assigns `defaultValue` first, which sets the raw value
+   * through the child-text-content steps, and then assigns `value` to the same
+   * string. The HTML spec moves the text entry cursor to the end only when that
+   * assignment *changes* the API value, so the browser skips it and the caret
+   * stays at zero. jsdom implements the same guard, which is why this test can
+   * see it at all.
+   */
+  it('opens with the caret past the quote it was seeded with', () => {
+    const seed = '> Alpha.\n\n';
+
+    mount({ seed });
+
+    expect(box().selectionStart).toBe(seed.length);
+    // Collapsed rather than a selection: typing must add to the quote's
+    // author, not replace what was quoted.
+    expect(box().selectionEnd).toBe(seed.length);
+    expect(document.activeElement).toBe(box());
+  });
+
+  it('still takes the focus when there is nothing to quote', () => {
+    mount();
+
+    expect(document.activeElement).toBe(box());
+    expect(box().selectionStart).toBe(0);
+  });
+
   it('will not post an empty comment', () => {
     mount();
 
