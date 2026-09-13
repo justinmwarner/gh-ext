@@ -129,21 +129,49 @@ existing.
 
 ### What it costs
 
-Measured with `esbuild --bundle --minify`, gzipped:
+The three candidates weighed against each other on a scratch `esbuild --bundle
+--minify` build, gzipped. This compares renderers; it does not measure this
+project, and that distinction is why the real number below was owed:
 
 | Renderer | Bundled gz | Source positions | Packages |
 | --- | --- | --- | --- |
-| `marked` 18.0.11 (current) | 13,191 B | none | 1 |
+| `marked` 18.0.11 | 13,191 B | none | 1 |
 | **`markdown-it` 15.0.2** | **41,665 B** | `token.map`, every block | **1** |
 | `unified` + `remark-parse` + `remark-gfm` + `remark-rehype` + `rehype-stringify` | 50,144 B | `node.position`, every node | 5 |
-
-**+28,474 B gzipped**, which roughly doubles what the Markdown feature cost when
-it shipped (+25,860 B for `marked` and `dompurify` together). That is the price
-of the defects in §3 and of the anchors in §5, and it was accepted knowingly.
 
 remark was rejected: it costs more, needs five packages, and the extra it buys —
 positions on *inline* nodes — is not wanted, because GitHub anchors a comment to
 a line and not to a word.
+
+**Measured on the real build, 2026-09-12.** `npx wxt build` at `04ad174^`
+(`marked` 18.0.12) and at `04ad174` (`markdown-it` 15.0.2) — the swap and
+nothing else — in a clean worktree with `npm ci` at each, which is how §2 of
+`2026-09-04-rich-diff-types-comparison.md` measured the rich modes. Gzipped with
+`gzip -9`:
+
+| Artifact | Before | After | Delta |
+| --- | --- | --- | --- |
+| `chunks/review-*.js` | 864,218 B | 918,687 B | **+54,469 B (+6.3%)** |
+| same, gzipped | 247,276 B | 275,528 B | **+28,252 B (+11.4%)** |
+| `assets/review-*.css` | 39,278 B | 39,278 B | 0 |
+| same, gzipped | 7,573 B | 7,573 B | 0 |
+
+**The estimate held.** The scratch figure claimed +28,474 B gzipped and the real
+one is +28,252 B — 222 bytes lower, 0.8% out. That is closer than a scratch
+build has any right to be in general, and the reason it is close here is the
+shape of the change rather than luck: one dependency in, one out, nothing shared
+between them for the bundler to fold away, and not a byte of stylesheet either
+way. The cost was accepted knowingly and it is the cost that was described.
+
+It roughly doubles what the Markdown feature cost when it shipped (+25,860 B for
+`marked` and `dompurify` together). That is the price of the defects in §3 and
+of the anchors in §5.
+
+For scale, everything on this branch *after* the swap — the anchors, the block
+split, the comment affordance, the composer path, the keyboard, the drawer —
+adds **+1,896 B gzipped** to the same chunk and +177 B to the stylesheet,
+measured the same way at `c840192`. The renderer is very nearly the whole cost
+of the feature, and the rest of it is rounding.
 
 ### Due diligence
 
@@ -519,6 +547,7 @@ size.
 3. ~~**UNVERIFIED** — per-block sanitising equals whole-document sanitising.~~
    **Closed on 2026-09-12.** Twenty-seven shapes compared structurally, all
    identical, both directions mutation-checked. §6 has the detail.
-4. The +28,474 B is a bundle-size claim about a scratch build. Re-measure with
-   `npx wxt build` before and after, the way §2 of the comparison spec did, and
-   record the real number.
+4. ~~The +28,474 B is a bundle-size claim about a scratch build.~~ **Closed on
+   2026-09-12.** Re-measured with `npx wxt build` at `04ad174^` and `04ad174`:
+   **+28,252 B gzipped**, 222 bytes under the estimate and no stylesheet cost at
+   all. §4 has the table and the figures for the rest of the branch.
