@@ -396,3 +396,50 @@ test.describe('the title search', () => {
     await expect(page.getByRole('heading', { name: /waiting on you/i })).toBeVisible();
   });
 });
+
+test.describe('the picker, drawn inside a full page', () => {
+  /**
+   * The first run draws the picker inside `FullPage`, where
+   * `.fullpage label { display: block; font-weight: 600; margin: 1rem 0 }`
+   * outranks `.repos-label` on specificity. Left alone it takes the row's
+   * layout, bolds every repository name and spaces the rows by its own margin
+   * — a control that looks like a different control depending on which screen
+   * reached it. Only a browser can catch this; jsdom applies no stylesheet.
+   */
+  test('keeps its own row layout', async ({ page, extensionId, api }) => {
+    void api;
+    await page.goto(dashboardUrl(extensionId));
+    const label = page.locator('.repos-label').first();
+    await expect(label).toBeVisible();
+
+    await expect(label).toHaveCSS('display', 'flex');
+  });
+
+  test('does not let the unlock form bold the repository names', async ({
+    page,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await page.goto(dashboardUrl(extensionId));
+    const name = page.locator('.repos-name').first();
+    await expect(name).toBeVisible();
+
+    // 600 is the unlock form leaking in. These are list rows, not field labels.
+    await expect(name).not.toHaveCSS('font-weight', '600');
+  });
+
+  test('gives the private tag a pill to sit in', async ({ page, extensionId, api }) => {
+    void api;
+    await page.goto(dashboardUrl(extensionId));
+    const tag = page.getByText('Private');
+    await expect(tag).toBeVisible();
+
+    // An inline box with no vertical padding takes its height from the font's
+    // ascent and descent, so the border ends up against the letters. The pill
+    // has to be taller than the text it holds.
+    const box = await tag.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.height ?? 0).toBeGreaterThan(17);
+  });
+});
