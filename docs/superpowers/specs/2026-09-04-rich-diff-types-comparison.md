@@ -856,6 +856,43 @@ documented:
 
 ---
 
+### Decision 14 — A thread on a rich card is drawn nowhere — **OPEN**
+
+Found on 2026-09-12 while closing the same hole in the Markdown view, and it is
+not a Markdown problem either: Markdown is only the first rich mode that was
+asked the question.
+
+A rich card is handed `emptyDiffFor` so that no rows are drawn under its
+comparison. Thread annotations are built from the real patch by `layoutThreads`,
+which is correct and deliberate — a comment is posted as a line number in
+GitHub's diff and nothing on this page may be allowed to decide one. The two
+meet badly. A thread whose line is *inside* a hunk becomes an annotation rather
+than a listed thread, the card it belongs to has no rows, and
+`ui/DiffColumn.test.tsx`'s "what Pierre does with an annotation it cannot place"
+pins what follows: React writes the light-DOM node, it carries
+`slot="annotation-additions-N"`, and its `assignedSlot` is `null`. Present in
+the document, drawn nowhere, no error anywhere.
+
+Reproduced 2026-09-12 on a `.csv` in Grid mode with one thread on line 2: one
+`[data-thread]` node in the document, `assignedSlot` null, and an empty
+`UnanchoredThreads` drawer. The same holds for the JSON, YAML, TOML and notebook
+comparisons: `ThreadCard` is rendered by `DiffColumn`, `MarkdownCompare`,
+`UnanchoredThreads` and `ReviewFooter` and by nothing else, so none of those
+renderers draws a thread of its own.
+
+The Markdown view now has two routes out — a thread lands under the block whose
+range contains it, or it reaches the drawer with a `no-block` reason — and
+neither generalises for free. A grid has cells rather than blocks and a notebook
+has cells of another kind; what each one *can* do is say which source lines it
+put on screen, which is the same question `markdownBlocks` answers. The cheap
+interim is the second route alone: demote every thread on a rich card whose
+renderer cannot place it into the per-file list, which is visible and honest
+even when it is not beside the data.
+
+Not fixed here. It is a defect in the rich modes rather than in the Markdown
+feature, it predates that feature, and guessing at it while finishing something
+else is how a comment ends up drawn against the wrong row.
+
 ---
 
 ## 5. Types deliberately left as "binary file changed"
