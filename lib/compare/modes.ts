@@ -39,6 +39,7 @@ export type ComparisonKind =
   | 'structured'
   | 'notebook'
   | 'markdown'
+  | 'archive'
   | 'none';
 
 /** Which sides of the change exist at all. */
@@ -192,6 +193,18 @@ const MODES: Record<Exclude<ComparisonKind, 'none'>, ModeSpec[]> = {
       needsBothSides: true,
     },
   ],
+  archive: [
+    {
+      id: 'archive:contents',
+      label: 'Contents',
+      hint: 'Every file inside, with the ones that changed marked.',
+    },
+    {
+      id: 'archive:changed',
+      label: 'Changed files',
+      hint: 'Only the files inside that differ, without the ones that do not.',
+    },
+  ],
 };
 
 /**
@@ -224,6 +237,27 @@ const KINDS_BY_EXTENSION: Record<string, ComparisonKind> = {
   md: 'markdown',
   markdown: 'markdown',
   mdown: 'markdown',
+  // Every one of these is a zip with a different name on it, which is most of
+  // the argument for the kind: a reviewer changing a `.docx` or bumping a
+  // `.vsix` currently gets "Binary file changed" and nothing else. Kept to the
+  // formats that are a plain zip end to end — a container with its own header
+  // in front of the archive would read as damaged rather than as itself.
+  zip: 'archive',
+  jar: 'archive',
+  war: 'archive',
+  ear: 'archive',
+  aar: 'archive',
+  apk: 'archive',
+  vsix: 'archive',
+  nupkg: 'archive',
+  whl: 'archive',
+  epub: 'archive',
+  docx: 'archive',
+  xlsx: 'archive',
+  pptx: 'archive',
+  odt: 'archive',
+  ods: 'archive',
+  odp: 'archive',
 };
 
 /**

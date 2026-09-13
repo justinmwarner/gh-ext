@@ -578,7 +578,7 @@ comparison that is confidently wrong rather than absent. It needs a design
 decision about how attributes are pathed, which is a smaller version of the
 same question this document exists to ask.
 
-### Decision 9 — Archives
+### Decision 9 — Archives — **TAKEN, `@zip.js/zip.js` 2.14.1**
 
 `.zip`, `.jar`, `.vsix`, `.crx`. A file-list comparison — what entered, what
 left, what changed size — is the only useful view.
@@ -589,6 +589,37 @@ output that the noise rules already hide.
 
 **Recommendation: do nothing.** Reopen if a repository in real use commits
 them.
+
+**Taken on 2026-09-13**, at the maintainer's request, and with one part of the
+recommendation above corrected on the way: *what changed size* is not the useful
+view, it is the misleading one. A file edited without changing its length is the
+ordinary case — five bytes of `hello` for five of `world` — and a card reading
+sizes calls it unchanged. What answers honestly is the CRC-32 the archive stores
+per member in its central directory.
+
+Which decided the library, against the table in §0. `fflate`'s `UnzipFileInfo`
+carries `name`, `size`, `originalSize` and `compression` and **no checksum**, so
+with it "did this member change" means decompressing both sides and comparing
+bytes — and a four megabyte archive can expand to gigabytes, so that is a
+hazard as well as a cost. `@zip.js/zip.js` exposes `crc32` per entry straight
+off the central directory, along with `directory`, `encrypted` and `zip64`, so
+nothing is decompressed at all and the states this card cannot compare are ones
+it can *name* rather than guess at.
+
+It is expensive next to the 2,769 B that table quotes for `fflate`:
+**85,236 B gzipped**, measured on the real build, as `chunks/zip.js-*.js`. It is
+its own chunk behind a dynamic import, as Mermaid is, so it is fetched the first
+time a reviewer opens an archive and never in a review that has none.
+
+The extension list went wider than the four formats named above, and that is
+most of the value: `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp`, `.jar`,
+`.war`, `.ear`, `.aar`, `.apk`, `.vsix`, `.nupkg`, `.whl` and `.epub` are all a
+zip with another name on it. `.crx` and `.xpi` were left out rather than
+included: both can carry a signature header in front of the archive, and an
+unverified claim about where the zip starts is the kind of thing that reads as
+a damaged file. `lib/compare/archive.ts` has the comparison,
+`ui/ArchiveCompare.tsx` draws it, and the README's known limits record what it
+does not do.
 
 ### Decision 10 — Video and audio
 

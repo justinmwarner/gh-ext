@@ -215,7 +215,9 @@ describe('searching the diff', () => {
     await user.click(within(results).getAllByRole('button')[0] as HTMLElement);
 
     expect(currentFile()).toBe('src/app.ts');
-    expect(screen.queryByRole('searchbox')).toBeNull();
+    // Named, because the file tree carries a filter box of its own now and
+    // the claim here is about the panel rather than about searchboxes.
+    expect(screen.queryByRole('searchbox', { name: /search the diff|jump to a file/i })).toBeNull();
   });
 
   it('takes Ctrl+F too, so the browser find bar does not open instead', async () => {
@@ -274,7 +276,9 @@ describe('never while the reviewer is typing', () => {
     expect((box as HTMLTextAreaElement).value).toBe('jknvcre/?p');
     expect(currentFile()).toBe('');
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.queryByRole('searchbox')).toBeNull();
+    // Named, because the file tree carries a filter box of its own now and
+    // the claim here is about the panel rather than about searchboxes.
+    expect(screen.queryByRole('searchbox', { name: /search the diff|jump to a file/i })).toBeNull();
     expect(requestMock).not.toHaveBeenCalled();
   });
 

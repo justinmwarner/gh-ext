@@ -139,6 +139,27 @@ function locate(haystack: string, needle: string): { start: number; end: number 
 }
 
 /**
+ * Whether a path matches, without ranking it against any other.
+ *
+ * The file tree's filter, and deliberately the same substring rule the panel
+ * uses rather than a second one: a reviewer who has learned what typing `util`
+ * finds in one place should not have to learn it again in the other.
+ *
+ * Separate from {@link filterPaths} because the two want opposite things from
+ * the same match. The jump palette ranks by where the hit fell and truncates,
+ * so the likeliest destination is first; a tree keeps its own order and its own
+ * nesting and has to show every hit, so a ranked, truncated list is no use to
+ * it. What they share is this question.
+ *
+ * An empty query matches everything, which is what lets the box sit on screen
+ * at rest without hiding anything.
+ */
+export function pathMatches(path: string, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  return needle === '' || locate(path, needle) !== null;
+}
+
+/**
  * Everything in the diff that matches, in the order the files were given.
  *
  * File order is the column's order, which is the order the reviewer reads in,

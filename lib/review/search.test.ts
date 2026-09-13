@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type SearchableFile, filterPaths, searchDiff } from './search';
+import { type SearchableFile, filterPaths, pathMatches, searchDiff } from './search';
 
 const patch = (path: string, body: readonly string[]): string =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...body].join(
@@ -185,5 +185,42 @@ describe('filterPaths', () => {
 
   it('stops at the limit', () => {
     expect(filterPaths(paths, '', { limit: 2 })).toHaveLength(2);
+  });
+});
+
+/**
+ * The rule the file tree's filter narrows by.
+ *
+ * Its own export rather than `filterPaths`, because the two want opposite
+ * things from the same match: the jump palette ranks and truncates so the best
+ * candidate is first, and a tree must keep its own order and show every hit.
+ * What they must agree on is *what counts as a hit*, which is why it is asked
+ * here rather than reimplemented one directory over.
+ */
+describe('pathMatches', () => {
+  it('ignores case, as the panel does', () => {
+    expect(pathMatches('src/App.tsx', 'app')).toBe(true);
+    expect(pathMatches('src/app.tsx', 'APP')).toBe(true);
+  });
+
+  it('matches inside a directory as readily as inside a name', () => {
+    // Typing a folder is how a reviewer narrows to an area of the change, and
+    // it is most of what this filter is for.
+    expect(pathMatches('lib/review/search.ts', 'review/')).toBe(true);
+  });
+
+  it('trims, so a stray space does not empty the tree', () => {
+    expect(pathMatches('src/app.ts', '  app  ')).toBe(true);
+  });
+
+  it('lets everything through for an empty query', () => {
+    // The filter box at rest hides nothing, which is what makes it safe to
+    // leave on screen.
+    expect(pathMatches('src/app.ts', '')).toBe(true);
+    expect(pathMatches('src/app.ts', '   ')).toBe(true);
+  });
+
+  it('refuses a path it does not appear in', () => {
+    expect(pathMatches('src/app.ts', 'zzz')).toBe(false);
   });
 });

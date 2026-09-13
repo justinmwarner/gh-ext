@@ -3,9 +3,13 @@
  *
  * `/` searches inside the diff — file paths and changed lines — and `Mod+K`
  * filters the file list. They are the same mechanism deliberately: the same
- * box, the same list, the same highlight, the same keys. The file tree runs
- * with its own search off (§16.5) so single-letter shortcuts survive, which is
- * why the file jump lives here rather than in the tree.
+ * box, the same list, the same highlight, the same keys.
+ *
+ * The file tree has a filter of its own, and the two are not the same thing.
+ * This one *finds*: it ranks candidates, jumps to the best, and closes. That
+ * one *narrows*: it stays on, keeps the tree's own order and nesting, and
+ * leaves the reviewer working down what is left. Both ask `lib/review/search`
+ * what counts as a match, so a query that finds a file here finds it there.
  *
  * Everything matched is already in the page: `searchDiff` and `filterPaths` are
  * pure functions over the parsed patch. Nothing here asks GitHub anything, so

@@ -23,6 +23,7 @@ import { HEADER_BUDGET } from '@/lib/review/columnTail';
 import { REACHED } from '@/ui/currentFile';
 import {
   ADDED_FILE,
+  ARCHIVE_FILE,
   BASE_SHA,
   DELETED_FILE,
   EXEMPTED_FILE,
@@ -46,9 +47,9 @@ const VIEW = '.diff-view';
 /**
  * Every file in the column, in the order `UNIFIED_DIFF` concatenates them.
  *
- * `FILES` alone is not the column. Five more follow it — the image, the table,
- * and the added, deleted and unevenly-modified files — and a walk down the
- * column reaches all of them.
+ * `FILES` alone is not the column. Six more follow it — the image, the table,
+ * the archive, and the added, deleted and unevenly-modified files — and a walk
+ * down the column reaches all of them.
  */
 const COLUMN_ORDER = [
   ...FILES,
@@ -57,6 +58,7 @@ const COLUMN_ORDER = [
   REINDENTED_FILE,
   IMAGE_FILE,
   TABLE_FILE,
+  ARCHIVE_FILE,
   ADDED_FILE,
   DELETED_FILE,
   UNEVEN_FILE,
@@ -586,6 +588,48 @@ test('hovering a tree row names the whole path', async ({ context, extensionId, 
   await row.hover();
 
   await expect(row).toHaveAttribute('title', 'src/components/Button.tsx');
+});
+
+/**
+ * The tree's filter, and the one thing about it a browser has to settle.
+ *
+ * What it matches and what it hides is decided in `pathMatches` and asserted in
+ * jsdom. What cannot be asked there is layout: the box is a sibling of the
+ * scrolling rows rather than a row inside them, so that a reviewer who narrows
+ * a long tree and then walks down what is left still has it. jsdom performs no
+ * layout and scrolls nothing, and would report every one of these as zero.
+ */
+test('the tree filter narrows the rail and stays put while it scrolls', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const box = page.getByRole('searchbox', { name: 'Filter files' });
+  const rows = page.locator('.filetree-rows');
+
+  const before = await box.boundingBox();
+  await rows.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  expect(await box.boundingBox()).toEqual(before);
+
+  await box.fill('components/');
+
+  // The three files under `src/components`, their folders, and nothing else.
+  await expect(page.locator('.filetree-rows [data-path]')).toHaveCount(5);
+  // Counted off the fixture rather than written down, so a file added to the
+  // column later does not quietly make this assertion a lie.
+  await expect(page.locator('.filetree-count')).toHaveText(
+    `3 of ${COLUMN_ORDER.length} files`,
+  );
+
+  await box.press('Escape');
+  await expect(page.locator('.filetree-count')).toHaveCount(0);
+  await expect(page.locator('.filetree-rows [data-path]').first()).toBeVisible();
 });
 
 /**
@@ -1510,6 +1554,30 @@ test('a comment expanded into view survives narrowing the diff', async ({
  * Writing storage would skip the half of the chain most likely to break: that
  * the options page writes the field the review reads.
  */
+/**
+ * Choose a syntax theme on an options page that is already open.
+ *
+ * Typed rather than selected, because the control is no longer a `<select>`:
+ * seventy-five themes in one native list was a scroll nobody could aim at, so
+ * it is a filter box over a listbox now. Filtering first is not decoration —
+ * the list is virtual-length enough that a bare `getByRole('option')` would be
+ * resolving against every theme in the product.
+ *
+ * `exact` matters on every one of these. `Dracula` is a prefix of `Dracula
+ * soft`, and `Match the page (default)` is the only row whose label is not a
+ * theme name at all.
+ */
+async function chooseTheme(options: Page, label: string): Promise<void> {
+  const filter = options.getByRole('combobox', { name: 'Filter themes' });
+  await expect(filter).toBeVisible();
+  await filter.fill(label);
+
+  const option = options.getByRole('option', { name: label, exact: true });
+  await expect(option).toBeVisible();
+  await option.click();
+  await expect(option).toHaveAttribute('aria-selected', 'true');
+}
+
 async function setPreference(
   context: BrowserContext,
   extensionId: string,
@@ -2265,7 +2333,11 @@ test('the last card can still be read when the column is full of rich ones', asy
           card.getBoundingClientRect().top - view.getBoundingClientRect().top,
         );
       },
-      [VIEW, TABLE_FILE] as const,
+      // The archive, which sits where the table used to: three cards from the
+      // end of the column. It is the probe rather than the table because it is
+      // now the rich card in that position, and the position is what this
+      // measures — a rich card near the bottom being reachable at all.
+      [VIEW, ARCHIVE_FILE] as const,
     );
 
   const scrollFraction = (fraction: number) =>
@@ -2740,7 +2812,7 @@ test('the syntax theme is the reviewer\'s, and choosing one lets it colour the d
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
-  await options.locator('#diffTheme').selectOption('github-light-high-contrast');
+  await chooseTheme(options, 'GitHub light high contrast');
   await options.close();
 
   // Polled on the colours rather than on the attribute, and that distinction is
@@ -2795,7 +2867,7 @@ test('a chosen theme reaches the page around the diff, and can be taken back off
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
-  await options.locator('#diffTheme').selectOption('dracula');
+  await chooseTheme(options, 'Dracula');
 
   // Dracula's own editor background, and the whole point of the feature: the
   // reviewer chose a dark theme on a light machine and got a dark page.
@@ -2813,7 +2885,7 @@ test('a chosen theme reaches the page around the diff, and can be taken back off
   // Back to the default, which has to be a real removal rather than a second
   // palette that happens to hold Primer's values — otherwise a later change to
   // `ui/tokens.css` would never reach anyone who had ever chosen a theme.
-  await options.locator('#diffTheme').selectOption('');
+  await chooseTheme(options, 'Match the page (default)');
   await expect.poll(async () => (await chrome()).body).toBe('rgb(255, 255, 255)');
   const reset = await chrome();
   expect(reset.scheme).toBe('light dark');

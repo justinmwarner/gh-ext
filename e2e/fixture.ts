@@ -18,6 +18,8 @@
  * and the bar are sums over every one of them.
  */
 
+import { CHANGED_ARCHIVE, PAIR_ARCHIVE } from '../lib/compare/archive.fixture';
+
 export const PR = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 export const HEAD_SHA = 'f'.repeat(40);
 export const BASE_SHA = 'a'.repeat(40);
@@ -100,6 +102,23 @@ const patchFor = (path: string): string =>
  */
 export const IMAGE_FILE = 'assets/logo.png';
 export const TABLE_FILE = 'data/rows.csv';
+
+/**
+ * A zip, for the one question jsdom cannot be asked about this card.
+ *
+ * The archive reader is a lazily imported chunk, and whether an MV3 extension
+ * page's content security policy lets it load is not something a unit test in
+ * Node can answer — there, the import is a plain module resolution that always
+ * works. The two sides are the same two the unit tests use, and the member that
+ * matters is `readme.txt`: five bytes either way, different contents, so a card
+ * comparing sizes would call it unchanged.
+ */
+export const ARCHIVE_FILE = 'fixtures/bundle.zip';
+
+export const ARCHIVE_BYTES: Record<'base' | 'head', string> = {
+  base: PAIR_ARCHIVE,
+  head: CHANGED_ARCHIVE,
+};
 
 /**
  * The three files that are not a line-for-line edit.
@@ -254,6 +273,13 @@ const IMAGE_PATCH = [
   `Binary files a/${IMAGE_FILE} and b/${IMAGE_FILE} differ`,
 ].join('\n');
 
+/** A zip is binary to git too, so its patch says the same nothing a PNG's does. */
+const ARCHIVE_PATCH = [
+  `diff --git a/${ARCHIVE_FILE} b/${ARCHIVE_FILE}`,
+  'index 1111111..2222222 100644',
+  `Binary files a/${ARCHIVE_FILE} and b/${ARCHIVE_FILE} differ`,
+].join('\n');
+
 const TABLE_PATCH = [
   `diff --git a/${TABLE_FILE} b/${TABLE_FILE}`,
   'index 1111111..2222222 100644',
@@ -348,6 +374,7 @@ export const UNIFIED_DIFF = [
   REINDENTED_PATCH,
   IMAGE_PATCH,
   TABLE_PATCH,
+  ARCHIVE_PATCH,
   ADDED_PATCH,
   DELETED_PATCH,
   UNEVEN_PATCH,

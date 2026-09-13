@@ -161,7 +161,7 @@ describe('changeSides', () => {
 describe('modesFor', () => {
   it('offers raw for every kind there is', () => {
     const kinds = [
-      'image', 'svg', 'table', 'structured', 'notebook', 'markdown', 'none',
+      'image', 'svg', 'table', 'structured', 'notebook', 'markdown', 'archive', 'none',
     ] as const;
     for (const kind of kinds) {
       expect(modesFor(kind, 'both').map((mode) => mode.id)).toContain(RAW.id);
@@ -367,4 +367,48 @@ describe('isRememberedKind', () => {
       expect(isRememberedKind(kind)).toBe(false);
     },
   );
+});
+
+describe('archives, which are a container rather than a format', () => {
+  it('recognises a zip', () => {
+    expect(comparisonKind(file({ path: 'fixtures/sample.zip' }))).toBe('archive');
+  });
+
+  it('recognises the formats that are a zip wearing another name', () => {
+    // The better half of the argument for this kind. A `.docx` in a docs
+    // repository is a zip of XML parts, and it says "Binary file changed" and
+    // nothing else on every other review page there is.
+    for (const name of [
+      'a.docx', 'a.xlsx', 'a.pptx', 'a.odt', 'a.ods', 'a.odp',
+      'a.jar', 'a.war', 'a.ear', 'a.aar', 'a.apk',
+      'a.vsix', 'a.nupkg', 'a.whl', 'a.epub',
+    ]) {
+      expect(comparisonKind(file({ path: name }))).toBe('archive');
+    }
+  });
+
+  it('offers the contents, the changed files, and raw', () => {
+    expect(modesFor('archive', 'both').map((mode) => mode.id)).toEqual([
+      'archive:contents',
+      'archive:changed',
+      RAW.id,
+    ]);
+  });
+
+  it('keeps both modes for an archive that was only added', () => {
+    // Neither mode needs two sides to mean something: every file inside a new
+    // archive is a new file, and saying so is the answer rather than a
+    // degradation of one.
+    expect(modesFor('archive', 'added').map((mode) => mode.id)).toEqual([
+      'archive:contents',
+      'archive:changed',
+      RAW.id,
+    ]);
+  });
+
+  it('opens on the contents, because raw says only that it changed', () => {
+    expect(defaultModeFor(file({ path: 'fixtures/sample.zip', isBinary: true, patch: '' }))).toBe(
+      'archive:contents',
+    );
+  });
 });

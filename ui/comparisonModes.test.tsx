@@ -23,6 +23,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { browser } from 'wxt/browser';
+import { CHANGED_ARCHIVE, PAIR_ARCHIVE } from '@/lib/compare/archive.fixture';
 import { ANCHOR_ATTRIBUTE } from '@/lib/compare/markdownAnchors';
 import type { ReviewThread } from '@/lib/github/types';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
@@ -859,5 +860,68 @@ describe('a comment the rendered document has no block for', () => {
     );
     expect(body(README).querySelectorAll('[data-thread]')).toHaveLength(1);
     expect(listed()).toBeNull();
+  });
+});
+
+/**
+ * A zip, which GitHub has nothing to say about beyond "Binary file changed".
+ *
+ * The two sides differ in one member that kept its length, which is why the
+ * card reads checksums rather than sizes — and why this is asserted from the
+ * column rather than only on `ArchiveCompare`, where the entries arrive already
+ * parsed and the claim would be about a fixture instead of about a zip.
+ */
+function answerArchives(): void {
+  requestMock.mockImplementation(
+    (msg: { kind: string; ref: string; path: string }) => {
+      if (msg.kind === 'get-blob-bytes') {
+        const base64 = msg.ref === BLOBS.baseSha ? PAIR_ARCHIVE : CHANGED_ARCHIVE;
+        return Promise.resolve({
+          ok: true,
+          data: { status: 'ok', base64, byteLength: 0 },
+        });
+      }
+      return Promise.resolve({ ok: true, data: { data: {} } });
+    },
+  );
+}
+
+const ARCHIVE = 'fixtures/bundle.zip';
+
+describe('an archive, which GitHub calls a binary file and leaves at that', () => {
+  it('lists what is inside it, and which member changed', async () => {
+    answerArchives();
+    mount([file({ path: ARCHIVE, isBinary: true, patch: '' })]);
+
+    await waitFor(() => {
+      expect(within(body(ARCHIVE)).getByText('readme.txt')).toBeDefined();
+    });
+
+    const row = within(body(ARCHIVE)).getByRole('row', { name: /readme\.txt/ });
+    // Five bytes on both sides, so a card comparing sizes would have called
+    // this one unchanged.
+    expect(within(row).getByText('changed')).toBeDefined();
+    expect(
+      within(within(body(ARCHIVE)).getByRole('row', { name: /notes\.md/ })).getByText('added'),
+    ).toBeDefined();
+    expect(
+      within(
+        within(body(ARCHIVE)).getByRole('row', { name: /values\.csv/ }),
+      ).getByText('unchanged'),
+    ).toBeDefined();
+  });
+
+  it('drops the members that held still when asked for the changed ones', async () => {
+    answerArchives();
+    mount([file({ path: ARCHIVE, isBinary: true, patch: '' })]);
+
+    await waitFor(() => {
+      expect(within(body(ARCHIVE)).getByText('data/values.csv')).toBeDefined();
+    });
+
+    await userEvent.click(modeButton(ARCHIVE, /changed files/i));
+
+    expect(within(body(ARCHIVE)).queryByText('data/values.csv')).toBeNull();
+    expect(within(body(ARCHIVE)).getByText('readme.txt')).toBeDefined();
   });
 });

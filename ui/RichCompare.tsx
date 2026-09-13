@@ -27,13 +27,15 @@ import {
   imageMediaType,
   syntaxOf,
 } from '@/lib/compare/modes';
+import { compareArchives } from '@/lib/compare/archive';
 import { compareMarkdown } from '@/lib/compare/markdown';
 import { compareNotebooks, parseNotebook } from '@/lib/compare/notebook';
 import { compareStructured } from '@/lib/compare/structured';
 import { compareTables, delimiterFor, parseDelimited } from '@/lib/compare/tabular';
 import { commentableLines } from '@/lib/review/commentable';
+import { ArchiveCompare } from './ArchiveCompare';
 import type { BlobRefs } from './blobLoader';
-import { useImageSides, useTextSides } from './fileSides';
+import { useArchiveSides, useImageSides, useTextSides } from './fileSides';
 import { ImageCompare, type ImageVariant } from './ImageCompare';
 import { JsonFormatted, JsonKeyPaths } from './JsonCompare';
 import { MarkdownCompare, type UnplacedComments } from './MarkdownCompare';
@@ -43,6 +45,19 @@ import { TableCompare } from './TableCompare';
 
 /** Which side-loader a kind needs. Images and SVG want bytes; the rest, text. */
 const NEEDS_BYTES: ReadonlySet<ComparisonKind> = new Set<ComparisonKind>(['image', 'svg']);
+
+/**
+ * Which of the three loaders a kind reads its sides with.
+ *
+ * A third was added rather than folding archives in with the images, because
+ * what reaches the page is not the same thing. An archive's bytes are parsed on
+ * arrival and only its index is kept — a `.jar` is megabytes and its listing is
+ * kilobytes, and the side cache holds two dozen of these.
+ */
+type SideLoader = 'bytes' | 'archive' | 'text';
+
+const loaderFor = (kind: ComparisonKind): SideLoader =>
+  NEEDS_BYTES.has(kind) ? 'bytes' : kind === 'archive' ? 'archive' : 'text';
 
 /** The image variant a mode id asks for, for the two kinds that share a renderer. */
 const VARIANTS: Record<string, ImageVariant> = {
@@ -117,7 +132,7 @@ export function RichCompare({
     path: file.path,
     oldPath: file.oldPath,
     sides,
-    enabled: active && NEEDS_BYTES.has(kind) && mediaType !== null,
+    enabled: active && loaderFor(kind) === 'bytes' && mediaType !== null,
     mediaType: mediaType ?? 'application/octet-stream',
   });
 
@@ -126,7 +141,15 @@ export function RichCompare({
     path: file.path,
     oldPath: file.oldPath,
     sides,
-    enabled: active && !NEEDS_BYTES.has(kind),
+    enabled: active && loaderFor(kind) === 'text',
+  });
+
+  const archive = useArchiveSides({
+    refs: blobs,
+    path: file.path,
+    oldPath: file.oldPath,
+    sides,
+    enabled: active && loaderFor(kind) === 'archive',
   });
 
   const table = useMemo(() => {
@@ -187,6 +210,21 @@ export function RichCompare({
     [anchorable, file.patch],
   );
 
+  /**
+   * The two indexes lined up, which is the whole comparison.
+   *
+   * A missing side is an empty archive rather than a reason not to draw: an
+   * added `.zip` has no base side, and every file inside it is then correctly
+   * reported as added.
+   */
+  const archived = useMemo(
+    () =>
+      kind !== 'archive' || archive.status !== 'ready'
+        ? null
+        : compareArchives(archive.before ?? [], archive.after ?? []),
+    [kind, archive.status, archive.before, archive.after],
+  );
+
   const notebook = useMemo(() => {
     if (kind !== 'notebook' || text.status !== 'ready') return null;
     const before = parseNotebook(text.before ?? '{"cells":[]}');
@@ -210,7 +248,7 @@ export function RichCompare({
     );
   }
 
-  const loading = NEEDS_BYTES.has(kind) ? bytes : text;
+  const loading = { bytes, archive, text }[loaderFor(kind)];
   if (loading.status === 'loading' || loading.status === 'idle') {
     return (
       <p className="file-note" role="status">
@@ -236,6 +274,12 @@ export function RichCompare({
         before={bytes.before}
         after={bytes.after}
       />
+    );
+  }
+
+  if (archived !== null) {
+    return (
+      <ArchiveCompare comparison={archived} changedOnly={mode === 'archive:changed'} />
     );
   }
 

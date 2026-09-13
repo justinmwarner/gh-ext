@@ -29,6 +29,8 @@ import {
   FIRST_SHA,
   RANGE_DIFF,
   HEAD_SHA,
+  ARCHIVE_BYTES,
+  ARCHIVE_FILE,
   IMAGE_BYTES,
   IMAGE_FILE,
   MARKDOWN_FILE,
@@ -476,6 +478,17 @@ export async function routeGitHub(context: BrowserContext): Promise<ApiLog> {
         });
         return;
       }
+      // Real archive bytes, for the same reason the PNG is: the question is
+      // whether they survive the worker, the base64 and the message channel
+      // and still parse as a zip on the page.
+      if (path === ARCHIVE_FILE) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/zip',
+          body: Buffer.from(ARCHIVE_BYTES[side], 'base64'),
+        });
+        return;
+      }
       if (path === TABLE_FILE) {
         await route.fulfill({ status: 200, contentType: 'text/csv', body: TABLE_TEXT[side] });
         return;
@@ -605,4 +618,4 @@ export const dashboardUrl = (extensionId: string): string =>
   `chrome-extension://${extensionId}/review.html#/prs`;
 
 export { expect } from '@playwright/test';
-export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR, IMAGE_FILE, TABLE_FILE };
+export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR, ARCHIVE_FILE, IMAGE_FILE, TABLE_FILE };

@@ -12,8 +12,9 @@ switch to open the review automatically on landing on a pull request.
 Comments with reply and resolve. The pending-review flow. Status checks.
 Approve and request changes. Plus keyboard navigation, viewed state, drafts that
 survive a failed post, multi-line comments, suggestion authoring, noise
-filtering, diff search, expand-unchanged-context, and scoping the diff to one
-commit, a range of commits, or "changes since my last review".
+filtering, diff search, a filter on the file tree, expand-unchanged-context, and
+scoping the diff to one commit, a range of commits, or "changes since my last
+review".
 
 The colours are yours to pick: seventy-five themes, all already in the extension
 so choosing one downloads nothing. A theme dresses the whole product, not just
@@ -234,6 +235,20 @@ how to validate a mutation without performing one.
 - Expanding unchanged context reads blobs at `baseRefOid` rather than the merge
   base, so if the base branch has moved the expanded context can come from a
   slightly different revision than the patch.
+- An archive — a `.zip`, or one of the formats that is a zip wearing another
+  name, such as `.docx`, `.jar` or `.vsix` — is compared by its index rather
+  than by its contents. The card lists every file inside and marks the ones that
+  were added, removed or changed, read from the checksums the archive itself
+  stores, so nothing is ever decompressed. It does not show the diff of a file
+  *inside* the archive, and there is no line in one to anchor a comment to. A
+  member the archive encrypted carries no usable checksum and is reported as one
+  that could not be compared rather than as unchanged. The reader is
+  `@zip.js/zip.js`, fetched as its own chunk — 85 kB gzipped — the first time a
+  reviewer opens an archive, and absent from every other review.
+- An archive past four megabytes is not listed at all. Its index is at the end
+  of the file, so the whole file has to cross the message channel to be read,
+  and `MAX_BINARY_BYTES` in `lib/github/binary-blobs.ts` is where that ceiling
+  sits. A built `.jar` or `.apk` will usually be past it.
 - The bundle carries an unreachable Shiki WebAssembly chunk. It is dead weight
   in the output, not on the main thread — the default highlighter is the
   JavaScript regex engine and nothing selects the WASM path.

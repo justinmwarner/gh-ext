@@ -23,19 +23,38 @@
  * it costs — no measured heights, no scroll anchoring, no rows that exist for
  * the reviewer but not for `Ctrl+F`.
  *
+ * **The filter narrows, it does not find.** `Mod+K` already finds a file and
+ * jumps to it; the box at the top of this rail is the other half — it stays on,
+ * keeps the tree's order and nesting, and leaves a reviewer working down an
+ * area of the change. It narrows *this rail only*: the diff column keeps every
+ * file, because a control in the sidebar that quietly removed files from a
+ * review is the thing `lib/settings.ts` argues at length against. What it is
+ * doing is said in words above the rows, so it cannot be left on by accident.
+ *
  * Structure, order, and what a folder's checkbox acts on are all in
  * `treeRows`. What is here is only how a row is drawn and which key does what.
  */
 
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FileViewedState, PatchStatus } from '@/lib/github/types';
+import { pathMatches } from '@/lib/review/search';
 import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import type { FileComments } from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
-import { type TreeRow, checkState, treeRows } from './treeRows';
+import { type TreeRow, checkState, directoryPaths, treeRows } from './treeRows';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
 const MINUS = '−';
+
+/**
+ * No folds, shared so a filtered render does not allocate one per keystroke.
+ *
+ * What a narrowed tree is built with. A folder the reviewer shut still holds
+ * whatever matched, and leaving it shut would have the count claim a file the
+ * tree is not showing — which reads as the filter being broken rather than as
+ * the folder being closed.
+ */
+const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
 
 /**
  * Linguist's own colours, for the dot that stands in for a file-type icon.
@@ -113,6 +132,16 @@ export interface FileTreeProps {
    * every file beneath it for a folder's.
    */
   onSetViewed?: (paths: readonly string[], next: boolean) => void;
+  /**
+   * Open with every directory shut, for the monorepo case.
+   *
+   * Read once, when the first file list arrives, and never again — see the
+   * seed below. It is where the tree *starts*, not a switch the tree obeys,
+   * and the difference matters: a reviewer forty minutes into a review has
+   * arranged these folds themselves, and a setting that reapplied itself
+   * would throw that away to tell them something they already knew.
+   */
+  collapseTree?: boolean;
 }
 
 export function FileTree({
@@ -122,13 +151,62 @@ export function FileTree({
   current,
   onSelect,
   onSetViewed,
+  collapseTree = false,
 }: FileTreeProps) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NOTHING_COLLAPSED);
   const [focused, setFocused] = useState<string | null>(null);
   const elements = useRef(new Map<string, HTMLElement>());
 
+  const [query, setQuery] = useState('');
+
   const paths = useMemo(() => files.map((file) => file.path), [files]);
-  const rows = useMemo(() => treeRows(paths, collapsed), [paths, collapsed]);
+
+  /**
+   * Shut every directory, once, if that is how the reviewer asked for the tree.
+   *
+   * Two things about the timing, and both are load-bearing.
+   *
+   * It waits for a file list rather than running on mount, because settings
+   * arrive from `storage.local` and storage is asynchronous — `useSettings`
+   * starts on the defaults and replaces them a tick later. A seed at mount
+   * would therefore read `collapseTree` as off for every reviewer who had
+   * turned it on. The first render that has paths to fold is the one whose
+   * setting is real: `useSettings` resolves long before the pull request
+   * itself arrives over the wire, which is what puts these files here.
+   *
+   * And it runs once, guarded by a ref rather than by the value it read. A
+   * reviewer who changes the setting with a review open has forty minutes of
+   * their own folding on screen, and reapplying this would throw it away to
+   * tell them something they had just said. The same ref is why turning the
+   * setting *off* mid-review does not fling every folder open either.
+   *
+   * During render rather than in an effect, which is the pattern `DiffColumn`
+   * uses for the same reason: the rows below are built from `collapsed` in
+   * this same pass, and an effect would paint one frame of a fully open tree
+   * before shutting it.
+   */
+  const seeded = useRef(false);
+  if (!seeded.current && paths.length > 0) {
+    seeded.current = true;
+    if (collapseTree) setCollapsed(directoryPaths(paths));
+  }
+
+  /**
+   * What the filter leaves, or `paths` itself when there is no filter.
+   *
+   * The same array rather than a copy in the common case, so the rows below are
+   * rebuilt only when something actually moved.
+   */
+  const filtering = query.trim() !== '';
+  const shown = useMemo(
+    () => (filtering ? paths.filter((path) => pathMatches(path, query)) : paths),
+    [filtering, paths, query],
+  );
+
+  const rows = useMemo(
+    () => treeRows(shown, filtering ? NOTHING_COLLAPSED : collapsed),
+    [shown, filtering, collapsed],
+  );
   const byPath = useMemo(
     () => new Map(files.map((file) => [file.path, file])),
     [files],
@@ -254,8 +332,54 @@ export function FileTree({
     return <p className="placeholder">No changed files.</p>;
   }
 
+  /**
+   * What the filter did, in words, and empty when it is not doing anything.
+   *
+   * It exists so that a filter cannot be forgotten. The tree is the reviewer's
+   * map of the change, and one silently showing four of forty files is a map
+   * that lies — the same objection `lib/settings.ts` makes to a preference that
+   * hides lines without saying it is on.
+   */
+  const narrowed = !filtering
+    ? ''
+    : shown.length === 0
+      ? `No file matches “${query.trim()}”`
+      : `${shown.length} of ${paths.length} files`;
+
   return (
-    <div className="filetree-rows" role="tree" aria-label="Changed files" onKeyDown={onKeyDown}>
+    <>
+      <div className="filetree-filter">
+        <input
+          type="search"
+          className="filetree-search"
+          aria-label="Filter files"
+          placeholder="Filter files…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            // Escape rather than selecting the text and deleting it. This box
+            // is meant to be picked up and put down between one look and the
+            // next, and `lib/keymap.ts` already ignores keys typed in an input,
+            // so the single-letter shortcuts are not at risk either way.
+            if (event.key === 'Escape') setQuery('');
+            // Straight into what was found, without reaching for the mouse.
+            else if (event.key === 'ArrowDown') move(rows[0]);
+            else return;
+            event.preventDefault();
+          }}
+        />
+        {narrowed !== '' && (
+          /* Rendered only when it has something to say. A live region that is
+             permanently present and permanently empty is a node every other
+             surface's `role="status"` has to be told apart from, and it says
+             nothing to a reviewer either. */
+          <p className="filetree-count" role="status">
+            {narrowed}
+          </p>
+        )}
+      </div>
+
+      <div className="filetree-rows" role="tree" aria-label="Changed files" onKeyDown={onKeyDown}>
       {rows.map((row) => {
         const file = byPath.get(row.path);
         const state = checkState(row, states);
@@ -344,6 +468,7 @@ export function FileTree({
           </div>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }

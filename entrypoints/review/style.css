@@ -940,13 +940,52 @@ button.scope-showing:hover {
   min-height: 0;
 }
 
-/* The tree owns the width the drag gave it and does its own scrolling. */
+/* The tree owns the width the drag gave it and does its own scrolling. A
+   column, because the filter sits above the rows rather than beside them. */
 .filetree {
   display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
   min-height: 0;
   padding: 8px 0 8px 8px;
   overflow: hidden;
+}
+
+/* Outside `.filetree-rows` on purpose: the box must not scroll away from a
+   reviewer who narrowed a long tree and then walked down what was left. */
+.filetree-filter {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 6px;
+  padding-bottom: 6px;
+}
+
+.filetree-search {
+  min-width: 0;
+  padding: 3px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+/* A placeholder is text and answers to the same contrast as any other. The UA
+   default is a fixed grey whatever it is sitting on, which is the problem. */
+.filetree-search::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
+}
+
+/* Empty and therefore zero-height until the filter is doing something. No
+   space is reserved for it: the line is absent on almost every review, and a
+   permanently blank row above the tree would be furniture. */
+.filetree-count {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
 }
 
 .filetree-rows {
@@ -3146,6 +3185,56 @@ button.scope-showing:hover {
   margin-right: 6px;
   color: var(--danger-fg);
   text-decoration: line-through;
+}
+
+/* ------------------------------------------------------------- archives */
+
+.archive-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Not bold. The path is a `th` because it is the name a screen reader should
+   announce the row by, which is a question about semantics rather than weight. */
+.archive-path {
+  font-weight: 400;
+}
+
+.archive-size {
+  color: var(--fg-muted);
+  text-align: right;
+}
+
+/* The greens and reds a changed line is already drawn in, so a file appearing
+   inside an archive and a file appearing in the tree read as the same event. */
+.archive-added th,
+.archive-added td {
+  background: var(--success-subtle-bg);
+}
+
+.archive-removed th,
+.archive-removed td {
+  background: var(--danger-subtle-bg);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--danger-fg) 53%, transparent);
+}
+
+/* Tinted whole, unlike a changed row in the CSV grid - there the cells that
+   moved are marked and the rest of the row is the point of the mode. Here
+   nothing finer is known: the checksum says the member differs and says
+   nothing about where. */
+.archive-changed th,
+.archive-changed td {
+  background: var(--attention-subtle-bg);
+}
+
+/* Neither changed nor unchanged, and deliberately given no colour of its own:
+   a third tint would claim to mean something, and the row already says in
+   words that it could not be compared. */
+.archive-unknown th,
+.archive-unknown td {
+  color: var(--fg-muted);
 }
 
 /* ----------------------------------------------------------------- JSON */
