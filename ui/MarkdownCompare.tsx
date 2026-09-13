@@ -46,7 +46,7 @@
  * changes the document.
  */
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MarkdownComparison } from '@/lib/compare/markdown';
 import type { DiffSide, ReviewThread } from '@/lib/github/types';
 import { firstCommentableLine, isCommentable } from '@/lib/review/commentable';
@@ -60,6 +60,33 @@ import { useReviewSession } from './reviewSession';
 import { useShortcutTarget } from './shortcutTargets';
 import { ThreadCard } from './ThreadCard';
 
+/**
+ * What this view had a line for and no block for, on its way to the drawer.
+ *
+ * A block carries the range of source lines it was built from, and those
+ * ranges do not tile the file: the blank line between two paragraphs is in
+ * none of them, and a raw `html_block` has no range at all because
+ * `markdown-it` returns its content verbatim and the anchor never reaches the
+ * output. A comment on one of those lines is perfectly well anchored as far as
+ * GitHub and `layoutThreads` are concerned — so it is made an annotation, and
+ * a rich card is handed a diff with no rows for Pierre to hang one on. Drawn
+ * nowhere, listed nowhere, and silent at every step.
+ *
+ * Reported upward rather than listed here, because a card has one drawer and
+ * `FileBody` owns it. Two `<details>` saying "comments not shown in the diff"
+ * on one card is a worse answer than the bug.
+ */
+export interface UnplacedComments {
+  threads: readonly ReviewThread[];
+  posting: readonly PostingComment[];
+}
+
+/** Nothing fell through, shared so the common answer costs no allocation. */
+export const NOTHING_UNPLACED: UnplacedComments = Object.freeze({
+  threads: [],
+  posting: [],
+});
+
 export interface MarkdownCompareProps {
   comparison: MarkdownComparison;
   path: string;
@@ -71,6 +98,14 @@ export interface MarkdownCompareProps {
    * cannot form its own opinion about what a patch says.
    */
   commentable: ReadonlySet<string>;
+  /**
+   * Where to send the comments this view has no block for.
+   *
+   * Required rather than optional, and that is the whole point of it: a caller
+   * who forgets is a caller whose reviewer is never told a comment exists, and
+   * an optional callback is exactly the one that gets forgotten.
+   */
+  onUnplaced: (unplaced: UnplacedComments) => void;
 }
 
 /** Long enough to recognise a paragraph, short enough to be read aloud. */
@@ -144,7 +179,12 @@ interface BlockComments {
   posting: PostingComment[];
 }
 
-export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompareProps) {
+export function MarkdownCompare({
+  comparison,
+  path,
+  commentable,
+  onUnplaced,
+}: MarkdownCompareProps) {
   const session = useReviewSession();
 
   const blocks = useMemo(
@@ -223,7 +263,19 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
    * rewrote. Such a thread is listed and also drawn under its block. Closing
    * it would mean carrying the per-file list's verdict into a component that
    * otherwise needs nothing from it, and the failure it costs is a comment
-   * read twice rather than a comment not read at all.
+   * read twice rather than a comment not read at all. `FileBody` does drop
+   * the duplicate on the one path where it would otherwise be listed twice
+   * under two different sentences, which is a contradiction rather than a
+   * repetition.
+   *
+   * **What is left over is reported, not discarded.** A comment whose line the
+   * patch accepts and no block covers would be anchored by `layoutThreads`,
+   * handed to a renderer with no rows, and lost without a word. Those go out
+   * through `onUnplaced` to the card's drawer. The rejected alternative was to
+   * attach such a comment to the nearest block at or above its line, which
+   * draws a reviewer's words beside prose they were not written about — the
+   * same misattribution the `outdated` verdict already refuses to make, and
+   * worse than the drawer because nothing on screen would admit to it.
    *
    * The scan is linear per thread over the blocks rather than a lookup table.
    * A document has hundreds of blocks and a file has a handful of threads, the
@@ -234,38 +286,30 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
     const placed = new Map<string, BlockComments>();
     const threads = session.byPath.get(path) ?? [];
     const posting = session.posting.filter((entry) => entry.path === path);
-    if (threads.length === 0 && posting.length === 0) return placed;
+    if (threads.length === 0 && posting.length === 0) {
+      return { placed, unplaced: NOTHING_UNPLACED };
+    }
 
     /**
      * Which block a comment on this line belongs under, if any.
      *
-     * **The two conditions are about different lines, and that is the whole of
-     * it.** Placement is containment — a block holds a comment when the comment
-     * sits anywhere in the range the block occupies, which is how a thread on
-     * the second line of a wrapped paragraph finds the paragraph it was written
-     * about. The gate against drawing a second copy is about the *comment's*
-     * own line, because that is the line `layoutThreads` judged when it decided
-     * between an annotation and the per-file list. Gating on the block's range
-     * instead would draw a thread here that the list is already showing, and
-     * asking about the block's first line — which is what these two used to be,
-     * indistinguishably, when a block was one line — loses the thread from both
-     * places at once.
+     * Placement is containment — a block holds a comment when the comment sits
+     * anywhere in the range the block occupies, which is how a thread on the
+     * second line of a wrapped paragraph finds the paragraph it was written
+     * about. Asking about the block's first line instead — which this was,
+     * indistinguishably, when a block was one line — loses the thread.
      *
      * Ranges are disjoint and in document order, so the first block containing
      * the line is the only one, and no comment can be placed twice.
      */
-    const keyFor = (line: number, side: DiffSide): string | null => {
-      if (!isCommentable(commentable, side, line)) return null;
-      return (
-        blocks.find(
-          (block) =>
-            block.anchor !== null &&
-            block.anchor.side === side &&
-            block.anchor.line <= line &&
-            line <= block.anchor.endLine,
-        )?.key ?? null
-      );
-    };
+    const blockAt = (line: number, side: DiffSide): string | null =>
+      blocks.find(
+        (block) =>
+          block.anchor !== null &&
+          block.anchor.side === side &&
+          block.anchor.line <= line &&
+          line <= block.anchor.endLine,
+      )?.key ?? null;
 
     const at = (key: string): BlockComments => {
       const held = placed.get(key);
@@ -275,24 +319,66 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
       return made;
     };
 
+    const unplacedThreads: ReviewThread[] = [];
+    const unplacedPosting: PostingComment[] = [];
+
     for (const thread of threads) {
       // An outdated thread has no line at all and a file-level one names no
       // line by design. Both stay in the per-file list, where they say so.
       if (thread.subjectType !== 'LINE' || thread.line === null) continue;
-      const key = keyFor(thread.line, thread.diffSide);
-      if (key !== null) at(key).threads.push(thread);
+      // Asked before the blocks, and about the *comment's* own line rather
+      // than about any block's range, because that is the line `layoutThreads`
+      // judged when it chose between an annotation and the per-file list. A
+      // thread outside the patch is already listed there with a reason of its
+      // own — `out-of-hunk`, or `other-commit` when this scope empties the set
+      // outright — and is neither drawn here nor reported as unplaced, which
+      // would be the same comment read twice under two sentences.
+      if (!isCommentable(commentable, thread.diffSide, thread.line)) continue;
+      const key = blockAt(thread.line, thread.diffSide);
+      if (key === null) unplacedThreads.push(thread);
+      else at(key).threads.push(thread);
     }
 
     for (const entry of posting) {
       // A comment about the file is drawn below the document by `FileBody`,
       // which is where its thread will land once GitHub answers.
       if (entry.anchor.subject === 'file') continue;
-      const key = keyFor(entry.anchor.line, entry.anchor.side);
-      if (key !== null) at(key).posting.push(entry);
+      if (!isCommentable(commentable, entry.anchor.side, entry.anchor.line)) continue;
+      const key = blockAt(entry.anchor.line, entry.anchor.side);
+      if (key === null) unplacedPosting.push(entry);
+      else at(key).posting.push(entry);
     }
 
-    return placed;
+    return {
+      placed,
+      unplaced:
+        unplacedThreads.length === 0 && unplacedPosting.length === 0
+          ? NOTHING_UNPLACED
+          : { threads: unplacedThreads, posting: unplacedPosting },
+    };
   }, [blocks, commentable, path, session.byPath, session.posting]);
+
+  /**
+   * Hand the leftovers to the card, and take them back when this view goes.
+   *
+   * An effect rather than a call during render, because the report is a write
+   * into another component's state and React forbids that on the way down.
+   *
+   * The cleanup is what makes pressing Raw honest: the text diff draws these
+   * comments on their own rows, and a drawer still listing them would be the
+   * same comment twice. It costs a clear-and-refill whenever `unplaced` moves,
+   * which React batches into one render because both updates are scheduled in
+   * the same effect flush — and the far worse failure is the stale list.
+   *
+   * This cannot loop. The state it writes re-renders the card, the memo above
+   * depends on nothing the card's own state touches, so `unplaced` keeps its
+   * identity and the effect is not asked again.
+   */
+  const { unplaced } = comments;
+  useEffect(() => {
+    onUnplaced(unplaced);
+    return () => onUnplaced(NOTHING_UNPLACED);
+  }, [onUnplaced, unplaced]);
 
   /**
    * A changed block is this view's hunk, and this is where that is decided.
@@ -371,7 +457,7 @@ export function MarkdownCompare({ comparison, path, commentable }: MarkdownCompa
       <div className="markdown-rendered">
         {blocks.map((block, index) => {
           const anchor = anchorFor(block, commentable);
-          const mine = comments.get(block.key);
+          const mine = comments.placed.get(block.key);
 
           return (
             <div

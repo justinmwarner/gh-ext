@@ -25,7 +25,11 @@ import type { ReviewThread } from '@/lib/github/types';
 import { commentableLines } from '@/lib/review/commentable';
 import { DraftStore, type KeyValueStore } from '@/lib/review/drafts';
 import { request } from './background';
-import { MarkdownCompare } from './MarkdownCompare';
+import {
+  MarkdownCompare,
+  NOTHING_UNPLACED,
+  type UnplacedComments,
+} from './MarkdownCompare';
 import { memoryStore } from './memoryStore.fixture';
 import { renderMermaid } from './mermaid';
 import { pullRequestNode, reviewThread } from './prPayload.fixture';
@@ -56,6 +60,7 @@ const PR_REF = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 beforeEach(() => {
   requestMock.mockReset();
   renderMock.mockReset();
+  unplaced = NOTHING_UNPLACED;
   renderMock.mockResolvedValue({
     ok: true,
     svg: '<svg viewBox="0 0 300 120"></svg>',
@@ -92,6 +97,16 @@ interface MountOptions {
   store?: KeyValueStore;
 }
 
+/**
+ * The last thing the card said it could not place.
+ *
+ * A card reports upward rather than listing anything itself — `ui/FileBody.tsx`
+ * owns the one drawer — so this is the only place the answer is observable
+ * from here, and the end-to-end claim that it reaches the drawer is made in
+ * `comparisonModes.test.tsx` where the whole column is mounted.
+ */
+let unplaced: UnplacedComments = NOTHING_UNPLACED;
+
 function mount(before: string, after: string, options: MountOptions = {}) {
   const { path = PATH, patch = '', threads = [], store = memoryStore() } = options;
   const view = render(
@@ -107,6 +122,9 @@ function mount(before: string, after: string, options: MountOptions = {}) {
           comparison={compareMarkdown(before, after, NONCE)}
           path={path}
           commentable={commentableLines(patch)}
+          onUnplaced={(next) => {
+            unplaced = next;
+          }}
         />
       </ReviewSessionProvider>
     </ShortcutTargetsProvider>,
@@ -268,6 +286,7 @@ describe('the document as React sees it', () => {
             )}
             path={PATH}
             commentable={commentableLines('')}
+            onUnplaced={() => {}}
           />
         </ReviewSessionProvider>
       </ShortcutTargetsProvider>,
@@ -301,6 +320,28 @@ describe('a comparison with nothing to render', () => {
 const BEFORE = '# Title\n\nAlpha.\n\nTwo.\n\n<table><tr><td>raw</td></tr></table>\n';
 const AFTER = '# Title\n\nAlpha.\n\nThree.\n\n<table><tr><td>raw</td></tr></table>\n';
 const PATCH = '@@ -5 +5 @@\n-Two.\n+Three.\n';
+
+/**
+ * The same two documents under one hunk covering every line of them.
+ *
+ * The shape that exposes the gap between the blocks: with the whole file in a
+ * hunk, every line is one GitHub would take a comment on and one
+ * `layoutThreads` will anchor — including the blank separators, which render
+ * as nothing at all, and the raw `<table>`, which renders without an anchor.
+ * Those lines have no block, and a comment on one of them is drawn by neither
+ * half of the card unless this view says so.
+ */
+const WHOLE_PATCH = [
+  '@@ -1,7 +1,7 @@',
+  ' # Title',
+  ' ',
+  ' Alpha.',
+  ' ',
+  '-Two.',
+  '+Three.',
+  ' ',
+  ' <table><tr><td>raw</td></tr></table>',
+].join('\n');
 
 /**
  * A paragraph occupying three source lines, reworded on the middle one.
@@ -520,6 +561,53 @@ describe('threads on a rendered document', () => {
     });
 
     expect(document.querySelectorAll('[data-thread]')).toHaveLength(0);
+    // And not reported as unplaced either: it is already listed, with a reason
+    // of its own, and a second entry would be the same comment under two
+    // sentences that disagree about why it is there.
+    expect(unplaced.threads).toHaveLength(0);
+  });
+
+  it('reports a thread standing between two blocks rather than losing it', () => {
+    // Line 2 is the blank line between the heading and the first paragraph. It
+    // is inside the hunk, so `layoutThreads` anchors it rather than listing it,
+    // and the card that annotation belongs to is handed a diff with no rows —
+    // so without this report the comment is drawn nowhere, listed nowhere, and
+    // nothing anywhere says a word about it.
+    //
+    // Matching it to the block above was the alternative and it is worse: that
+    // draws a reviewer's comment beside prose it was not written about.
+    mount(BEFORE, AFTER, {
+      patch: WHOLE_PATCH,
+      threads: [reviewThread({ path: PATH, line: 2 })],
+    });
+
+    expect(document.querySelectorAll('[data-thread]')).toHaveLength(0);
+    expect(unplaced.threads.map((thread) => thread.line)).toEqual([2]);
+  });
+
+  it('reports a thread inside raw HTML, which carries no anchor at all', () => {
+    // The second way into the same hole. `markdown-it` returns an `html_block`
+    // verbatim, so the attribute never reaches the output and the block has no
+    // range — §5.1 of the design spec calls this a real gap, and it is one.
+    mount(BEFORE, AFTER, {
+      patch: WHOLE_PATCH,
+      threads: [reviewThread({ path: PATH, line: 7 })],
+    });
+
+    expect(document.querySelectorAll('[data-thread]')).toHaveLength(0);
+    expect(unplaced.threads.map((thread) => thread.line)).toEqual([7]);
+  });
+
+  it('reports nothing about a thread it drew under a block', () => {
+    // The other half. Reporting a thread that is on screen would list it in the
+    // drawer as well, which is the failure this fix must not introduce.
+    mount(BEFORE, AFTER, {
+      patch: WHOLE_PATCH,
+      threads: [reviewThread({ path: PATH, line: 5 })],
+    });
+
+    expect(document.querySelectorAll('[data-thread]')).toHaveLength(1);
+    expect(unplaced.threads).toHaveLength(0);
   });
 
   it('leaves an outdated one in the per-file list it is already in', () => {
@@ -540,6 +628,7 @@ describe('threads on a rendered document', () => {
             comparison={compareMarkdown(BEFORE, AFTER, NONCE)}
             path={PATH}
             commentable={commentableLines(PATCH)}
+            onUnplaced={() => {}}
           />
           <UnanchoredThreads path={PATH} threads={[{ thread: outdated, reason: 'outdated' }]} />
         </ReviewSessionProvider>

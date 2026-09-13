@@ -36,7 +36,7 @@ import type { BlobRefs } from './blobLoader';
 import { useImageSides, useTextSides } from './fileSides';
 import { ImageCompare, type ImageVariant } from './ImageCompare';
 import { JsonFormatted, JsonKeyPaths } from './JsonCompare';
-import { MarkdownCompare } from './MarkdownCompare';
+import { MarkdownCompare, type UnplacedComments } from './MarkdownCompare';
 import { NotebookCompare } from './NotebookCompare';
 import type { ReviewFile } from './reviewFiles';
 import { TableCompare } from './TableCompare';
@@ -83,9 +83,24 @@ export interface RichCompareProps {
    * identity decides whether Pierre rebuilds a row.
    */
   anchorable: boolean;
+  /**
+   * Where the rendered Markdown view sends the comments it has no block for.
+   *
+   * A pass-through and nothing more, but it is not optional at either end. The
+   * rendered view is the only thing that knows which lines its blocks cover,
+   * and a card whose body drops that answer on the floor is a card that never
+   * tells the reviewer a comment exists. `FileBody` owns the drawer it goes to.
+   */
+  onUnplaced: (unplaced: UnplacedComments) => void;
 }
 
-export function RichCompare({ file, mode, refs, anchorable }: RichCompareProps) {
+export function RichCompare({
+  file,
+  mode,
+  refs,
+  anchorable,
+  onUnplaced,
+}: RichCompareProps) {
   const kind = comparisonKind(file);
   const sides = changeSides(file);
   const active = mode !== RAW.id && kind !== 'none' && refs !== null;
@@ -253,7 +268,12 @@ export function RichCompare({ file, mode, refs, anchorable }: RichCompareProps) 
 
   if (markdown !== null) {
     return (
-      <MarkdownCompare comparison={markdown} path={file.path} commentable={commentable} />
+      <MarkdownCompare
+        comparison={markdown}
+        path={file.path}
+        commentable={commentable}
+        onUnplaced={onUnplaced}
+      />
     );
   }
 

@@ -19,10 +19,12 @@
  * slotted into the shadow row, exactly as the header is.
  */
 
+import { useCallback, useMemo, useState } from 'react';
 import { RAW } from '@/lib/compare/modes';
 import type { PostingComment } from '@/lib/review/posting';
 import { type WhitespaceDiff, whitespaceNotice } from '@/lib/review/whitespace';
 import type { BlobRefs } from './blobLoader';
+import { NOTHING_UNPLACED, type UnplacedComments } from './MarkdownCompare';
 import { PostingCard } from './PostingCard';
 import { RichCompare } from './RichCompare';
 import { UnanchoredThreads } from './UnanchoredThreads';
@@ -69,6 +71,54 @@ export function FileBody({
   const body = fileBody(file);
   const raw = mode === RAW.id;
 
+  /**
+   * What the rendered Markdown view had a line for and no block for.
+   *
+   * Held here rather than decided here, because only the view that drew the
+   * blocks knows which source lines they covered — and reported upward rather
+   * than listed down there, because a card has one drawer and this is where it
+   * is. `MarkdownCompare` has the argument for why such a comment exists at
+   * all; the short version is that its line is inside a hunk, so it is made an
+   * annotation, and a rich card is handed a diff with no rows to hang one on.
+   *
+   * State rather than a ref: the list has to be on screen, and the report
+   * arrives from an effect one render after the document settles. It clears
+   * itself when that view goes away, which is what keeps the drawer from
+   * listing comments the raw diff has just put back on their own rows.
+   */
+  const [unplaced, setUnplaced] = useState<UnplacedComments>(NOTHING_UNPLACED);
+  // Stable, because the callback travels into an effect's dependencies: a
+  // fresh function each render would clear and refill the list on every render
+  // of the card, which is a loop rather than an inefficiency.
+  const report = useCallback((next: UnplacedComments) => setUnplaced(next), []);
+
+  /**
+   * The two lists as the drawer and the strip above it will show them.
+   *
+   * The filters are not tidiness. `layoutThreads` has one verdict this view
+   * cannot see — `whitespace-only`, about a patch this page recomputed — and a
+   * thread carrying it can also arrive here as unplaced, so without the guard
+   * the same comment is listed twice under two sentences that contradict each
+   * other. Listing it once, under the verdict that already has a reason and a
+   * remedy, is the honest half of the pair.
+   */
+  const listed = useMemo(() => {
+    if (unplaced.threads.length === 0) return unanchored;
+    const already = new Set(unanchored.map((entry) => entry.thread.id));
+    return [
+      ...unanchored,
+      ...unplaced.threads
+        .filter((thread) => !already.has(thread.id))
+        .map((thread): ListedThread => ({ thread, reason: 'no-block' })),
+    ];
+  }, [unanchored, unplaced]);
+
+  const stranded = useMemo(() => {
+    if (unplaced.posting.length === 0) return posting;
+    const already = new Set(posting.map((entry) => entry.id));
+    return [...posting, ...unplaced.posting.filter((entry) => !already.has(entry.id))];
+  }, [posting, unplaced]);
+
   return (
     <div className="file-body" data-file-body={file.path}>
       {/* The sentence explaining an absent diff belongs to the raw view alone.
@@ -81,11 +131,17 @@ export function FileBody({
         </p>
       )}
 
-      <RichCompare file={file} mode={mode} refs={blobs} anchorable={anchorable} />
+      <RichCompare
+        file={file}
+        mode={mode}
+        refs={blobs}
+        anchorable={anchorable}
+        onUnplaced={report}
+      />
 
-      {posting.length > 0 && (
+      {stranded.length > 0 && (
         <ul className="unplaceable-posting" data-unplaceable-posting={file.path}>
-          {posting.map((entry) => (
+          {stranded.map((entry) => (
             <li key={entry.id}>
               <p className="unanchored-reason">
                 {/* A file comment is not stranded here, it lives here: this is
@@ -104,7 +160,7 @@ export function FileBody({
         </ul>
       )}
 
-      <UnanchoredThreads path={file.path} threads={unanchored} />
+      <UnanchoredThreads path={file.path} threads={listed} />
     </div>
   );
 }

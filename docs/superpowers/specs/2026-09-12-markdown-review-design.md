@@ -384,6 +384,26 @@ different commit stay in `UnanchoredThreads` with the reasons it already gives.
 Today every thread on a `.md` file in the rendered mode is in that drawer, so
 this is strictly better in every case and much better in the common one.
 
+**A thread that lands in no block at all also goes to the drawer**, under a
+seventh reason — `no-block`, added on 2026-09-12. Blocks carry ranges and those
+ranges do not tile the file: the blank line between two paragraphs is in none of
+them, and a raw `html_block` carries no range at all for the reason §5.1 gives.
+A comment on such a line is inside a hunk, so `layoutThreads` makes it an
+annotation — and a rich card is handed `emptyDiffFor`, which has no rows, so
+Pierre drops that annotation in silence. Drawn nowhere, listed nowhere, and no
+error raised anywhere: the exact failure `ui/UnanchoredThreads.tsx` calls the
+worst outcome available.
+
+Matching such a thread to the nearest block at or before its line was considered
+and refused. That draws a reviewer's comment beside prose it was not written
+about, which is the misattribution the `outdated` verdict already refuses to
+make, and it is worse than the drawer because nothing on screen would admit to
+it. Only the rendered view knows which lines its blocks covered, so
+`MarkdownCompare` reports what it could not place and `ui/FileBody.tsx` lists
+it; the sentence sends the reviewer to Raw, which shows the comment on its line.
+The same channel carries a comment still in flight, where losing it would lose
+writing that is on GitHub nowhere.
+
 ### The keyboard needs no new bindings
 
 The existing keymap maps onto this view without additions:

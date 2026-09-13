@@ -28,6 +28,14 @@ const REASONS: Record<ListedReason, string> = {
   'other-commit':
     'Written against the whole pull request, which is not the diff on screen. ' +
     'Show all commits to see it in place.',
+  // Says what the rendered view is rather than what it failed at: a document
+  // is blocks of prose, and the lines between them — a blank separator, raw
+  // HTML passed through untouched — are not part of any of them. The line is
+  // perfectly good, so the sentence names the view that can show it rather
+  // than telling the reviewer something is wrong with their comment.
+  'no-block':
+    'Nothing in the rendered document stands on the line this was written on. ' +
+    'Raw shows it on its line.',
   // Named by the reviewer's own action rather than by "not shown", because it
   // is the one reason in this list they turned on themselves and can turn off.
   'whitespace-only':

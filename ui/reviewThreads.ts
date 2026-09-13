@@ -99,7 +99,23 @@ export type ListedReason =
   /** The diff on screen numbers this side's lines against a different commit. */
   | 'other-commit'
   /** This file is ignoring whitespace, and the line it sat on only moved. */
-  | 'whitespace-only';
+  | 'whitespace-only'
+  /**
+   * A rendered view is on screen and none of its blocks covers this line.
+   *
+   * The only verdict here that is not reached in this module. A rendered
+   * Markdown document is a list of blocks, each carrying the range of source
+   * lines it was built from, and those ranges do not tile the file: the blank
+   * line between two paragraphs is in neither of them, and a raw `html_block`
+   * carries no range at all. Only the view that drew the blocks knows which
+   * lines it covered, so `MarkdownCompare` reports what it could not place and
+   * `FileBody` labels it — see both.
+   *
+   * Nothing here is wrong with the thread. It is a comment on a line GitHub
+   * would take a comment on, which the *other* view can show in place; that is
+   * why the sentence sends the reviewer to Raw rather than apologising.
+   */
+  | 'no-block';
 
 export interface ListedThread {
   thread: ReviewThread;
