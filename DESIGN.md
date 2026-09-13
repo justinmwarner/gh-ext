@@ -480,7 +480,27 @@ Border Default outline, Canvas Default or Canvas Subtle fill, no shadow, and
 
 ### Navigation
 
-There is no site navigation. The review page has a 52px top bar (`--topbar-height`,
+There is almost no site navigation, and what there is has exactly one entry.
+This line used to read "there is no site navigation", which was true of a
+product with one screen and stopped being true when the pull request dashboard
+arrived: a list whose rows open reviews is navigation however it is described.
+It is recorded as an amendment rather than left as an undocumented exception,
+because a design system that quietly contradicts the manifest is worse than one
+that says when it changed its mind.
+
+The rules the amendment carries:
+
+- **One way in, and it is not a menu bar.** The toolbar button (`action` in the
+  manifest, no popup) and the `g p` chord. No persistent nav rail, no
+  breadcrumbs, no second-level navigation anywhere.
+- **The list is rows, not a dashboard in the SaaS sense.** No summary tiles, no
+  counts on badges, no chart. Bucket headings are text plus a muted count, the
+  same treatment the view switcher uses.
+- **Nothing on it writes to GitHub.** Every row is an entry to the review page;
+  the moment a control there merges, closes or labels a pull request, this
+  product has become the second GitHub PRODUCT.md names as an anti-reference.
+
+The review page itself has a 52px top bar (`--topbar-height`,
 a layout constant the sticky rail below it has to know and CSS cannot ask for) and
 a resizable file tree. Tabs are text plus a count, separated by weight and by the
 Accent Foreground underline on the active one. Rows in the tree hover to Neutral

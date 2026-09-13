@@ -23,6 +23,8 @@ import {
   BASE_SHA,
   COMMIT_NODES,
   COMPARE_DIFF,
+  CONTRIBUTED_REPOS_RESPONSE,
+  DASHBOARD_RESPONSE,
   FIRST_COMMIT_DIFF,
   FIRST_SHA,
   RANGE_DIFF,
@@ -152,6 +154,12 @@ function graphqlReply(
   if (log.refuseRepository) return REPOSITORY_REFUSED;
 
   switch (operation) {
+    case 'Dashboard':
+      return { data: DASHBOARD_RESPONSE };
+
+    case 'ContributedRepos':
+      return { data: CONTRIBUTED_REPOS_RESPONSE };
+
     case 'ViewerPendingReview':
       return {
         data: {
@@ -591,6 +599,10 @@ export const test = base.extend<Fixtures>({
 
 export const reviewUrl = (extensionId: string): string =>
   `chrome-extension://${extensionId}/review.html#/pr/${PR.owner}/${PR.repo}/${PR.number}`;
+
+/** The list route on the same page. See `e2e/dashboard.spec.ts`. */
+export const dashboardUrl = (extensionId: string): string =>
+  `chrome-extension://${extensionId}/review.html#/prs`;
 
 export { expect } from '@playwright/test';
 export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR, IMAGE_FILE, TABLE_FILE };

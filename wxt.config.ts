@@ -81,5 +81,20 @@ export default defineConfig({
     // of which this extension does.
     permissions: ['storage'],
     host_permissions: ['https://github.com/*', 'https://api.github.com/*'],
+    /**
+     * The toolbar button, and the dashboard's front door.
+     *
+     * No `default_popup`, so pressing it fires `action.onClicked` in the worker
+     * and the worker opens the review page at its list route. A popup would be
+     * a second surface with its own bundle and its own copy of the row
+     * components, and it would close the moment focus left it — wrong for a
+     * list somebody works down.
+     *
+     * `action` costs no permission and produces no store-listing warning. It
+     * does reverse DESIGN.md's "there is no site navigation", which was true of
+     * a product with one screen; that line has been amended rather than left to
+     * contradict the manifest quietly.
+     */
+    action: { default_title: 'Pull requests waiting on you' },
   }),
 });

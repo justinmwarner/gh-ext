@@ -75,6 +75,7 @@ describe('the shortcut table', () => {
       'submit-comment',
       'submit-review',
       'open-in-github',
+      'open-dashboard',
       'search-in-diff',
       'shortcut-help',
     ];
@@ -376,5 +377,33 @@ describe('shortcutLabel', () => {
 
   it('writes a sequence as two keys in a row', () => {
     expect(shortcutLabel(of('open-in-github'), 'Ctrl')).toBe('g h');
+  });
+});
+
+describe('going to the pull request list', () => {
+  /** Press `g`, then the second key, and say what that resolved to. */
+  const chord = (second: string) => {
+    const first = resolveShortcut(keydown({ key: 'g' }), ctx(WINDOWS));
+    return resolveShortcut(keydown({ key: second }), {
+      platform: WINDOWS,
+      now: 0,
+      pending: first.pending,
+    }).action;
+  };
+
+  it('is a g chord, like the other way of leaving this page', () => {
+    // `g h` already means "open this pull request on GitHub", so the chord
+    // vocabulary exists and `g p` needs no new concept in the help overlay.
+    expect(chord('p')).toBe('open-dashboard');
+  });
+
+  it('does not disturb the other g chord', () => {
+    expect(chord('h')).toBe('open-in-github');
+  });
+
+  it('is listed under moving around', () => {
+    const binding = SHORTCUTS.find((s) => s.action === 'open-dashboard');
+
+    expect(binding?.group).toBe('Moving around');
   });
 });

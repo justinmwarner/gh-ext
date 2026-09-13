@@ -25,6 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ShortcutAction } from '@/lib/keymap';
+import { DASHBOARD_HASH } from '@/lib/github/pr-url';
 import type { PrPayload } from '@/lib/messages';
 import {
   BOTH_SIDES,
@@ -424,6 +425,12 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     'search-in-diff': () => setOverlay({ kind: 'search', mode: 'diff' }),
     'shortcut-help': () => setOverlay({ kind: 'help' }),
     'open-in-github': openOnGitHub,
+    // The hash, not a navigation. The dashboard is a route on this same page,
+    // so changing the fragment is the whole trip — no reload, no second tab,
+    // and Back returns to the pull request that was being read.
+    'open-dashboard': () => {
+      window.location.hash = DASHBOARD_HASH;
+    },
     // Whatever composer or footer is mounted answers these. Nothing mounted
     // means nothing happens, and the key goes back to the browser.
     'submit-comment': () => {

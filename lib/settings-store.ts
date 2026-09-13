@@ -12,6 +12,7 @@
  */
 
 import { browser } from 'wxt/browser';
+import { OVERRIDES_KEY, type Overrides, parseOverrides } from './dashboard/overrides';
 import { setLoggingEnabled } from './log';
 import {
   CARD_COLLAPSED_KEY,
@@ -49,6 +50,23 @@ export async function readCardCollapsed(): Promise<boolean> {
 
 export async function writeCardCollapsed(collapsed: boolean): Promise<void> {
   await browser.storage.local.set({ [CARD_COLLAPSED_KEY]: collapsed });
+}
+
+/**
+ * The dashboard's overrides.
+ *
+ * Its own key rather than a field on the settings object, for the reason
+ * `CARD_COLLAPSED_KEY` is: two writers doing read-modify-write on one key will
+ * eventually lose one of the two edits, and the dashboard writes this on every
+ * press while the options page writes settings.
+ */
+export async function readOverrides(): Promise<Overrides> {
+  const stored = await browser.storage.local.get(OVERRIDES_KEY);
+  return parseOverrides(stored[OVERRIDES_KEY]);
+}
+
+export async function writeOverrides(overrides: Overrides): Promise<void> {
+  await browser.storage.local.set({ [OVERRIDES_KEY]: overrides });
 }
 
 /**

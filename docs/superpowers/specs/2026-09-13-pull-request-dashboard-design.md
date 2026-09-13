@@ -509,3 +509,73 @@ answers a third of the ask and would need the searches anyway.
 4. **Whether DESIGN.md's navigation line is amended or exempted.** §5 argues
    for amending it. That is a call about the design system, not about this
    feature, and it should be made deliberately rather than by merging this.
+   *Resolved during implementation: amended, with the three rules the amendment
+   carries written into DESIGN.md §5.*
+
+---
+
+## What changed during implementation
+
+Four things this document got wrong, found by executing rather than reasoning.
+They are recorded here rather than edited away, because the reasoning that
+produced each of them looked sound at the time.
+
+**The cost figure in Part 1 was wrong by two orders of magnitude.** "A full
+dashboard refresh costs roughly what opening one pull request costs" was
+extrapolated from probes that never ran the real document. Spreading the thread
+fragment into all four searches at `first: 100` with a nested `comments(last: 1)`
+measures **155 points and 30,450 nodes**. The fix is in `DASHBOARD_THREAD_FIELDS`:
+the counts are read only by the blocked-on-you rule, that rule returns nothing
+unless the viewer wrote the pull request, so the fragment goes into the authored
+search alone at `first: 25`. That measures **17 points and 3,100 nodes** for the
+same information. The lesson is the one CLAUDE.md already states — execute the
+document.
+
+**"Ageing never buries work that is yours to do" made a useless list.** §1
+exempted `blocked-on-you` from going quiet, on reasoning that still reads well.
+Run against a real account it put **47 of 52** pull requests in that one bucket,
+because every abandoned branch with red CI or a stale conflict is technically
+blocked on its author. A bucket holding nine tenths of the list has stopped
+sorting anything. Only `waiting-on-you` and `drafts` are exempt now: the first
+is another person waiting and does not expire, the second is already where
+nothing is asked. After the change the same data reads 1 and 51 — which is the
+truthful shape of that backlog.
+
+**Four searches, not three.** `involves:` covers author, assignee, mentions and
+commenter, and does **not** cover a review request — so the most important row
+on the page was invisible to the query this document described. `reviewed-by:@me`
+was added for the same reason: an approval with no comment leaves no trace
+`involves:` can see. Two of the four exclude `author:@me` so the merge has
+almost nothing to deduplicate.
+
+**`g p` was not free.** §5 claimed the `g` chord vocabulary was established by
+`g h` and that `g p` needed no new concept. True, except `h` is unbound on its
+own and `p` is `previous-thread` — so this is the first chord that takes a key
+away from a single-key binding, within the sequence timeout. Kept, and written
+down in `lib/keymap.ts` where somebody debugging it will find it.
+
+Two smaller corrections came from looking at the rendered page rather than the
+markup. The move control is hidden until a row is hovered or focused, because
+ten copies of a rarely-used select were louder than the titles. And the Quiet
+blurb was rewritten: that bucket holds both what has gone stale and what simply
+needs nobody, and "nothing has moved here in a while" was plainly wrong on a
+five-day-old pull request the reviewer had already approved.
+
+## Not yet built
+
+The involvement half of this design is complete and covered. The
+**repository-watching half is plumbed but has no surface**:
+
+- `lib/dashboard/repos.ts` and `CONTRIBUTED_REPOS_QUERY` exist and are tested,
+  and the worker answers `discover-repos`.
+- `Settings.watchedRepos` exists, validates and persists.
+- Nothing reads any of it. There is no options-page picker, no `REPO_PRS_QUERY`,
+  and no path by which a watched repository's pull requests reach the page.
+
+It stopped there against a design question this document did not answer: a
+repository-wide list contains pull requests that are *nobody's* business of the
+reviewer's, and the six buckets are all phrased as whose turn it is. Every such
+row lands in Quiet, which would flood the one bucket that is supposed to mean
+"safe to ignore". Either those rows need a bucket of their own, or watching a
+repository needs to mean something narrower than "show me everything in it".
+That is a product decision, not an implementation detail.

@@ -165,7 +165,16 @@ export const BUCKET_ORDER: readonly { id: BucketId; label: string; blurb: string
     label: 'Waiting on others',
     blurb: 'Yours, and out of your hands for now.',
   },
-  { id: 'quiet', label: 'Quiet', blurb: 'Nothing has moved here in a while.' },
+  {
+    id: 'quiet',
+    label: 'Quiet',
+    // This bucket does two jobs and the blurb has to cover both, or it lies
+    // about one of them. It catches what has gone stale *and* what simply
+    // needs nobody — somebody else's pull request you already reviewed, where
+    // nothing has changed since. "Nothing has moved here in a while" was true
+    // of the first and plainly wrong on a row from five days ago.
+    blurb: 'Nothing here needs anybody right now.',
+  },
   { id: 'drafts', label: 'Drafts', blurb: 'Not asking anything of anybody yet.' },
 ];
 

@@ -23,6 +23,8 @@ const settings = (openIn: OpenIn, autoOpen = true): Settings => ({
   splitView: false,
   hideGenerated: false,
   diffTheme: '',
+  stalenessDays: 14,
+  watchedRepos: [],
 });
 
 const ask = (

@@ -511,3 +511,23 @@ describe('the pull request node the shortcuts read', () => {
     );
   });
 });
+
+describe('leaving for the pull request list', () => {
+  it('takes g p to the dashboard route', async () => {
+    render(<Shell payload={payload()} retry={() => {}} />);
+
+    await userEvent.keyboard('gp');
+
+    expect(window.location.hash).toBe('#/prs');
+  });
+
+  it('leaves p alone when no g preceded it', async () => {
+    // `p` is previous-thread on its own, and the chord must not swallow it.
+    render(<Shell payload={payload()} retry={() => {}} />);
+    window.location.hash = '#/pr/acme/widgets/42';
+
+    await userEvent.keyboard('p');
+
+    expect(window.location.hash).toBe('#/pr/acme/widgets/42');
+  });
+});

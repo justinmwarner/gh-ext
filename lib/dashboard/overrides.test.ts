@@ -3,6 +3,7 @@ import type { PrSummary } from './buckets';
 import {
   type Overrides,
   clearOverride,
+  parseOverrides,
   resolve,
   setOverride,
   sweepOverrides,
@@ -183,5 +184,39 @@ describe('sweepOverrides', () => {
     const overrides = setOverride({}, summary(), 'quiet', NOW);
 
     expect(sweepOverrides(overrides, ['PR_1'])).toBe(overrides);
+  });
+});
+
+describe('parseOverrides', () => {
+  const good = { bucket: 'quiet', headRefOid: 'aaa', seenAt: 1, setAt: 2 };
+
+  it('reads a stored record back', () => {
+    expect(parseOverrides({ PR_1: good })).toEqual({ PR_1: good });
+  });
+
+  it('answers empty for anything that is not a record', () => {
+    expect(parseOverrides(undefined)).toEqual({});
+    expect(parseOverrides(null)).toEqual({});
+    expect(parseOverrides([good])).toEqual({});
+    expect(parseOverrides('quiet')).toEqual({});
+  });
+
+  it('drops an entry naming a bucket this version does not have', () => {
+    // A bucket renamed in a later version would otherwise pin a pull request
+    // to a heading that is no longer drawn, where it would be invisible.
+    expect(parseOverrides({ PR_1: { ...good, bucket: 'triage' } })).toEqual({});
+  });
+
+  it('drops an entry missing the stamp that makes it expire', () => {
+    // Without headRefOid and seenAt the lapse rule cannot run, and an override
+    // that can never lapse is the exact failure this module exists to prevent.
+    expect(parseOverrides({ PR_1: { bucket: 'quiet' } })).toEqual({});
+    expect(parseOverrides({ PR_1: { ...good, seenAt: 'soon' } })).toEqual({});
+  });
+
+  it('keeps the good entries beside a bad one', () => {
+    const result = parseOverrides({ PR_1: good, PR_2: { bucket: 'nope' } });
+
+    expect(Object.keys(result)).toEqual(['PR_1']);
   });
 });

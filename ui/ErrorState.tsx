@@ -95,8 +95,16 @@ function permissionRemedy(diagnosis: Diagnosis): string {
   return `${where}, set ${permission} to Read-only and try again.`;
 }
 
-function fromDiagnosis(pr: PrRef, error: ProtocolError, diagnosis: Diagnosis): Explanation {
-  const repo = `${pr.owner}/${pr.repo}`;
+function fromDiagnosis(
+  pr: PrRef | null,
+  error: ProtocolError,
+  diagnosis: Diagnosis,
+): Explanation {
+  // The dashboard asks four account-wide searches, so its failures name no
+  // repository. The worker's `diagnose` already takes a null `pr` for exactly
+  // this reason; the sentences below that mention one are guarded rather than
+  // the whole screen being duplicated.
+  const repo = pr === null ? 'this account' : `${pr.owner}/${pr.repo}`;
 
   switch (diagnosis.cause) {
     case 'offline':
@@ -198,9 +206,11 @@ function fromDiagnosis(pr: PrRef, error: ProtocolError, diagnosis: Diagnosis): E
 
     case 'pr-not-found':
       return {
-        title: `No pull request #${pr.number} in ${repo}`,
+        title: pr === null ? 'GitHub found nothing here' : `No pull request #${pr.number} in ${repo}`,
         body: [
-          `Your token can see ${repo} — GitHub returned the repository — but there is no pull request #${pr.number} in it.${whoseToken(diagnosis.login)}`,
+          pr === null
+            ? `Your token works, and GitHub returned nothing for this request.${whoseToken(diagnosis.login)}`
+            : `Your token can see ${repo} — GitHub returned the repository — but there is no pull request #${pr.number} in it.${whoseToken(diagnosis.login)}`,
           'So this is not a permissions problem. The number is wrong, the pull request has been deleted, or it belongs to a different repository.',
         ],
         // Genuinely not the token. The button is still offered below, because
@@ -240,7 +250,7 @@ function fromDiagnosis(pr: PrRef, error: ProtocolError, diagnosis: Diagnosis): E
  * little it knows. It should be rare: the only failures that skip the
  * classifier are the ones raised before any request was attempted.
  */
-function fromKind(pr: PrRef, error: ProtocolError): Explanation {
+function fromKind(pr: PrRef | null, error: ProtocolError): Explanation {
   if (error.kind === 'rate-limit') {
     return {
       title: 'GitHub rate limit reached',
@@ -251,9 +261,11 @@ function fromKind(pr: PrRef, error: ProtocolError): Explanation {
   }
   if (error.kind === 'not-found') {
     return {
-      title: 'This pull request is out of reach',
+      title: pr === null ? 'GitHub found nothing here' : 'This pull request is out of reach',
       body: [
-        `${pr.owner}/${pr.repo}#${pr.number} either does not exist or your token does not have access to it.`,
+        pr === null
+          ? 'GitHub returned nothing for this request, which usually means the token cannot see what was asked for.'
+          : `${pr.owner}/${pr.repo}#${pr.number} either does not exist or your token does not have access to it.`,
         'Which of the two it is was not established, because this failure did not reach the part of the worker that asks.',
       ],
       tokenMayBeAtFault: true,
@@ -273,7 +285,7 @@ export function ErrorState({
   error,
   retry,
 }: {
-  pr: PrRef;
+  pr: PrRef | null;
   error: ProtocolError;
   /** Ask the worker again. Every failure here is one that may have passed. */
   retry: () => void;
@@ -312,7 +324,7 @@ export function ErrorState({
           <button type="button" className="button" onClick={retry}>
             Try again
           </button>
-          <OpenInGitHub pr={pr} />
+          {pr !== null && <OpenInGitHub pr={pr} />}
         </>
       }
     >

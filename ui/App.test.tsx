@@ -152,3 +152,47 @@ describe('App', () => {
     ).toBeDefined();
   });
 });
+
+describe('App, the dashboard route', () => {
+  const emptyDashboard = () => {
+    requestMock.mockResolvedValue({
+      ok: true,
+      data: {
+        viewerLogin: 'me',
+        prs: [],
+        truncated: [],
+        denied: [],
+        fetchedAt: Date.now(),
+      },
+    });
+  };
+
+  it('draws the list at #/prs', async () => {
+    emptyDashboard();
+    window.location.hash = '#/prs';
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy();
+  });
+
+  it('asks the worker for the dashboard rather than for a pull request', async () => {
+    emptyDashboard();
+    window.location.hash = '#/prs';
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Pull requests' });
+
+    expect(requestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'get-dashboard' }),
+    );
+  });
+
+  it('still explains a hash that names nothing', () => {
+    window.location.hash = '#/nonsense';
+
+    render(<App />);
+
+    expect(screen.getByText(/no pull request here/i)).toBeTruthy();
+  });
+});

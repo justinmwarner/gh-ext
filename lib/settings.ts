@@ -94,6 +94,32 @@ export interface Settings {
    * reviewer did not choose.
    */
   diffTheme: string;
+  /**
+   * How long a pull request goes without moving before it counts as quiet.
+   *
+   * A setting rather than a constant because the right number is a property of
+   * a team's cadence and not of this extension: a fortnight is nothing on a
+   * release branch and an age on a repository that ships twice a day.
+   *
+   * Whole days, and at least one. Zero would send every pull request to Quiet
+   * the moment it was read — a dashboard that empties itself — so it is
+   * refused rather than clamped, on the same principle as every other stored
+   * value here.
+   */
+  stalenessDays: number;
+  /**
+   * The repositories whose whole open list the dashboard shows.
+   *
+   * Empty by default, and only ever added to by the reviewer ticking a box.
+   * Discovery finds every repository the account has opened a pull request in
+   * — nineteen, for the account this was built against, most of them scratch
+   * work — and watching all of them uninvited is exactly the attention
+   * PRODUCT.md says this product does not get to take.
+   *
+   * Separate from the involvement searches, which need no repository list at
+   * all. See `lib/dashboard/repos.ts` for why the two are kept apart.
+   */
+  watchedRepos: string[];
 }
 
 /** `storage.local` key holding the whole {@link Settings} object. */
@@ -155,7 +181,23 @@ export const DEFAULT_SETTINGS: Settings = {
   // taste frozen into every install's storage, and a later change to it
   // invisible to anyone who had already opened the options page.
   diffTheme: THEME_FOLLOWS_PAGE,
+  // A fortnight. A guess made in the design document rather than a measured
+  // figure, and the options page says so beside the field.
+  stalenessDays: 14,
+  // Nothing. Discovery proposes; the reviewer disposes.
+  watchedRepos: [],
 };
+
+/**
+ * `owner/name`, and not much more than that.
+ *
+ * Deliberately loose. GitHub's own rules for what may appear in an owner or a
+ * repository name have changed more than once, and a strict pattern here would
+ * quietly drop a repository somebody really does contribute to. One slash, no
+ * empty halves, no whitespace — enough to reject a stored value that is
+ * obviously not a repository, and no more.
+ */
+const REPO_NAME = /^[^\s/]+\/[^\s/]+$/;
 
 /**
  * Typed as `Record<OpenIn, true>` so adding a destination to the union without
@@ -186,7 +228,10 @@ export function isOpenIn(value: unknown): value is OpenIn {
  */
 export function parseSettings(raw: unknown): Settings {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return { ...DEFAULT_SETTINGS };
+    // `watchedRepos` is an array, so the spread alone would hand every caller
+    // the same one. The first of them to push onto what it got back would be
+    // adding a watched repository to every later parse in the process.
+    return { ...DEFAULT_SETTINGS, watchedRepos: [...DEFAULT_SETTINGS.watchedRepos] };
   }
 
   const stored = raw as Record<string, unknown>;
@@ -212,6 +257,22 @@ export function parseSettings(raw: unknown): Settings {
     diffTheme: isDiffTheme(stored.diffTheme)
       ? stored.diffTheme
       : DEFAULT_SETTINGS.diffTheme,
+    // Whole days and at least one. A fraction is rejected rather than rounded:
+    // it can only have arrived by a bug or by hand, and neither is a preference
+    // worth honouring approximately.
+    stalenessDays:
+      typeof stored.stalenessDays === 'number' &&
+      Number.isInteger(stored.stalenessDays) &&
+      stored.stalenessDays >= 1
+        ? stored.stalenessDays
+        : DEFAULT_SETTINGS.stalenessDays,
+    // Filtered rather than rejected wholesale. One unrecognizable entry is no
+    // reason to forget the other eighteen repositories somebody chose.
+    watchedRepos: Array.isArray(stored.watchedRepos)
+      ? stored.watchedRepos.filter(
+          (name): name is string => typeof name === 'string' && REPO_NAME.test(name),
+        )
+      : [...DEFAULT_SETTINGS.watchedRepos],
   };
 }
 

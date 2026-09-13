@@ -328,3 +328,32 @@ describe('the worker’s raw message', () => {
     expect(screen.getByText('GitHub said: “Not Found”')).toBeTruthy();
   });
 });
+
+describe('ErrorState, with no pull request', () => {
+  it('renders a failure that was not about one repository', () => {
+    // The dashboard asks four account-wide searches, so a failure there names
+    // no repository. The worker already builds a diagnosis for this case —
+    // `diagnose` takes a null `pr` — and the screen has to accept one too.
+    render(
+      <ErrorState
+        pr={null}
+        error={{ kind: 'unknown', message: 'GitHub request failed: 500', resetAt: null }}
+        retry={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /try again/i })).toBeTruthy();
+  });
+
+  it('offers no Open in GitHub when there is nothing to open', () => {
+    render(
+      <ErrorState
+        pr={null}
+        error={{ kind: 'unknown', message: 'GitHub request failed: 500', resetAt: null }}
+        retry={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: /open in github/i })).toBeNull();
+  });
+});

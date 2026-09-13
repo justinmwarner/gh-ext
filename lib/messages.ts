@@ -12,6 +12,9 @@
  * instants are epoch milliseconds and absence is `null`.
  */
 
+import type { PrSummary } from './dashboard/buckets';
+import type { DiscoveredRepo } from './dashboard/repos';
+import type { Shortfall } from './dashboard/summary';
 import type { BinaryBlobResult } from './github/binary-blobs';
 import type { BlobResult } from './github/blobs';
 import type { ParsedDiffFile } from './github/diff';
@@ -311,6 +314,78 @@ export interface ProtocolMap {
     request: Record<string, never>;
     response: RateLimitSnapshot | null;
   };
+
+  /**
+   * Dashboard → worker: every pull request this account is involved in.
+   *
+   * Four aliased searches in one document. Here rather than on the page for
+   * the reason every other read is: the worker holds the token and the review
+   * page never calls `fetch`.
+   *
+   * No `pr`, so a failure gets a diagnosis about the token alone rather than
+   * about access to any particular repository — which is right, because this
+   * request is not about one.
+   */
+  'get-dashboard': {
+    request: { refresh?: boolean };
+    response: DashboardPayload;
+  };
+
+  /**
+   * Options page → worker: every repository this account has opened a pull
+   * request in.
+   *
+   * Asked for explicitly rather than refreshed on a timer. It is the reviewer
+   * pressing a button on a settings screen, and a background request that
+   * enumerates somebody's private repositories is not something to make on
+   * their behalf.
+   */
+  'discover-repos': {
+    request: Record<string, never>;
+    response: DiscoveredRepos;
+  };
+}
+
+/**
+ * The dashboard's reply.
+ *
+ * `prs` are unclassified on purpose. The worker could run `classify` before
+ * replying and it must not: the staleness horizon is a setting the page
+ * already reads, `now` is the page's clock, and the overrides live in storage
+ * the page owns. Sorting on one side of the channel and drawing on the other
+ * is how the two end up disagreeing about what a row says.
+ */
+export interface DashboardPayload {
+  /** Who GitHub says this token belongs to. Needed to read thread authorship. */
+  viewerLogin: string;
+  prs: PrSummary[];
+  /**
+   * Which searches returned fewer pull requests than they counted.
+   *
+   * Never inferred from `pageInfo`. GitHub's search answers
+   * `hasNextPage: false` past its thousandth result, so a client trusting that
+   * flag concludes it has the whole list — this is derived from `issueCount`
+   * against the nodes actually returned.
+   */
+  truncated: Shortfall[];
+  /** Fields GitHub refused, for the same reason `PrPayload` carries them. */
+  denied: DeniedField[];
+  /** When the worker read this, epoch ms. The page shows the age. */
+  fetchedAt: number;
+}
+
+/** The reply to `discover-repos`. */
+export interface DiscoveredRepos {
+  repos: DiscoveredRepo[];
+  /**
+   * How many GitHub said there were, against how many came back.
+   *
+   * The query asks for a hundred and does not paginate. A hundred
+   * repositories somebody has personally opened a pull request in is well
+   * outside what this feature is for, but the number is carried so the
+   * shortfall can be stated rather than hidden if it ever happens.
+   */
+  total: number;
 }
 
 export type MessageKind = keyof ProtocolMap;
@@ -414,6 +489,8 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   'get-blob-bytes': true,
   'validate-token': true,
   'get-rate-limit': true,
+  'get-dashboard': true,
+  'discover-repos': true,
 };
 
 /**

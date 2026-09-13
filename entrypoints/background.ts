@@ -43,10 +43,17 @@ import {
   MissingTokenError,
   RateLimitError,
 } from '@/lib/github/client';
+import { collectSummaries } from '@/lib/dashboard/summary';
+import {
+  CONTRIBUTED_REPOS_QUERY,
+  DASHBOARD_QUERY,
+  DASHBOARD_SEARCHES,
+} from '@/lib/github/queries';
+import type { DeniedField } from '@/lib/github/graphql-errors';
 import { NO_PROBE, type Probe, diagnose, statedDiagnosis } from '@/lib/github/diagnosis';
 import { evidenceOf, worthProbing } from '@/lib/github/evidence';
 import { parseUnifiedDiff } from '@/lib/github/diff';
-import { reviewHash } from '@/lib/github/pr-url';
+import { DASHBOARD_HASH, reviewHash } from '@/lib/github/pr-url';
 import { type OpenReason, openTarget } from '@/lib/review/openTarget';
 import { readSettings } from '@/lib/settings-store';
 import {
@@ -56,6 +63,8 @@ import {
 } from '@/lib/github/token-provider';
 import {
   type CompareDiff,
+  type DashboardPayload,
+  type DiscoveredRepos,
   type Err,
   type JsonValue,
   type Message,
@@ -553,6 +562,67 @@ export default defineBackground({
     }
 
     /**
+     * Every pull request this account is involved in, in one request.
+     *
+     * `onPartial` rather than letting a refusal throw, and that is the whole
+     * difference between a dashboard and an error page. A fine-grained token
+     * scoped to three repositories will be refused nodes belonging to the
+     * fourth, and GitHub sends the refusals *beside* the data rather than
+     * instead of it (section 8 of the API reference). Treating any `errors`
+     * array as fatal would blank the page over pull requests it successfully
+     * read — so the refusals are collected, carried on the payload, and named
+     * on screen.
+     *
+     * Not cached. The whole value of this list is that it is current, its
+     * inputs are four server-side searches rather than one immutable diff, and
+     * at 17 points a read there is nothing to save worth a stale answer.
+     * `refresh` is accepted for symmetry with `get-pr` and changes nothing
+     * today; it exists so the page has one word for "read it again".
+     */
+    async function getDashboard(): Promise<DashboardPayload> {
+      const denied: DeniedField[] = [];
+      const data = await client.graphql<unknown>(
+        DASHBOARD_QUERY,
+        { ...DASHBOARD_SEARCHES },
+        (refusals) => denied.push(...refusals),
+      );
+
+      const { viewerLogin, prs, truncated } = collectSummaries(data);
+      return { viewerLogin, prs, truncated, denied, fetchedAt: Date.now() };
+    }
+
+    /**
+     * Every repository this account has opened a pull request in.
+     *
+     * `reachable` is true for everything that came back, because a repository
+     * outside the token's grant does not come back at all — it answers exactly
+     * what a repository that does not exist answers. The flag exists so the
+     * options page can mark a *watched* name that discovery no longer returns,
+     * which is the only form this refusal can actually take.
+     */
+    async function discoverRepos(): Promise<DiscoveredRepos> {
+      const data = await client.graphql<{
+        viewer: {
+          repositoriesContributedTo: {
+            totalCount: number;
+            nodes: ({ nameWithOwner: string; isPrivate: boolean } | null)[];
+          };
+        };
+      }>(CONTRIBUTED_REPOS_QUERY, {});
+
+      const connection = data.viewer.repositoriesContributedTo;
+      const repos = connection.nodes
+        .filter((node): node is { nameWithOwner: string; isPrivate: boolean } => node !== null)
+        .map((node) => ({
+          nameWithOwner: node.nameWithOwner,
+          isPrivate: node.isPrivate,
+          reachable: true,
+        }));
+
+      return { repos, total: connection.totalCount };
+    }
+
+    /**
      * One extra question to GitHub, asked only once something has already
      * failed.
      *
@@ -699,6 +769,10 @@ export default defineBackground({
             return ok<'validate-token'>(await validateToken());
           case 'get-rate-limit':
             return ok<'get-rate-limit'>(rateLimit());
+          case 'get-dashboard':
+            return ok<'get-dashboard'>(await getDashboard());
+          case 'discover-repos':
+            return ok<'discover-repos'>(await discoverRepos());
         }
       } catch (error) {
         // `pr` where the request carried one. Two kinds do not, and for those
@@ -717,6 +791,28 @@ export default defineBackground({
      * way an entry leaves — a tab closed while this worker was asleep is
      * noticed later by `existingReviewTab` — but it is the cheap one.
      */
+    /**
+     * The toolbar button opens the dashboard.
+     *
+     * Registered at the top level of `main` so it survives the worker being
+     * killed and restarted, like every other listener here.
+     *
+     * `tabs.create` unconditionally rather than through `openTarget`: that
+     * function decides between a tab, a window and the sender, and there is no
+     * sender here — a toolbar press comes from the browser, not from a page.
+     * The reviewer's `openIn` preference is about where a *review* goes when
+     * they press the card, which is a different question from where the list
+     * goes, and reusing it would put the list into the github.com tab they
+     * were reading.
+     */
+    browser.action.onClicked.addListener(() => {
+      void browser.tabs
+        .create({ url: browser.runtime.getURL(`/review.html${DASHBOARD_HASH}`) })
+        .catch((error: unknown) => {
+          logWarn('could not open the dashboard', error);
+        });
+    });
+
     browser.tabs.onRemoved.addListener((tabId) => {
       void forgetReviewTab(tabId).catch((error: unknown) => {
         logWarn('could not forget a review tab', error);

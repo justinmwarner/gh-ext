@@ -24,7 +24,29 @@
  * the settings store.
  */
 
-import { type BucketId, type Classification, type PrSummary, classify } from './buckets';
+import {
+  BUCKET_ORDER,
+  type BucketId,
+  type Classification,
+  type PrSummary,
+  classify,
+} from './buckets';
+
+/**
+ * `storage.local` key holding the overrides.
+ *
+ * Its own key rather than a field on `Settings`, for the reason
+ * `CARD_COLLAPSED_KEY` and `MODE_MEMORY_KEY` already are: the dashboard writes
+ * this on every press while the options page writes the settings object, and
+ * two writers doing read-modify-write on one key will eventually lose one of
+ * the two edits.
+ *
+ * `local` rather than `sync`. These are decisions about pull requests that are
+ * open right now, they expire on their own, and replicating them across every
+ * machine signed into a browser profile is not something to do on somebody's
+ * behalf.
+ */
+export const OVERRIDES_KEY = 'dashboard-overrides';
 
 /**
  * A bucket the reviewer chose, and the pull request it was chosen against.
@@ -107,6 +129,41 @@ function lapseReason(pr: PrSummary, override: Override): LapseReason | null {
   if (pr.headRefOid !== override.headRefOid) return 'pushed';
   if (pr.updatedAt > override.seenAt) return 'changed';
   return null;
+}
+
+const BUCKET_IDS = new Set<string>(BUCKET_ORDER.map((bucket) => bucket.id));
+
+/**
+ * A stored blob as overrides, dropping anything that cannot be trusted.
+ *
+ * Two rejections are load-bearing rather than defensive tidiness.
+ *
+ * A bucket this version does not have — renamed in a later release, read back
+ * by an older one — would pin a pull request to a heading nothing draws, which
+ * is a row that has silently left the page.
+ *
+ * A missing or non-numeric stamp is worse. `headRefOid` and `seenAt` are what
+ * {@link lapseReason} compares, so an entry without them can never expire, and
+ * an override that never expires is precisely the failure this module exists
+ * to prevent. Dropping it returns the pull request to its derived bucket,
+ * which is the safe direction.
+ *
+ * Bad entries are dropped individually. One unreadable record is no reason to
+ * forget every decision the reviewer made.
+ */
+export function parseOverrides(raw: unknown): Overrides {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+
+  const parsed: Overrides = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
+    const { bucket, headRefOid, seenAt, setAt } = value as Record<string, unknown>;
+    if (typeof bucket !== 'string' || !BUCKET_IDS.has(bucket)) continue;
+    if (typeof headRefOid !== 'string' || headRefOid === '') continue;
+    if (typeof seenAt !== 'number' || typeof setAt !== 'number') continue;
+    parsed[id] = { bucket: bucket as BucketId, headRefOid, seenAt, setAt };
+  }
+  return parsed;
 }
 
 /** Record a reviewer's decision, stamped with what it was decided against. */

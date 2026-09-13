@@ -3645,3 +3645,252 @@ button.scope-showing:hover {
      see `lib/review/columnTail.ts` for why it cannot be known any other way. */
   height: calc(40vh + var(--tail-deficit, 0px));
 }
+
+
+/* ---------------------------------------------------------------- dashboard
+
+   The pull request list. Rows, not cards: DESIGN.md section 6 says this
+   interface is rows, and a list of pull requests is the most tempting place in
+   the product to reach for a card grid.
+
+   Nothing here draws a colour of its own. Every value is a token from
+   ui/tokens.css, so the whole page follows a chosen theme along with the diff,
+   and `ui/tokens.test.tsx` fails the build if a literal creeps in. */
+
+.dash {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+.dash-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.dash-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.dash-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dash-fetched {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* What the list could not show. A 1px border and a tint, never a coloured
+   side stripe — DESIGN.md forbids one above 1px by any technique. */
+.dash-caveats {
+  margin: 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dash-caveat {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--attention-border-muted);
+  border-radius: 6px;
+  background: var(--attention-subtle-bg);
+  color: var(--fg-default);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.dash-empty {
+  margin: 32px 0 0;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+.dash-bucket {
+  margin-top: 28px;
+}
+
+.dash-bucket-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* A count, not a badge. Hierarchy comes from weight and from Foreground
+   Muted; a filled pill here would read as a notification, which is exactly the
+   attention PRODUCT.md says this product does not take. */
+.dash-bucket-count {
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.dash-bucket-blurb {
+  margin: 2px 0 10px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.dash-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dash-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  background: var(--canvas-default);
+  transition: background-color 0.12s ease;
+}
+
+.dash-row + .dash-row {
+  border-top: 1px solid var(--border-muted);
+}
+
+.dash-row:hover {
+  background: var(--neutral-hover);
+}
+
+.dash-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-row-repo {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.dash-row-title {
+  color: var(--fg-default);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-row-title:hover {
+  color: var(--accent-fg);
+  text-decoration: underline;
+}
+
+.dash-row-meta {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+/* The one fact that decided the row. Carried as a word first; if a colour is
+   ever added here it reinforces the sentence and never replaces it. */
+.dash-row-reason {
+  font-size: 13px;
+  color: var(--fg-default);
+}
+
+.dash-row-age {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.dash-row-lapsed {
+  font-size: 12px;
+  color: var(--attention-fg);
+}
+
+/* The move control is on every row and is wanted on almost none of them, so it
+   stays out of the way until the row is under the cursor or something in it has
+   focus.
+
+   `opacity`, not `display: none` or `visibility: hidden`: those take the select
+   out of the tab order, and PRODUCT.md treats a keyboard gap as a product bug
+   rather than an accessibility footnote. At zero opacity it is still focusable,
+   still announced, and `:focus-within` brings it back into view the moment Tab
+   reaches it — so a keyboard user sees exactly what a pointer user sees.
+
+   The row also keeps the space reserved, so nothing reflows on hover. */
+.dash-row-actions {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.dash-row:hover .dash-row-actions,
+.dash-row:focus-within .dash-row-actions {
+  opacity: 1;
+}
+
+/* A row carrying an override is the one case where the control is the point:
+   it is the only way back, and hiding the way out of a state the reviewer put
+   themselves in is how they conclude it is stuck. */
+.dash-row:has(.dash-row-putback) .dash-row-actions {
+  opacity: 1;
+}
+
+/* Colour-only above, so reduced motion has no quarrel with it. Named anyway
+   because the rule in DESIGN.md is that every transition has an answer here,
+   and `opacity` is the family that gets argued about. */
+@media (prefers-reduced-motion: reduce) {
+  .dash-row-actions {
+    transition: none;
+  }
+}
+
+.dash-row-move {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-subtle);
+  color: var(--fg-muted);
+}
+
+.dash-row-putback {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+/* At a narrow width the meta column stops earning its place beside the title.
+   The review page is routinely opened in a half-screen window, and PRODUCT.md
+   asks for reflow without horizontal scrolling. */
+@media (max-width: 620px) {
+  .dash-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .dash-row-main {
+    flex-basis: 100%;
+  }
+
+  .dash-row-meta {
+    align-items: flex-start;
+    text-align: left;
+  }
+}

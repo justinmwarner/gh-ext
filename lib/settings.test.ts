@@ -262,3 +262,59 @@ describe('parseModeMemory', () => {
     });
   });
 });
+
+describe('the dashboard settings', () => {
+  it('defaults the staleness horizon to a fortnight', () => {
+    expect(parseSettings({}).stalenessDays).toBe(14);
+  });
+
+  it('takes a stored horizon', () => {
+    expect(parseSettings({ stalenessDays: 30 }).stalenessDays).toBe(30);
+  });
+
+  it('refuses a horizon of zero', () => {
+    // Zero would send every pull request to Quiet the moment it was read,
+    // which is a dashboard that has emptied itself.
+    expect(parseSettings({ stalenessDays: 0 }).stalenessDays).toBe(14);
+  });
+
+  it('refuses a negative or fractional horizon', () => {
+    expect(parseSettings({ stalenessDays: -5 }).stalenessDays).toBe(14);
+    expect(parseSettings({ stalenessDays: 1.5 }).stalenessDays).toBe(14);
+  });
+
+  it('refuses a horizon that is not a number', () => {
+    expect(parseSettings({ stalenessDays: '30' }).stalenessDays).toBe(14);
+  });
+
+  it('watches nothing by default', () => {
+    expect(parseSettings({}).watchedRepos).toEqual([]);
+  });
+
+  it('takes a stored watch list', () => {
+    expect(parseSettings({ watchedRepos: ['acme/widgets'] }).watchedRepos).toEqual([
+      'acme/widgets',
+    ]);
+  });
+
+  it('drops entries of a watch list that are not repository names', () => {
+    expect(
+      parseSettings({ watchedRepos: ['acme/widgets', 7, null, '', 'nope'] }).watchedRepos,
+    ).toEqual(['acme/widgets']);
+  });
+
+  it('refuses a watch list that is not a list', () => {
+    expect(parseSettings({ watchedRepos: 'acme/widgets' }).watchedRepos).toEqual([]);
+  });
+
+  it('does not hand out the defaults own array', () => {
+    // A shallow spread of DEFAULT_SETTINGS shares this reference, so one
+    // caller pushing onto what it got back would add a watched repository to
+    // every future parse in the process — including the worker's.
+    const first = parseSettings(undefined);
+    first.watchedRepos.push('acme/widgets');
+
+    expect(parseSettings(undefined).watchedRepos).toEqual([]);
+    expect(DEFAULT_SETTINGS.watchedRepos).toEqual([]);
+  });
+});

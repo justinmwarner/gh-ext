@@ -767,3 +767,221 @@ export const COMPARE_DIFF = [
   '+new src/beta.ts',
   ' third line',
 ].join('\n');
+
+
+/* ------------------------------------------------------------- dashboard */
+
+/**
+ * A day's worth of pull requests, one for every bucket.
+ *
+ * Deliberately not a realistic *volume* — fifty rows would prove nothing a
+ * dozen does not — but a realistic *spread*: every derivation rule in
+ * `lib/dashboard/buckets.ts` is reachable from this fixture, so a change that
+ * silently stops producing one of the six headings fails here.
+ */
+const DAY = 86_400_000;
+
+/** Fixed, so a screenshot taken twice is the same screenshot. */
+export const DASHBOARD_NOW = Date.parse('2026-09-13T12:00:00Z');
+
+const iso = (daysAgo: number) => new Date(DASHBOARD_NOW - daysAgo * DAY).toISOString();
+
+interface DashPrOptions {
+  id: string;
+  number: number;
+  title: string;
+  repo?: string;
+  author?: string;
+  daysAgo?: number;
+  isDraft?: boolean;
+  viewerDidAuthor?: boolean;
+  reviewDecision?: string | null;
+  viewerLatestReview?: { state: string; commit: { oid: string } | null } | null;
+  reviewRequests?: number;
+  checks?: string | null;
+  mergeStateStatus?: string | null;
+  headRefOid?: string;
+  threads?: { isResolved: boolean; lastAuthor: string }[];
+}
+
+function dashPr(options: DashPrOptions): Record<string, unknown> {
+  const repo = options.repo ?? 'acme/widgets';
+  const node: Record<string, unknown> = {
+    id: options.id,
+    number: options.number,
+    title: options.title,
+    url: `https://github.com/${repo}/pull/${options.number}`,
+    isDraft: options.isDraft ?? false,
+    createdAt: iso((options.daysAgo ?? 1) + 2),
+    updatedAt: iso(options.daysAgo ?? 1),
+    headRefOid: options.headRefOid ?? 'head1',
+    repository: { nameWithOwner: repo, isPrivate: false },
+    author: { login: options.author ?? 'dana' },
+    viewerDidAuthor: options.viewerDidAuthor ?? false,
+    reviewDecision: options.reviewDecision ?? null,
+    viewerLatestReview: options.viewerLatestReview ?? null,
+    reviewRequests: { totalCount: options.reviewRequests ?? 0 },
+    additions: 84,
+    deletions: 12,
+    changedFiles: 5,
+    isReadByViewer: true,
+    mergeStateStatus: options.mergeStateStatus ?? 'CLEAN',
+    commits: {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup:
+              options.checks === null || options.checks === undefined
+                ? null
+                : { state: options.checks },
+          },
+        },
+      ],
+    },
+  };
+
+  if (options.threads !== undefined) {
+    node.reviewThreads = {
+      totalCount: options.threads.length,
+      nodes: options.threads.map((thread) => ({
+        isResolved: thread.isResolved,
+        comments: { nodes: [{ author: { login: thread.lastAuthor } }] },
+      })),
+    };
+  }
+
+  return node;
+}
+
+const search = (nodes: unknown[], issueCount = nodes.length) => ({
+  issueCount,
+  pageInfo: { hasNextPage: issueCount > nodes.length },
+  nodes,
+});
+
+/** The four aliased searches, as the worker's document asks for them. */
+export const DASHBOARD_RESPONSE = {
+  viewer: { login: 'octocat' },
+  requested: search([
+    dashPr({
+      id: 'PR_req1',
+      number: 512,
+      title: 'Retry the upload when S3 answers 503',
+      author: 'dana',
+      daysAgo: 0,
+    }),
+    dashPr({
+      id: 'PR_req2',
+      number: 508,
+      title: 'Drop the unused feature flag plumbing',
+      repo: 'acme/gears',
+      author: 'sam',
+      daysAgo: 2,
+    }),
+  ]),
+  mine: search(
+    [
+      dashPr({
+        id: 'PR_mine1',
+        number: 495,
+        title: 'Cache the diff on head SHA',
+        author: 'octocat',
+        viewerDidAuthor: true,
+        // Deliberately no `reviewDecision`. Changes-requested outranks the
+        // conversation count in `blockedOnYou`, so setting both would make this
+        // row prove the precedence rule — which `buckets.test.ts` already does
+        // in a millisecond — instead of proving the thing only a browser can:
+        // that the nested thread selection survives the real bundle and the
+        // real worker. Three threads in, two counted.
+        daysAgo: 1,
+        threads: [
+          { isResolved: false, lastAuthor: 'dana' },
+          { isResolved: false, lastAuthor: 'dana' },
+          { isResolved: true, lastAuthor: 'octocat' },
+        ],
+      }),
+      dashPr({
+        id: 'PR_mine2',
+        number: 491,
+        title: 'Move the token vault behind a passphrase',
+        author: 'octocat',
+        viewerDidAuthor: true,
+        reviewDecision: 'APPROVED',
+        mergeStateStatus: 'CLEAN',
+        checks: 'SUCCESS',
+        daysAgo: 3,
+        threads: [],
+      }),
+      dashPr({
+        id: 'PR_mine3',
+        number: 487,
+        title: 'Split the palette generator out of the build',
+        author: 'octocat',
+        viewerDidAuthor: true,
+        reviewDecision: 'REVIEW_REQUIRED',
+        reviewRequests: 2,
+        daysAgo: 4,
+        threads: [],
+      }),
+      dashPr({
+        id: 'PR_mine4',
+        number: 402,
+        title: 'Spike: render diagrams off the main thread',
+        author: 'octocat',
+        viewerDidAuthor: true,
+        isDraft: true,
+        checks: 'FAILURE',
+        daysAgo: 6,
+        threads: [],
+      }),
+      dashPr({
+        id: 'PR_mine5',
+        number: 318,
+        title: 'Old experiment with a second cache layer',
+        author: 'octocat',
+        viewerDidAuthor: true,
+        mergeStateStatus: 'DIRTY',
+        daysAgo: 96,
+        threads: [],
+      }),
+    ],
+    86,
+  ),
+  involved: search([
+    dashPr({
+      id: 'PR_inv1',
+      number: 466,
+      title: 'Rewrite the rate limit classifier',
+      repo: 'acme/gears',
+      author: 'sam',
+      daysAgo: 1,
+      headRefOid: 'head2',
+      viewerLatestReview: { state: 'COMMENTED', commit: { oid: 'head1' } },
+    }),
+  ]),
+  reviewed: search([
+    dashPr({
+      id: 'PR_rev1',
+      number: 455,
+      title: 'Add the gitattributes reader',
+      author: 'kit',
+      daysAgo: 5,
+      viewerLatestReview: { state: 'APPROVED', commit: { oid: 'head1' } },
+    }),
+  ]),
+};
+
+/** Every repository the account has opened a pull request in. */
+export const CONTRIBUTED_REPOS_RESPONSE = {
+  viewer: {
+    login: 'octocat',
+    repositoriesContributedTo: {
+      totalCount: 3,
+      nodes: [
+        { nameWithOwner: 'acme/widgets', isPrivate: false },
+        { nameWithOwner: 'acme/gears', isPrivate: true },
+        { nameWithOwner: 'acme/bolts', isPrivate: false },
+      ],
+    },
+  },
+};

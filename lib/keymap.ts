@@ -52,6 +52,7 @@ export type ShortcutAction =
   | 'submit-comment'
   | 'submit-review'
   | 'open-in-github'
+  | 'open-dashboard'
   | 'search-in-diff'
   | 'shortcut-help';
 
@@ -217,6 +218,28 @@ export const SHORTCUTS: readonly Shortcut[] = [
     mod: false,
     shift: 'from-key',
     description: 'Open this pull request on GitHub',
+    group: 'Moving around',
+  },
+  {
+    /**
+     * The first chord whose second key is bound on its own.
+     *
+     * `g h` is free because `h` means nothing by itself. `p` is
+     * `previous-thread`, so this binding takes `g` followed by `p` away from a
+     * reviewer who pressed `g` by accident and then meant the single key —
+     * within the sequence timeout, and only there.
+     *
+     * Worth it, and worth writing down. `g` plus a mnemonic is the vocabulary
+     * every reader already has from Gmail and from github.com itself, and the
+     * alternative is either a worse letter or a modifier chord for the one
+     * navigation this page has. A stranded `g` still expires on its own after
+     * {@link SEQUENCE_TIMEOUT_MS}.
+     */
+    action: 'open-dashboard',
+    keys: ['g', 'p'],
+    mod: false,
+    shift: 'from-key',
+    description: 'Go to your pull requests',
     group: 'Moving around',
   },
   {
