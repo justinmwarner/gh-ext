@@ -839,6 +839,7 @@ function dashPr(options: DashPrOptions): Record<string, unknown> {
     title: options.title,
     url: `https://github.com/${repo}/pull/${options.number}`,
     isDraft: options.isDraft ?? false,
+    state: 'OPEN',
     createdAt: iso((options.daysAgo ?? 1) + 2),
     updatedAt: iso(options.daysAgo ?? 1),
     headRefOid: options.headRefOid ?? 'head1',
@@ -1010,5 +1011,43 @@ export const CONTRIBUTED_REPOS_RESPONSE = {
         { nameWithOwner: 'acme/bolts', isPrivate: false },
       ],
     },
+  },
+};
+
+
+/**
+ * What the title search answers with.
+ *
+ * Two results the dashboard itself could never show: one merged, one closed.
+ * That is the whole point of the box — it reaches past the ninety-day window
+ * *and* past `is:open`, to the pull request somebody is trying to find again.
+ */
+export const TITLE_SEARCH_RESPONSE = {
+  viewer: { login: 'octocat' },
+  search: {
+    issueCount: 14,
+    nodes: [
+      {
+        ...dashPr({
+          id: 'PR_found1',
+          number: 120,
+          title: 'Cache the diff on head SHA, first attempt',
+          author: 'octocat',
+          viewerDidAuthor: true,
+          daysAgo: 300,
+        }),
+        state: 'MERGED',
+      },
+      {
+        ...dashPr({
+          id: 'PR_found2',
+          number: 96,
+          title: 'Cache busting for the theme table',
+          author: 'dana',
+          daysAgo: 420,
+        }),
+        state: 'CLOSED',
+      },
+    ],
   },
 };

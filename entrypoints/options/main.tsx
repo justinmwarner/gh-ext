@@ -48,6 +48,9 @@ import {
   isLineDiff,
 } from '@/lib/settings';
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
+import { type DiscoveredRepo, toggleWatched } from '@/lib/dashboard/repos';
+import { FETCH_WINDOW_DAYS } from '@/lib/dashboard/searches';
+import { RepoPicker } from '@/ui/RepoPicker';
 import { summarizeDiagnosis } from '@/ui/diagnosisSummary';
 import { platformString } from '@/ui/platform';
 import { ThemePicker } from '@/ui/ThemePicker';
@@ -498,6 +501,65 @@ function GeneratedPatterns({
         {problem ?? ''}
       </p>
     </div>
+  );
+}
+
+/**
+ * Which repositories the pull request list reads.
+ *
+ * The same picker the dashboard carries, on the page a reviewer goes to when
+ * they are changing how this extension behaves rather than working. One
+ * component behind both, because a picker that disagreed with itself about
+ * what is ticked would be worse than either surface alone.
+ *
+ * Discovery runs when this section first draws. It is a query that names
+ * repositories, not one that reads pull requests out of them — the whole point
+ * of the opt-in is that the expensive read waits for a tick.
+ */
+function PullRequestList({ settings, update, result }: SectionProps) {
+  const [discovered, setDiscovered] = useState<DiscoveredRepo[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [asked, setAsked] = useState(false);
+
+  const discover = useCallback(() => {
+    setAsked(true);
+    setDiscovering(true);
+    void (async () => {
+      const reply = await request(message('discover-repos', {}));
+      setDiscovering(false);
+      if (isErr(reply)) {
+        logWarn('could not discover repositories', reply.error);
+        return;
+      }
+      setDiscovered(reply.data.repos);
+    })();
+  }, []);
+
+  useEffect(() => {
+    discover();
+  }, [discover]);
+
+  return (
+    <section className="settings">
+      <h2>Pull request list</h2>
+      <p className="hint">
+        The list reads only these repositories, and only the last {FETCH_WINDOW_DAYS} days.
+        Its search box reaches past both, including pull requests that have closed.
+      </p>
+
+      <RepoPicker
+        discovered={discovered}
+        watched={settings.watchedRepos}
+        discovering={discovering}
+        asked={asked}
+        onToggle={(nameWithOwner) =>
+          update({ watchedRepos: toggleWatched(settings.watchedRepos, nameWithOwner) })
+        }
+        onDiscover={discover}
+      />
+
+      <ResultLine result={result} />
+    </section>
   );
 }
 
@@ -1182,6 +1244,11 @@ function App() {
       {settings !== null && (
         <>
           <Reviewing
+            settings={settings}
+            update={update}
+            result={resultFor('reviewing')}
+          />
+          <PullRequestList
             settings={settings}
             update={update}
             result={resultFor('reviewing')}

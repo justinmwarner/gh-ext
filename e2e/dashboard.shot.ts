@@ -14,12 +14,30 @@
 import { mkdirSync } from 'node:fs';
 import { dashboardUrl, expect, test } from './extension';
 
+/**
+ * The dashboard reads nothing until a repository is opted in, so a shot of it
+ * has to opt in first or it captures the picker instead.
+ */
+async function watch(context: {
+  serviceWorkers(): { evaluate(fn: (names: string[]) => Promise<void>, arg: string[]): Promise<void> }[];
+}): Promise<void> {
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('the extension worker never started');
+  await worker.evaluate(async (names: string[]) => {
+    const api = (globalThis as unknown as {
+      chrome: { storage: { local: { set(items: Record<string, unknown>): Promise<void> } } };
+    }).chrome;
+    await api.storage.local.set({ settings: { watchedRepos: names } });
+  }, ['acme/widgets', 'acme/gears']);
+}
+
 const OUT = 'store/dashboard';
 mkdirSync(OUT, { recursive: true });
 
 for (const scheme of ['light', 'dark'] as const) {
-  test(`the dashboard, ${scheme}`, async ({ page, extensionId, api }) => {
+  test(`the dashboard, ${scheme}`, async ({ page, context, extensionId, api }) => {
     void api;
+    await watch(context);
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width: 1100, height: 1000 });
     await page.goto(dashboardUrl(extensionId));

@@ -134,6 +134,7 @@ export function toSummary(raw: unknown, context: SummaryContext): PrSummary {
     isPrivate: repository?.['isPrivate'] === true,
     author: asString(asRecord(node['author'])?.['login']),
     isDraft: node['isDraft'] === true,
+    state: asString(node['state']) ?? 'OPEN',
     createdAt: instant(node['createdAt']),
     updatedAt: instant(node['updatedAt']),
     headRefOid: asString(node['headRefOid']) ?? '',

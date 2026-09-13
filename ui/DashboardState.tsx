@@ -1,10 +1,13 @@
 /**
  * The dashboard route, wired up.
  *
- * `App` stays a switch over routes and states; this is the piece that knows
- * the list needs a payload, the reviewer's overrides and their staleness
- * horizon, and that a failure here is the same four failures every other
- * screen has.
+ * `App` stays a switch over routes; this is the piece that knows the list
+ * needs three things — the reviewer's opted-in repositories, a payload scoped
+ * to them, and their own overrides — and that a failure here is the same four
+ * failures every other screen has.
+ *
+ * The order matters. Repositories load first and from local storage, so a
+ * fresh install reaches the picker without a single pull request being read.
  */
 
 import { useEffect, useState } from 'react';
@@ -13,14 +16,19 @@ import { readSettings } from '@/lib/settings-store';
 import { logWarn } from '@/lib/log';
 import { DashboardView } from './DashboardView';
 import { ErrorState } from './ErrorState';
+import { FullPage } from './FullPage';
 import { LoadingState } from './LoadingState';
 import { LockedState } from './LockedState';
+import { RepoPicker } from './RepoPicker';
 import { SetupState } from './SetupState';
 import { useDashboard } from './useDashboard';
+import { useRepos } from './useRepos';
 import { unlockVault, useVaultState } from './useVaultState';
 
 export function DashboardState() {
-  const { state, overrides, refresh, override } = useDashboard();
+  const repos = useRepos();
+  const { state, overrides, search, refresh, override, runSearch, clearSearch } =
+    useDashboard(repos.watched);
   const vault = useVaultState();
   const [stalenessDays, setStalenessDays] = useState(DEFAULT_SETTINGS.stalenessDays);
 
@@ -31,6 +39,40 @@ export function DashboardState() {
         logWarn('could not read the staleness horizon', error);
       });
   }, []);
+
+  /**
+   * Ask GitHub which repositories exist the moment we know there are none
+   * ticked.
+   *
+   * This is the only request a fresh install makes, and it names repositories
+   * rather than reading pull requests out of them. Guarded on `asked` so a
+   * reviewer who unticks their last repository does not set off a second
+   * round trip for a list already on screen.
+   */
+  useEffect(() => {
+    if (repos.watched?.length === 0 && !repos.asked) repos.discover();
+  }, [repos]);
+
+  const picker = {
+    discovered: repos.discovered,
+    watched: repos.watched ?? [],
+    discovering: repos.discovering,
+    asked: repos.asked,
+    onToggle: repos.toggle,
+    onDiscover: repos.discover,
+  };
+
+  if (state.status === 'unconfigured') {
+    return (
+      <FullPage title="Pick the repositories to watch">
+        <p>
+          This list reads only the repositories you choose, and only the last ninety
+          days. Nothing is fetched until you pick one.
+        </p>
+        <RepoPicker {...picker} />
+      </FullPage>
+    );
+  }
 
   if (state.status === 'loading') return <LoadingState />;
 
@@ -59,6 +101,10 @@ export function DashboardState() {
       now={Date.now()}
       onOverride={override}
       onRefresh={refresh}
+      repos={picker}
+      search={search}
+      onSearch={runSearch}
+      onClearSearch={clearSearch}
     />
   );
 }

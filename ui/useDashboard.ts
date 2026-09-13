@@ -1,12 +1,17 @@
 /**
- * The dashboard's data: the payload from the worker, and the overrides from
- * storage.
+ * The dashboard's data: the payload from the worker, the overrides from
+ * storage, and whatever the title search last returned.
  *
- * Two sources, deliberately kept as two. The payload is server truth and is
- * re-read on demand; the overrides are the reviewer's own decisions and live
- * in `storage.local`. Merging them is `resolve`, which is pure and runs during
+ * Three sources, deliberately kept as three. The payload is server truth and
+ * is re-read on demand; the overrides are the reviewer's own decisions and
+ * live in `storage.local`; the search is a separate question with a separate
+ * answer. Merging the first two is `resolve`, which is pure and runs during
  * render — so pressing "move to Quiet" reorders the list on the spot rather
  * than after a round trip.
+ *
+ * **Nothing is fetched until a repository is opted in.** `repos` arriving
+ * empty means no `get-dashboard` is sent at all, which is what makes that
+ * promise literal rather than a no-op performed after asking.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -18,34 +23,59 @@ import {
   sweepOverrides,
 } from '@/lib/dashboard/overrides';
 import { logWarn } from '@/lib/log';
-import type { DashboardPayload, ProtocolError } from '@/lib/messages';
+import type { DashboardPayload, ProtocolError, SearchResults } from '@/lib/messages';
 import { isErr, message } from '@/lib/messages';
 import { readOverrides, writeOverrides } from '@/lib/settings-store';
 import { request } from './background';
 
 export type DashboardState =
+  | { status: 'unconfigured' }
   | { status: 'loading' }
   | { status: 'failed'; error: ProtocolError }
   | { status: 'ready'; payload: DashboardPayload };
 
+export type SearchState =
+  | { status: 'idle' }
+  | { status: 'running'; terms: string }
+  | { status: 'failed'; terms: string; error: ProtocolError }
+  | { status: 'done'; terms: string; results: SearchResults };
+
 export interface Dashboard {
   state: DashboardState;
   overrides: Overrides;
+  search: SearchState;
   refresh: () => void;
   /** `null` puts a row back where the derivation had it. */
   override: (pr: PrSummary, bucket: BucketId | null) => void;
+  runSearch: (terms: string) => void;
+  clearSearch: () => void;
 }
 
-export function useDashboard(): Dashboard {
+/**
+ * @param repos The opted-in repositories, or null while settings are loading.
+ */
+export function useDashboard(repos: string[] | null): Dashboard {
   const [state, setState] = useState<DashboardState>({ status: 'loading' });
   const [overrides, setOverrides] = useState<Overrides>({});
+  const [search, setSearch] = useState<SearchState>({ status: 'idle' });
   const [attempt, setAttempt] = useState(0);
 
+  // A string, so the effect below re-runs when the *contents* change rather
+  // than on every render that rebuilt the array.
+  const key = repos === null ? null : repos.join(',');
+
   useEffect(() => {
+    if (repos === null) return;
+    if (repos.length === 0) {
+      setState({ status: 'unconfigured' });
+      return;
+    }
+
     let live = true;
+    setState({ status: 'loading' });
 
     void (async () => {
-      const reply = await request(message('get-dashboard', {}));
+      const reply = await request(message('get-dashboard', { repos }));
       if (!live) return;
       if (isErr(reply)) {
         setState({ status: 'failed', error: reply.error });
@@ -74,10 +104,11 @@ export function useDashboard(): Dashboard {
     return () => {
       live = false;
     };
-  }, [attempt]);
+    // `key` stands in for `repos`, whose identity changes on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, attempt]);
 
   const refresh = useCallback(() => {
-    setState({ status: 'loading' });
     setAttempt((n) => n + 1);
   }, []);
 
@@ -96,5 +127,29 @@ export function useDashboard(): Dashboard {
     });
   }, []);
 
-  return { state, overrides, refresh, override };
+  const runSearch = useCallback(
+    (terms: string) => {
+      if (repos === null || repos.length === 0) return;
+      const trimmed = terms.trim();
+      if (trimmed === '') {
+        setSearch({ status: 'idle' });
+        return;
+      }
+
+      setSearch({ status: 'running', terms: trimmed });
+      void (async () => {
+        const reply = await request(message('search-prs', { terms: trimmed, repos }));
+        setSearch(
+          isErr(reply)
+            ? { status: 'failed', terms: trimmed, error: reply.error }
+            : { status: 'done', terms: trimmed, results: reply.data },
+        );
+      })();
+    },
+    [repos],
+  );
+
+  const clearSearch = useCallback(() => setSearch({ status: 'idle' }), []);
+
+  return { state, overrides, search, refresh, override, runSearch, clearSearch };
 }

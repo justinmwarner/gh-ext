@@ -43,11 +43,12 @@ import {
   MissingTokenError,
   RateLimitError,
 } from '@/lib/github/client';
-import { collectSummaries } from '@/lib/dashboard/summary';
+import { dashboardSearches, titleSearch } from '@/lib/dashboard/searches';
+import { collectSummaries, toSummary } from '@/lib/dashboard/summary';
 import {
   CONTRIBUTED_REPOS_QUERY,
   DASHBOARD_QUERY,
-  DASHBOARD_SEARCHES,
+  TITLE_SEARCH_QUERY,
 } from '@/lib/github/queries';
 import type { DeniedField } from '@/lib/github/graphql-errors';
 import { NO_PROBE, type Probe, diagnose, statedDiagnosis } from '@/lib/github/diagnosis';
@@ -65,6 +66,7 @@ import {
   type CompareDiff,
   type DashboardPayload,
   type DiscoveredRepos,
+  type SearchResults,
   type Err,
   type JsonValue,
   type Message,
@@ -579,16 +581,55 @@ export default defineBackground({
      * `refresh` is accepted for symmetry with `get-pr` and changes nothing
      * today; it exists so the page has one word for "read it again".
      */
-    async function getDashboard(): Promise<DashboardPayload> {
+    async function getDashboard(repos: string[]): Promise<DashboardPayload> {
+      const searches = dashboardSearches(repos, Date.now());
+      // Null means nothing was opted into. The page does not send this message
+      // in that case, so reaching here is a bug rather than a state — and an
+      // empty payload is the answer that cannot turn into a read of the whole
+      // account.
+      if (searches === null) {
+        return {
+          viewerLogin: '',
+          prs: [],
+          truncated: [],
+          denied: [],
+          fetchedAt: Date.now(),
+        };
+      }
+
       const denied: DeniedField[] = [];
-      const data = await client.graphql<unknown>(
-        DASHBOARD_QUERY,
-        { ...DASHBOARD_SEARCHES },
-        (refusals) => denied.push(...refusals),
+      const data = await client.graphql<unknown>(DASHBOARD_QUERY, searches, (refusals) =>
+        denied.push(...refusals),
       );
 
       const { viewerLogin, prs, truncated } = collectSummaries(data);
       return { viewerLogin, prs, truncated, denied, fetchedAt: Date.now() };
+    }
+
+    /**
+     * Pull requests whose title matches, at any age and in any state.
+     *
+     * One search rather than four: this answers "where did that one go", not
+     * "whose turn is it", so there is nothing to cross-reference and no bucket
+     * to derive.
+     */
+    async function searchPrs(terms: string, repos: string[]): Promise<SearchResults> {
+      const query = titleSearch(terms, repos);
+      if (query === null) return { viewerLogin: '', prs: [], total: 0 };
+
+      const data = await client.graphql<{
+        viewer: { login: string };
+        search: { issueCount: number; nodes: unknown[] };
+      }>(TITLE_SEARCH_QUERY, { q: query });
+
+      const viewerLogin = data.viewer.login;
+      return {
+        viewerLogin,
+        prs: data.search.nodes.map((node) =>
+          toSummary(node, { viewerLogin, reviewRequested: false }),
+        ),
+        total: data.search.issueCount,
+      };
     }
 
     /**
@@ -770,7 +811,9 @@ export default defineBackground({
           case 'get-rate-limit':
             return ok<'get-rate-limit'>(rateLimit());
           case 'get-dashboard':
-            return ok<'get-dashboard'>(await getDashboard());
+            return ok<'get-dashboard'>(await getDashboard(message.repos));
+          case 'search-prs':
+            return ok<'search-prs'>(await searchPrs(message.terms, message.repos));
           case 'discover-repos':
             return ok<'discover-repos'>(await discoverRepos());
         }

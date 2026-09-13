@@ -327,8 +327,33 @@ export interface ProtocolMap {
    * request is not about one.
    */
   'get-dashboard': {
-    request: { refresh?: boolean };
+    request: {
+      /**
+       * The repositories the reviewer opted into. Never empty.
+       *
+       * The page does not send this message at all until something is ticked,
+       * which is what makes "fetch nothing until you ask" literal rather than
+       * a no-op the worker performs after being asked. `lib/dashboard/searches.ts`
+       * refuses to build an unscoped query for the same reason.
+       */
+      repos: string[];
+      /** Bypass nothing today; kept so the page has one word for "again". */
+      refresh?: boolean;
+    };
     response: DashboardPayload;
+  };
+
+  /**
+   * Dashboard → worker: pull requests whose title matches, at any age.
+   *
+   * The way past the fetch window. It drops the date bound *and* `is:open`,
+   * because the pull request somebody is hunting for is usually one that
+   * already landed — so these results carry states the buckets have no home
+   * for, and the page draws them as a flat list rather than sorting them.
+   */
+  'search-prs': {
+    request: { terms: string; repos: string[] };
+    response: SearchResults;
   };
 
   /**
@@ -372,6 +397,20 @@ export interface DashboardPayload {
   denied: DeniedField[];
   /** When the worker read this, epoch ms. The page shows the age. */
   fetchedAt: number;
+}
+
+/** The reply to `search-prs`. */
+export interface SearchResults {
+  viewerLogin: string;
+  prs: PrSummary[];
+  /**
+   * How many GitHub counted, against however many came back.
+   *
+   * Shown when the two differ. A search that quietly returned the first fifty
+   * of four hundred is the same failure the dashboard's own truncation notice
+   * exists to prevent, one screen over.
+   */
+  total: number;
 }
 
 /** The reply to `discover-repos`. */
@@ -491,6 +530,7 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   'get-rate-limit': true,
   'get-dashboard': true,
   'discover-repos': true,
+  'search-prs': true,
 };
 
 /**

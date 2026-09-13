@@ -21,7 +21,23 @@ export interface DashboardRowProps {
   resolved: Resolved;
   now: number;
   onOverride: (pr: PrSummary, bucket: BucketId | null) => void;
+  /**
+   * Draw the pull request's state beside its number.
+   *
+   * Off in the buckets, where everything is open by construction and a row of
+   * "Open" badges would be a column of noise. On in search results, which
+   * reach closed and merged pull requests and would otherwise show a finished
+   * one as though it were still waiting.
+   */
+  showState?: boolean;
 }
+
+/** The badge vocabulary DESIGN.md section 5 already defines, by state. */
+const STATE_LABEL: Readonly<Record<string, string>> = {
+  OPEN: 'Open',
+  CLOSED: 'Closed',
+  MERGED: 'Merged',
+};
 
 /**
  * The route to this pull request's review.
@@ -35,7 +51,13 @@ function hashFor(pr: PrSummary): string {
   return reviewHash({ owner, repo, number: pr.number });
 }
 
-export function DashboardRow({ pr, resolved, now, onOverride }: DashboardRowProps) {
+export function DashboardRow({
+  pr,
+  resolved,
+  now,
+  onOverride,
+  showState = false,
+}: DashboardRowProps) {
   const reason = describeReason(resolved.reason, pr.threadsTruncated);
   const override = resolved.override;
 
@@ -44,6 +66,11 @@ export function DashboardRow({ pr, resolved, now, onOverride }: DashboardRowProp
       <div className="dash-row-main">
         <span className="dash-row-repo">
           {pr.repo}#{pr.number}
+          {showState && (
+            <span className={`badge badge-${pr.state.toLowerCase()}`}>
+              {STATE_LABEL[pr.state] ?? pr.state}
+            </span>
+          )}
         </span>
         <a className="dash-row-title" href={hashFor(pr)}>
           {pr.title}

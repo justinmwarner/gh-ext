@@ -25,6 +25,7 @@ import {
   COMPARE_DIFF,
   CONTRIBUTED_REPOS_RESPONSE,
   DASHBOARD_RESPONSE,
+  TITLE_SEARCH_RESPONSE,
   FIRST_COMMIT_DIFF,
   FIRST_SHA,
   RANGE_DIFF,
@@ -161,6 +162,9 @@ function graphqlReply(
 
     case 'ContributedRepos':
       return { data: CONTRIBUTED_REPOS_RESPONSE };
+
+    case 'TitleSearch':
+      return { data: TITLE_SEARCH_RESPONSE };
 
     case 'ViewerPendingReview':
       return {

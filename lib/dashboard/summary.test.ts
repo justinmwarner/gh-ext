@@ -8,6 +8,7 @@ const node = (overrides: Record<string, unknown> = {}) => ({
   title: 'Do the thing',
   url: 'https://github.com/acme/widgets/pull/7',
   isDraft: false,
+  state: 'OPEN',
   createdAt: '2026-09-10T09:00:00Z',
   updatedAt: '2026-09-12T09:00:00Z',
   headRefOid: 'aaa',
@@ -253,5 +254,21 @@ describe('collectSummaries', () => {
     };
 
     expect(collectSummaries(data).viewerLogin).toBe('me');
+  });
+});
+
+describe('toSummary, state', () => {
+  it('carries the state through', () => {
+    // The dashboard searches filter `is:open`, so this was always OPEN and was
+    // not worth a field. The title search drops that filter to reach the pull
+    // request somebody is hunting for, which has usually already landed.
+    expect(toSummary(node({ state: 'MERGED' }), ctx).state).toBe('MERGED');
+    expect(toSummary(node({ state: 'CLOSED' }), ctx).state).toBe('CLOSED');
+  });
+
+  it('calls a state it did not get OPEN rather than guessing', () => {
+    // Every row this extension draws is reachable, and an unreadable state is
+    // a worse reason to hide one than to show it as open.
+    expect(toSummary(node({ state: null }), ctx).state).toBe('OPEN');
   });
 });

@@ -14,17 +14,20 @@
  * anti-reference this whole feature had to argue past.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   BUCKET_ORDER,
   type BucketId,
   type PrSummary,
 } from '@/lib/dashboard/buckets';
 import { type Overrides, type Resolved, resolve } from '@/lib/dashboard/overrides';
+import { FETCH_WINDOW_DAYS } from '@/lib/dashboard/searches';
 import { summarizeAreas } from '@/lib/github/permissions';
 import type { DashboardPayload } from '@/lib/messages';
 import { DashboardRow } from './DashboardRow';
+import { RepoPicker, type RepoPickerProps } from './RepoPicker';
 import { relativeAge } from './dashboardCopy';
+import type { SearchState } from './useDashboard';
 
 export interface DashboardViewProps {
   payload: DashboardPayload;
@@ -34,6 +37,11 @@ export interface DashboardViewProps {
   now: number;
   onOverride: (pr: PrSummary, bucket: BucketId | null) => void;
   onRefresh: () => void;
+  /** Everything the folded-away picker needs. See {@link RepoPicker}. */
+  repos: RepoPickerProps;
+  search: SearchState;
+  onSearch: (terms: string) => void;
+  onClearSearch: () => void;
 }
 
 interface Placed {
@@ -104,6 +112,142 @@ function Caveats({ payload }: { payload: DashboardPayload }) {
   );
 }
 
+/**
+ * What the list is reading, and the way to change it.
+ *
+ * Folded away by default and summarised in its own toggle — "1 of 2
+ * repositories" is the whole fact, and a reviewer who agrees with it never has
+ * to open anything. It is on the page rather than only in options because the
+ * list is deliberately partial, and what it is partial *to* is not something
+ * to make somebody leave the page to discover.
+ */
+function ReposPanel({ repos }: { repos: RepoPickerProps }) {
+  const [open, setOpen] = useState(false);
+  const count = repos.watched.length;
+  const total = repos.discovered.length;
+
+  // Discovery is lazy, so this is routinely drawn knowing what is watched and
+  // not yet what exists. "2 of 0 repositories" is arithmetic nobody can read
+  // as anything but a bug, so the denominator only appears once it is real.
+  const known = total >= count && total > 0;
+  // The noun agrees with whichever number it follows: "1 of 2 repositories",
+  // but "1 repository" when there is no denominator to trail.
+  const noun = (known ? total : count) === 1 ? 'repository' : 'repositories';
+
+  return (
+    <div className="dash-repos">
+      <button
+        type="button"
+        className="dash-repos-toggle"
+        aria-expanded={open}
+        onClick={() => {
+          // Ask GitHub what exists the first time somebody actually looks.
+          // Before that the panel is a sentence about a stored list, which
+          // costs nothing.
+          if (!repos.asked) repos.onDiscover();
+          setOpen((was) => !was);
+        }}
+      >
+        Reading {known ? `${count} of ${total}` : count} {noun}, last {FETCH_WINDOW_DAYS}{' '}
+        days
+      </button>
+      {open && <RepoPicker {...repos} />}
+    </div>
+  );
+}
+
+/** The box that reaches past the window. */
+function SearchBar({
+  search,
+  onSearch,
+  onClearSearch,
+}: Pick<DashboardViewProps, 'search' | 'onSearch' | 'onClearSearch'>) {
+  const [terms, setTerms] = useState('');
+
+  return (
+    <form
+      className="dash-search"
+      role="search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSearch(terms);
+      }}
+    >
+      <input
+        type="search"
+        className="dash-search-box"
+        aria-label={`Search pull request titles, any age, beyond the last ${FETCH_WINDOW_DAYS} days`}
+        placeholder="Search titles, including closed…"
+        value={terms}
+        onChange={(event) => setTerms(event.target.value)}
+      />
+      {search.status !== 'idle' && (
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            setTerms('');
+            onClearSearch();
+          }}
+        >
+          Clear search
+        </button>
+      )}
+    </form>
+  );
+}
+
+/**
+ * Search results, as a flat list.
+ *
+ * Not bucketed, and that is a statement rather than a shortcut: these are
+ * matches for a phrase, and most of them have already merged. A pull request
+ * that is finished has no turn to be whose, so filing it under "waiting on
+ * others" would be an invention the rest of this page is careful not to make.
+ */
+function Results({
+  search,
+  now,
+  onOverride,
+}: {
+  search: Extract<SearchState, { status: 'done' }>;
+  now: number;
+  onOverride: DashboardViewProps['onOverride'];
+}) {
+  const { prs, total } = search.results;
+
+  if (prs.length === 0) {
+    return (
+      <p className="dash-empty">Nothing matched “{search.terms}” in the titles here.</p>
+    );
+  }
+
+  return (
+    <section className="dash-bucket" aria-labelledby="dash-results-head">
+      <h2 className="dash-bucket-head" id="dash-results-head">
+        Matching “{search.terms}”{' '}
+        <span className="dash-bucket-count">
+          {prs.length} of {total}
+        </span>
+      </h2>
+      <ul className="dash-rows">
+        {prs.map((pr) => (
+          <DashboardRow
+            key={pr.id}
+            pr={pr}
+            // A match is not a bucket. The row still draws its own facts; it
+            // simply has no heading claiming whose move it is.
+            resolved={{ bucket: 'quiet', reason: { kind: 'nothing' }, override: null }}
+            now={now}
+            onOverride={onOverride}
+            showState
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function DashboardView({
   payload,
   overrides,
@@ -111,6 +255,10 @@ export function DashboardView({
   now,
   onOverride,
   onRefresh,
+  repos,
+  search,
+  onSearch,
+  onClearSearch,
 }: DashboardViewProps) {
   const grouped = useMemo(
     () => place(payload.prs, overrides, now, stalenessDays),
@@ -129,6 +277,19 @@ export function DashboardView({
         </div>
       </header>
 
+      <ReposPanel repos={repos} />
+      <SearchBar search={search} onSearch={onSearch} onClearSearch={onClearSearch} />
+
+      {search.status === 'running' && <p className="dash-empty">Searching…</p>}
+      {search.status === 'failed' && (
+        <p className="dash-caveat">The search could not run. {search.error.message}</p>
+      )}
+      {search.status === 'done' && (
+        <Results search={search} now={now} onOverride={onOverride} />
+      )}
+
+      {search.status !== 'idle' ? null : (
+        <>
       <Caveats payload={payload} />
 
       {payload.prs.length === 0 ? (
@@ -167,6 +328,8 @@ export function DashboardView({
             </section>
           );
         })
+      )}
+        </>
       )}
     </div>
   );

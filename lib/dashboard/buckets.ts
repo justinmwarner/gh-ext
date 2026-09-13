@@ -37,6 +37,14 @@ export interface PrSummary {
   /** Null for a deleted account, which GitHub still returns pull requests for. */
   author: string | null;
   isDraft: boolean;
+  /**
+   * `OPEN`, `CLOSED` or `MERGED`.
+   *
+   * Always `OPEN` on the dashboard searches, which filter `is:open`. The title
+   * search drops that filter to reach the pull request somebody is hunting
+   * for, and that one has usually already landed.
+   */
+  state: string;
   createdAt: number;
   updatedAt: number;
   headRefOid: string;

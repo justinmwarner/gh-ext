@@ -47,6 +47,7 @@ afterEach(async () => {
   // The fake storage areas are module-scoped, so a vault written by one test
   // would otherwise decide the state of every test after it.
   await vaultStorage().remove('github-token-vault');
+  await vaultStorage().remove('settings');
 });
 
 describe('App', () => {
@@ -154,20 +155,55 @@ describe('App', () => {
 });
 
 describe('App, the dashboard route', () => {
-  const emptyDashboard = () => {
-    requestMock.mockResolvedValue({
-      ok: true,
-      data: {
-        viewerLogin: 'me',
-        prs: [],
-        truncated: [],
-        denied: [],
-        fetchedAt: Date.now(),
-      },
-    });
+  /** The worker's reply to whichever request the page decides to make. */
+  const replyWith = (data: unknown) => {
+    requestMock.mockResolvedValue({ ok: true, data });
   };
 
-  it('draws the list at #/prs', async () => {
+  const emptyDashboard = () =>
+    replyWith({
+      viewerLogin: 'me',
+      prs: [],
+      truncated: [],
+      denied: [],
+      fetchedAt: Date.now(),
+    });
+
+  /** Opt a repository in, the way the options page would have. */
+  const watch = async (...repos: string[]) => {
+    await vaultStorage().set({ settings: { watchedRepos: repos } });
+  };
+
+  it('asks for no pull requests at all until a repository is opted in', async () => {
+    // The whole point of opting in. A fresh install reaches the picker without
+    // reading a single pull request out of anybody's account.
+    replyWith({ repos: [], total: 0 });
+    window.location.hash = '#/prs';
+
+    render(<App />);
+    await screen.findByRole('heading', { name: /pick the repositories/i });
+
+    expect(requestMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'get-dashboard' }),
+    );
+  });
+
+  it('offers the repositories it found instead', async () => {
+    replyWith({
+      repos: [{ nameWithOwner: 'acme/widgets', isPrivate: false, reachable: true }],
+      total: 1,
+    });
+    window.location.hash = '#/prs';
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole('checkbox', { name: /acme\/widgets/ }),
+    ).toBeTruthy();
+  });
+
+  it('draws the list once a repository is opted in', async () => {
+    await watch('acme/widgets');
     emptyDashboard();
     window.location.hash = '#/prs';
 
@@ -176,7 +212,8 @@ describe('App, the dashboard route', () => {
     expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy();
   });
 
-  it('asks the worker for the dashboard rather than for a pull request', async () => {
+  it('asks the worker for the dashboard, scoped to what was opted in', async () => {
+    await watch('acme/widgets');
     emptyDashboard();
     window.location.hash = '#/prs';
 
@@ -184,7 +221,7 @@ describe('App, the dashboard route', () => {
     await screen.findByRole('heading', { name: 'Pull requests' });
 
     expect(requestMock).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'get-dashboard' }),
+      expect.objectContaining({ kind: 'get-dashboard', repos: ['acme/widgets'] }),
     );
   });
 

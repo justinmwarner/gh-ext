@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrSummary } from '@/lib/dashboard/buckets';
 import type { Overrides } from '@/lib/dashboard/overrides';
 import type { DashboardPayload } from '@/lib/messages';
+import type { SearchState } from './useDashboard';
 import { DashboardView } from './DashboardView';
 
 const DAY = 86_400_000;
@@ -26,6 +27,7 @@ function pr(overrides: Partial<PrSummary> = {}): PrSummary {
     isPrivate: false,
     author: 'someone',
     isDraft: false,
+    state: 'OPEN',
     createdAt: NOW - DAY,
     updatedAt: NOW - DAY,
     headRefOid: 'aaa',
@@ -56,9 +58,27 @@ const payload = (prs: PrSummary[], extra: Partial<DashboardPayload> = {}): Dashb
   ...extra,
 });
 
+const REPOS = {
+  discovered: [
+    { nameWithOwner: 'acme/widgets', isPrivate: false, reachable: true },
+    { nameWithOwner: 'acme/gears', isPrivate: false, reachable: true },
+  ],
+  watched: ['acme/widgets'],
+  discovering: false,
+  asked: true,
+  onToggle: () => {},
+  onDiscover: () => {},
+};
+
 function draw(
   data: DashboardPayload,
-  options: { overrides?: Overrides; onOverride?: () => void } = {},
+  options: {
+    overrides?: Overrides;
+    onOverride?: () => void;
+    search?: SearchState;
+    onSearch?: (terms: string) => void;
+    onClearSearch?: () => void;
+  } = {},
 ) {
   return render(
     <DashboardView
@@ -68,6 +88,10 @@ function draw(
       now={NOW}
       onOverride={options.onOverride ?? vi.fn()}
       onRefresh={vi.fn()}
+      repos={REPOS}
+      search={options.search ?? { status: 'idle' }}
+      onSearch={options.onSearch ?? vi.fn()}
+      onClearSearch={options.onClearSearch ?? vi.fn()}
     />,
   );
 }
@@ -225,5 +249,165 @@ describe('DashboardView, with nothing in it', () => {
 
     expect(container.querySelector('svg')).toBeNull();
     expect(container.textContent ?? '').not.toMatch(/!/);
+  });
+});
+
+describe('DashboardView, the repositories panel', () => {
+  it('says which repositories the list is reading', () => {
+    // The list is deliberately partial, so what it is partial *to* has to be
+    // on the page rather than buried in a settings screen.
+    draw(payload([pr({ reviewRequestedFromViewer: true })]));
+
+    expect(screen.getByText(/1 of 2 repositories/i)).toBeTruthy();
+  });
+
+  it('keeps the picker folded away until it is asked for', () => {
+    draw(payload([pr({ reviewRequestedFromViewer: true })]));
+
+    expect(screen.queryByRole('checkbox', { name: /acme\/widgets/ })).toBeNull();
+  });
+
+  it('opens the picker in place', async () => {
+    draw(payload([pr({ reviewRequestedFromViewer: true })]));
+
+    await userEvent.click(screen.getByRole('button', { name: /1 of 2 repositories/i }));
+
+    expect(screen.getByRole('checkbox', { name: /acme\/widgets/ })).toBeTruthy();
+  });
+});
+
+describe('DashboardView, the repositories panel, before discovery', () => {
+  it('does not claim a total it has not been told', () => {
+    // Discovery is lazy, so the panel is routinely drawn knowing what is
+    // watched and not yet what exists. "2 of 0 repositories" is arithmetic
+    // nobody can read as anything but a bug.
+    render(
+      <DashboardView
+        payload={payload([])}
+        overrides={{}}
+        stalenessDays={14}
+        now={NOW}
+        onOverride={vi.fn()}
+        onRefresh={vi.fn()}
+        repos={{ ...REPOS, discovered: [], asked: false }}
+        search={{ status: 'idle' }}
+        onSearch={vi.fn()}
+        onClearSearch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /reading 1 repository/i })).toBeTruthy();
+    expect(screen.queryByText(/of 0/)).toBeNull();
+  });
+
+  it('says one repository rather than 1 repositories', () => {
+    render(
+      <DashboardView
+        payload={payload([])}
+        overrides={{}}
+        stalenessDays={14}
+        now={NOW}
+        onOverride={vi.fn()}
+        onRefresh={vi.fn()}
+        repos={{ ...REPOS, discovered: [], asked: false }}
+        search={{ status: 'idle' }}
+        onSearch={vi.fn()}
+        onClearSearch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /1 repository,/i })).toBeTruthy();
+  });
+});
+
+describe('DashboardView, the title search', () => {
+  it('offers a box that says what it reaches', () => {
+    draw(payload([pr({ reviewRequestedFromViewer: true })]));
+
+    expect(screen.getByRole('searchbox', { name: /search/i })).toBeTruthy();
+  });
+
+  it('reports what was typed when the form is submitted', async () => {
+    const onSearch = vi.fn();
+    draw(payload([pr({ reviewRequestedFromViewer: true })]), { onSearch });
+
+    await userEvent.type(screen.getByRole('searchbox', { name: /search/i }), 'cache{Enter}');
+
+    expect(onSearch).toHaveBeenCalledWith('cache');
+  });
+
+  it('draws results as one flat list rather than in buckets', async () => {
+    // These are matches, not work. A merged pull request has no turn to be
+    // whose, so sorting it into "waiting on others" would be an invention.
+    draw(payload([pr({ reviewRequestedFromViewer: true })]), {
+      search: {
+        status: 'done',
+        terms: 'cache',
+        results: {
+          viewerLogin: 'me',
+          total: 1,
+          prs: [pr({ id: 'S1', title: 'Cache the diff', state: 'MERGED' })],
+        },
+      },
+    });
+
+    expect(screen.getByText('Cache the diff')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: /waiting on you/i })).toBeNull();
+  });
+
+  it('says how many matched and how many it is showing', () => {
+    draw(payload([]), {
+      search: {
+        status: 'done',
+        terms: 'cache',
+        results: { viewerLogin: 'me', total: 120, prs: [pr({ id: 'S1' })] },
+      },
+    });
+
+    expect(screen.getByText(/1 of 120/)).toBeTruthy();
+  });
+
+  it('says plainly when nothing matched', () => {
+    draw(payload([]), {
+      search: {
+        status: 'done',
+        terms: 'nonsense',
+        results: { viewerLogin: 'me', total: 0, prs: [] },
+      },
+    });
+
+    expect(screen.getByText(/nothing matched/i)).toBeTruthy();
+  });
+
+  it('offers a way back to the list', async () => {
+    const onClearSearch = vi.fn();
+    draw(payload([]), {
+      onClearSearch,
+      search: {
+        status: 'done',
+        terms: 'cache',
+        results: { viewerLogin: 'me', total: 0, prs: [] },
+      },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /clear search/i }));
+
+    expect(onClearSearch).toHaveBeenCalledOnce();
+  });
+
+  it('marks a result that is no longer open', () => {
+    draw(payload([]), {
+      search: {
+        status: 'done',
+        terms: 'cache',
+        results: {
+          viewerLogin: 'me',
+          total: 1,
+          prs: [pr({ id: 'S1', title: 'Cache the diff', state: 'MERGED' })],
+        },
+      },
+    });
+
+    expect(screen.getByText('Merged')).toBeTruthy();
   });
 });

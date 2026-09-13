@@ -303,7 +303,7 @@ export const VIEWER_PENDING_REVIEW = `query ViewerPendingReview($owner: String!,
  * Ready to merge bucket is trusted — see the open questions in the spec.
  */
 export const DASHBOARD_PR_FIELDS = `fragment DashboardPr on PullRequest {
-  id number title url isDraft createdAt updatedAt headRefOid
+  id number title url isDraft state createdAt updatedAt headRefOid
   repository { nameWithOwner isPrivate }
   author { login }
   viewerDidAuthor
@@ -392,21 +392,24 @@ ${DASHBOARD_THREAD_FIELDS}
 `;
 
 /**
- * The search strings, which are data rather than part of the document.
+ * One search, for the title box.
  *
- * `sort:updated-desc` on every one: the first fifty of eighty-eight has to be
- * the fifty that moved most recently, or the cap silently drops exactly the
- * pull requests a reviewer is most likely to want.
+ * The same node selection the dashboard uses and deliberately not the thread
+ * fragment: these results are drawn as a flat list, and the conversation
+ * counts only feed a bucket rule that a closed pull request can never reach.
  *
- * `@me` rather than the viewer's login, so nothing has to be interpolated into
- * a search string at the call site.
+ * The query string is built by `lib/dashboard/searches.ts`, which is where the
+ * quoting that keeps a typed `repo:` from escaping the scope lives.
  */
-export const DASHBOARD_SEARCHES = {
-  requested: 'is:pr is:open review-requested:@me sort:updated-desc',
-  mine: 'is:pr is:open author:@me sort:updated-desc',
-  involved: 'is:pr is:open involves:@me -author:@me sort:updated-desc',
-  reviewed: 'is:pr is:open reviewed-by:@me -author:@me sort:updated-desc',
-} as const;
+export const TITLE_SEARCH_QUERY = `query TitleSearch($q: String!) {
+  viewer { login }
+  search(query: $q, type: ISSUE, first: 50) {
+    issueCount
+    nodes { ... on PullRequest { ...DashboardPr } }
+  }
+}
+${DASHBOARD_PR_FIELDS}
+`;
 
 /**
  * Every repository this account has opened a pull request in.

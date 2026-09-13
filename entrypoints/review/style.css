@@ -3994,3 +3994,122 @@ button.scope-showing:hover {
     text-align: left;
   }
 }
+
+
+/* ------------------------------------------- the dashboard's own controls
+
+   What the list is reading, and the way past what it is not. Tokens only, so
+   both follow a chosen theme along with everything else. */
+
+/* A summary that is also its own disclosure. The sentence is the whole fact —
+   a reviewer who agrees with it never opens anything — so it is the control
+   rather than a label beside one. */
+.dash-repos {
+  margin-top: 16px;
+}
+
+.dash-repos-toggle {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  color: var(--fg-muted);
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.dash-repos-toggle:not(:disabled):hover {
+  background: var(--neutral-hover);
+}
+
+.repos {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-subtle);
+}
+
+.repos-note {
+  margin: 0 0 8px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.repos-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  /* Nineteen repositories is an ordinary answer, and a panel that pushes the
+     pull requests off the page to show them is the wrong trade. */
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.repos-row + .repos-row {
+  border-top: 1px solid var(--border-muted);
+}
+
+.repos-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.repos-name {
+  color: var(--fg-default);
+}
+
+/* A quiet fact about the row, not a status. Outlined rather than filled, which
+   is the chip treatment in DESIGN.md section 5. */
+.repos-tag {
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  color: var(--fg-muted);
+}
+
+/* Carried as a sentence first. The colour reinforces the words and never
+   replaces them. */
+.repos-refused {
+  font-size: 12px;
+  color: var(--attention-fg);
+}
+
+.dash-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dash-search-box {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-default);
+  color: var(--fg-default);
+}
+
+.dash-search-box::placeholder {
+  color: var(--fg-subtle);
+}
+
+/* The state badge on a search result, which reaches pull requests that have
+   already finished. Sits inline with the repository line, so it takes the
+   badge shape the review page already uses rather than a new one. */
+.dash-row-repo .badge {
+  margin-left: 6px;
+  font-size: 11px;
+  vertical-align: baseline;
+}

@@ -15,6 +15,7 @@ function summary(overrides: Partial<PrSummary> = {}): PrSummary {
     isPrivate: false,
     author: 'someone',
     isDraft: false,
+    state: 'OPEN',
     createdAt: NOW - DAY,
     updatedAt: NOW - DAY,
     headRefOid: 'aaa',
