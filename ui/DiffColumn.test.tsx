@@ -40,6 +40,7 @@ import {
   diffHasRendered,
   diffLayout,
   dragGutterUtility,
+  fileShadow,
   gutterCell,
   hunkExpander,
 } from './pierreDom.fixture';
@@ -246,6 +247,15 @@ describe('CODE_VIEW_SAFE_PROPS', () => {
 
   it('shows the gutter "+" that starts a comment', () => {
     expect(CODE_VIEW_SAFE_PROPS.options.enableGutterUtility).toBe(true);
+  });
+
+  it('names no preference, so nothing here can outrank one', () => {
+    // A third absence, and it is what keeps this object's name true.
+    // `lineDiffType` is the reviewer's, from the options page, and it is built
+    // per render alongside `theme` and `loadDiffFiles`. A default parked here
+    // as well would be a second place to change one answer — and the failure
+    // would be silent, because both spellings produce a working diff.
+    expect('lineDiffType' in CODE_VIEW_SAFE_PROPS.options).toBe(false);
   });
 
   it('gives a rich card the whole width, and keeps both clauses that limit it', () => {
@@ -1797,6 +1807,90 @@ describe('DiffColumn, folding generated files', () => {
     });
   });
 
+  /**
+   * The reviewer's own globs, on top of the built-in list.
+   *
+   * `src/api/client.gen.ts` is the case the setting exists for: a real path
+   * that no heuristic over names could be expected to catch, and that the
+   * repository has said nothing about. The two claims worth pinning are that
+   * the globs do nothing at all while the folding setting is off, and that a
+   * repository's `.gitattributes` still outranks them.
+   *
+   * The path carries no `generated` in it deliberately — the card header is
+   * searched by accessible name, and a file called `generated-client.ts` would
+   * satisfy every one of these assertions by being named rather than folded.
+   */
+  describe('with the reviewer’s own patterns', () => {
+    const OURS = 'src/api/client.gen.ts';
+    const ours = () => file({ path: OURS, patch: REINDENTED(OURS) });
+    const PATTERNS = { generatedPatterns: ['**/*.gen.ts'] };
+
+    const foldWord = () =>
+      within(card(OURS)).queryByRole('button', { name: /generated/i });
+
+    it('folds a path the built-in list would never have caught', async () => {
+      mount([ours()], { ...HIDING, ...PATTERNS });
+
+      await waitFor(() => {
+        expect(foldWord()).not.toBeNull();
+      });
+      expect(diffHasRendered(OURS)).toBe(false);
+    });
+
+    it('ignores them entirely while the folding setting is off', async () => {
+      // The rule `Settings.generatedPatterns` insists on: a preference that
+      // folds a file away must not be able to start folding without the
+      // reviewer having turned folding on. A glob typed and then left behind
+      // is not consent.
+      mount([ours()], PATTERNS);
+      await untilDrawn(OURS);
+
+      expect(foldWord()).toBeNull();
+    });
+
+    it('lets the repository overrule them, because it is talking about that file', async () => {
+      // The precedence decision, and the direction that matters: a glob typed
+      // months ago about a different codebase must not overrule a repository
+      // that went out of its way to say this file is worth reading.
+      mount([ours()], {
+        ...HIDING,
+        ...PATTERNS,
+        gitAttributes: parseGitAttributes(`${OURS} -linguist-generated`),
+      });
+      await untilDrawn(OURS);
+
+      expect(foldWord()).toBeNull();
+    });
+
+    it('adds to the built-in list rather than replacing it', async () => {
+      mount([bundle(), ours()], { ...HIDING, ...PATTERNS });
+
+      await waitFor(() => {
+        expect(foldWord()).not.toBeNull();
+      });
+      expect(
+        within(card(BUNDLE)).queryByRole('button', { name: /generated/i }),
+      ).not.toBeNull();
+    });
+
+    it('still opens on a press, like any other folded file', async () => {
+      // The escape hatch has to work for these too, or a mistyped glob is a
+      // file the reviewer cannot read without going to the options page.
+      mount([ours()], { ...HIDING, ...PATTERNS });
+      await waitFor(() => {
+        expect(foldWord()).not.toBeNull();
+      });
+
+      await act(async () => {
+        const word = foldWord();
+        if (word === null) throw new Error('the fold word is not showing');
+        fireEvent.click(word);
+      });
+
+      await untilDrawn(OURS);
+    });
+  });
+
   it('says generated rather than whitespace on a file that is both', async () => {
     // "Nobody wrote this" explains the folding on its own. "Every change in it
     // was whitespace" invites the reviewer to wonder what a lockfile is doing
@@ -1814,6 +1908,81 @@ describe('DiffColumn, folding generated files', () => {
     expect(
       within(card(BUNDLE)).queryByRole('button', { name: /whitespace/i }),
     ).toBeNull();
+  });
+});
+
+/**
+ * How much of a changed line is picked out inside it.
+ *
+ * `lineDiffType` is an option handed to the library, so — like `diffStyle`
+ * above — the only honest evidence that it took is what came out in the shadow
+ * root. Pierre wraps each changed run in a `[data-diff-span]`, and the *text*
+ * of those spans is what the three settings disagree about: `word-alt` marks
+ * the whole token, `char` marks only the characters that moved, and `none`
+ * emits no span at all.
+ *
+ * Asserted on `textContent` rather than on markup on purpose. Whether the run
+ * inside a span is one element or five depends on whether the shared
+ * highlighter has warmed up, which is a property of test ordering rather than
+ * of the setting.
+ */
+describe('DiffColumn, how much of a changed line is marked', () => {
+  /**
+   * One word inside a line becomes a longer word.
+   *
+   * `doSomething` → `doSomethingElse`, so the three settings have visibly
+   * different answers: the whole token, the four characters added to it, or
+   * nothing. The fixture patch elsewhere in this file replaces `before` with
+   * `after`, which shares no run long enough to tell them apart.
+   */
+  const INNER = 'src/inner.ts';
+  const innerPatch = [
+    `diff --git a/${INNER} b/${INNER}`,
+    `--- a/${INNER}`,
+    `+++ b/${INNER}`,
+    '@@ -1,3 +1,3 @@',
+    ' one',
+    '-const alpha = doSomething(value);',
+    '+const alpha = doSomethingElse(value);',
+    ' three',
+  ].join('\n');
+
+  const inner = () => file({ path: INNER, patch: innerPatch });
+
+  /** The text of every run Pierre marked as changed within a line. */
+  const marked = (path: string): string[] =>
+    [...fileShadow(path).querySelectorAll('[data-diff-span]')].map(
+      (span) => span.textContent ?? '',
+    );
+
+  it('marks whole words by default, which is Pierre’s own answer and ours', async () => {
+    mount([inner()]);
+    await untilDrawn(INNER);
+
+    expect(marked(INNER)).toContain('doSomething');
+  });
+
+  it('marks only the characters that moved when asked for char', async () => {
+    // The case the setting exists for: a rename inside a line, where a
+    // word-level pass marks the whole token and says nothing about what
+    // changed in it.
+    mount([inner()], { lineDiff: 'char' });
+    await untilDrawn(INNER);
+
+    const runs = marked(INNER);
+    expect(runs).toContain('Else');
+    expect(runs).not.toContain('doSomething');
+  });
+
+  it('marks nothing inside the line when asked for none', async () => {
+    // The line is still drawn, and still carries its addition colour. Only the
+    // emphasis inside it is gone, which is the claim `Settings.lineDiff` makes
+    // about this one hiding nothing.
+    mount([inner()], { lineDiff: 'none' });
+    await untilDrawn(INNER);
+
+    expect(marked(INNER)).toEqual([]);
+    expect(diffHasRendered(INNER)).toBe(true);
   });
 });
 

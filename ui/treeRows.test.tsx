@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { type TreeRow, checkState, treeRows } from './treeRows';
+import { type TreeRow, checkState, directoryPaths, treeRows } from './treeRows';
 
 const OPEN: ReadonlySet<string> = new Set();
 
@@ -167,5 +167,62 @@ describe('checkState', () => {
     ]);
 
     expect(checkState(row('src/'), mixed)).toBe('mixed');
+  });
+});
+
+/**
+ * Every directory a list of paths implies.
+ *
+ * What "open the tree shut" is built from, and the one property that matters is
+ * that it agrees with {@link treeRows} about how a directory is spelled — the
+ * last test here is the one that would catch a drift between the two, because
+ * a set naming directories the rows do not have produces folders that cannot be
+ * opened and no error anywhere.
+ */
+describe('directoryPaths', () => {
+  it('names each directory with the trailing slash the rows use', () => {
+    expect([...directoryPaths(['src/app.ts'])]).toEqual(['src/']);
+  });
+
+  it('includes the directories in between, not only the deepest', () => {
+    // Otherwise a deep tree collapses to a spine of single children the
+    // reviewer has to walk down before anything is actually folded.
+    expect([...directoryPaths(['lib/review/search.ts'])]).toEqual(['lib/', 'lib/review/']);
+  });
+
+  it('names a shared directory once', () => {
+    expect([...directoryPaths(['src/a.ts', 'src/b.ts', 'src/deep/c.ts'])]).toEqual([
+      'src/',
+      'src/deep/',
+    ]);
+  });
+
+  it('implies no directory for a file at the top level', () => {
+    expect([...directoryPaths(['README.md'])]).toEqual([]);
+  });
+
+  it('says nothing about an empty list', () => {
+    expect([...directoryPaths([])]).toEqual([]);
+  });
+
+  it('spells a directory the way treeRows does, which is the point of it', () => {
+    // The drift this is here to catch is silent: a set naming `src` where the
+    // rows say `src/` leaves every folder open and every toggle inert.
+    const paths = ['src/app.ts', 'lib/review/search.ts', 'README.md'];
+    const fromRows = treeRows(paths, OPEN)
+      .filter((row) => row.kind === 'directory')
+      .map((row) => row.path);
+
+    expect([...directoryPaths(paths)].sort()).toEqual([...fromRows].sort());
+  });
+
+  it('shuts the whole tree when it is handed back to treeRows', () => {
+    const paths = ['src/app.ts', 'lib/review/search.ts', 'README.md'];
+
+    expect(shape(treeRows(paths, directoryPaths(paths)))).toEqual([
+      'lib/',
+      'src/',
+      'README.md',
+    ]);
   });
 });

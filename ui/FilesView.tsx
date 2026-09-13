@@ -34,6 +34,8 @@ import type { GeneratedRule } from '@/lib/review/generated';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession } from './reviewSession';
 import { useDragSize } from './useDragSize';
+import type { LineDiff } from '@/lib/settings';
+import { readRailWidth, writeRailWidth } from '@/lib/settings-store';
 
 /** Wide enough for a deep path, narrow enough to leave the diff its width. */
 const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
@@ -62,8 +64,25 @@ export interface FilesViewProps {
   ignoreWhitespace: boolean;
   /** Fold away the diff of a file nobody wrote. Also passed through. */
   hideGenerated: boolean;
-  /** What the repository declared about its own generated files. */
+  /**
+   * What the repository declared about its own generated files.
+   *
+   * Outranks {@link generatedPatterns}, which is `isGenerated`'s rule and not
+   * this component's — everything here only carries the two to it.
+   */
   gitAttributes: readonly GeneratedRule[];
+  /**
+   * The three below are optional where the ones above are required, because
+   * each one's absence has a single obvious meaning — the value
+   * `DEFAULT_SETTINGS` gives it — and `DiffColumn` already declares them that
+   * way one layer down.
+   */
+  /** How much of a changed line is picked out inside it. Passed through. */
+  lineDiff?: LineDiff;
+  /** Paths the reviewer calls generated, on top of the built-in list. */
+  generatedPatterns?: readonly string[];
+  /** Open the tree with its directories shut. Read once, by the tree. */
+  collapseTree?: boolean;
   columnRef?: Ref<DiffColumnHandle>;
 }
 
@@ -82,10 +101,38 @@ export function FilesView({
   ignoreWhitespace,
   hideGenerated,
   gitAttributes,
+  lineDiff,
+  generatedPatterns,
+  collapseTree,
   columnRef,
 }: FilesViewProps) {
   const session = useReviewSession();
-  const rail = useDragSize(RAIL);
+
+  /**
+   * The rail's width, kept between sessions.
+   *
+   * Its own storage key rather than a field on `Settings`, and with no control
+   * on the options page at all — `RAIL_WIDTH_KEY` carries both arguments. The
+   * short version of the second one is that a drag has already said this, and a
+   * number field asking again would be the same answer in a worse form.
+   *
+   * `RAIL.min` and `RAIL.max` are handed to the read rather than kept beside
+   * the key, so a stored width from a wider monitor is clamped to the range
+   * this resizer actually enforces instead of drawing a rail that leaves no
+   * room for the diff and cannot be grabbed to fix.
+   *
+   * Inline rather than memoized: `useDragSize` holds it in a ref and reads it
+   * only from a listener, so a new identity each render costs nothing.
+   */
+  const rail = useDragSize(RAIL, {
+    read: () => readRailWidth(RAIL.min, RAIL.max),
+    // Fire and forget. Nothing on screen waits for this, and a failed write
+    // means the next session opens at the default — which is the state the
+    // reviewer would have been in anyway.
+    write: (width) => {
+      void writeRailWidth(width).catch(() => {});
+    },
+  });
 
   // Memoized on the threads themselves, not on the session: the tree redraws
   // on this map's *identity*, so a fresh one each render would re-render every
@@ -162,6 +209,7 @@ export function FilesView({
             current={current}
             onSelect={onSelectFromTree}
             onSetViewed={setViewedMany}
+            collapseTree={collapseTree}
           />
         </nav>
 
@@ -181,8 +229,10 @@ export function FilesView({
           sides={sides}
           diffStyle={diffStyle}
           syntaxTheme={syntaxTheme}
+          lineDiff={lineDiff}
           ignoreWhitespace={ignoreWhitespace}
           hideGenerated={hideGenerated}
+          generatedPatterns={generatedPatterns}
           gitAttributes={gitAttributes}
           current={current}
           onScrollTo={onSelectFromScroll}

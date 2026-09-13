@@ -14,10 +14,30 @@ import { THEME_FOLLOWS_PAGE, isDiffTheme } from './compare/themes';
 /** Where a review opens. */
 export type OpenIn = 'new-tab' | 'new-window' | 'same-tab';
 
+/**
+ * How much of a changed line is picked out inside it.
+ *
+ * Pierre's `lineDiffType`, named here so the options page and the diff column
+ * agree on the four values without either importing the other's types.
+ */
+export type LineDiff = 'word-alt' | 'word' | 'char' | 'none';
+
 export interface Settings {
   openIn: OpenIn;
   /** Open a review by itself on landing on a pull request. */
   autoOpen: boolean;
+  /**
+   * Open the review without moving to it.
+   *
+   * A sibling of {@link openIn} rather than a value inside it, because it is a
+   * different question: that one is *where* the review goes, this one is
+   * whether the reviewer goes with it. Triaging a notification digest means
+   * opening three pull requests and reading none of them yet, and a click that
+   * steals focus turns that into three interruptions.
+   *
+   * Ignored for `same-tab`, which has no background to open into.
+   */
+  openInBackground: boolean;
   /**
    * Write diagnostics to the console.
    *
@@ -94,6 +114,61 @@ export interface Settings {
    * reviewer did not choose.
    */
   diffTheme: string;
+  /**
+   * How much of a changed line is picked out inside it.
+   *
+   * `word-alt` is Pierre's own default and stays ours. `char` is meaningfully
+   * better for a rename inside a line and for prose, where a word-level pass
+   * marks a whole sentence changed because its third word gained an 's'.
+   * `none` is for anyone who finds the inner highlighting noisier than the
+   * line-level colour it sits on.
+   *
+   * Rearranges nothing and hides nothing, so it carries none of the hazard
+   * {@link ignoreWhitespace} does: the same lines are marked changed either
+   * way, and only the emphasis inside them moves.
+   */
+  lineDiff: LineDiff;
+  /**
+   * Open the file tree with its directories shut.
+   *
+   * For the monorepo case, where a hundred and fifty files across a deep tree
+   * arrive as a wall of rows with no shape to them. Folded rather than hidden,
+   * on the same reasoning {@link hideGenerated} is: every directory keeps its
+   * row and is one press from open.
+   */
+  collapseTree: boolean;
+  /**
+   * Paths the reviewer calls generated, on top of the built-in list.
+   *
+   * Globs in the syntax `lib/review/filters.ts` supports — `**`, `*` and `?`.
+   * Every team has one path the heuristic misses and no heuristic can guess:
+   * a generated API client, a snapshot directory, a tree of protobuf stubs.
+   *
+   * Additive, empty by default, and effective only while {@link hideGenerated}
+   * is on. All three of those are the same rule {@link ignoreWhitespace}
+   * answers to — a preference that folds a file away must not be able to
+   * arrive already doing it without the reviewer having asked.
+   *
+   * The repository's own `.gitattributes` still outranks this, for the reason
+   * `lib/review/generated.ts` gives: a repository marking a path is a
+   * statement about that path in particular, where a glob typed here is a
+   * standing guess about every repository the reviewer opens.
+   */
+  generatedPatterns: readonly string[];
+  /**
+   * Leave the browser's own find to the browser.
+   *
+   * The review page binds `Mod+F` to its search over changed lines, which is
+   * the more useful of the two on a diff and the wrong one when the reviewer
+   * wanted the page search they have used everywhere else for twenty years.
+   * Turning this on releases the key; the review search keeps `/`.
+   *
+   * One key rather than a remapping screen. A remapper is a config format, a
+   * conflict resolver and a reset button, and PRODUCT.md's "do less,
+   * completely" is a straight argument against building all three to solve one
+   * collision.
+   */
+  releaseFindKey: boolean;
 }
 
 /** `storage.local` key holding the whole {@link Settings} object. */
@@ -118,6 +193,35 @@ export const CARD_COLLAPSED_KEY = 'card-collapsed';
  * read-modify-write on one key will eventually lose one of the two edits.
  */
 export const MODE_MEMORY_KEY = 'mode-memory';
+
+/**
+ * `storage.local` key holding the file tree rail's width, in pixels.
+ *
+ * Its own key rather than a field on {@link Settings}, for the reason
+ * {@link CARD_COLLAPSED_KEY} is: the review page writes this at the end of
+ * every drag while the options page writes the settings object, and two writers
+ * doing read-modify-write on one key will eventually lose one of the two edits.
+ *
+ * Not on the options page at all, and that is the point of it. `ui/Shell.tsx`
+ * argues that nothing on the review page is remembered because everything there
+ * is an answer to *this* pull request — but a rail width is not an answer to a
+ * pull request, it is an answer to a monitor, and it is the same on all of
+ * them. A control for it would be a number field for something the reviewer has
+ * already said with a drag.
+ */
+export const RAIL_WIDTH_KEY = 'rail-width';
+
+/**
+ * Read a stored rail width, or `null` for "no answer yet, use the default".
+ *
+ * Clamped to the range the resizer itself enforces rather than trusted: a
+ * stored width from a wider monitor, or a corrupted one, would otherwise draw a
+ * rail that leaves no room for the diff and cannot be grabbed to fix.
+ */
+export function parseRailWidth(raw: unknown, min: number, max: number): number | null {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  return Math.min(Math.max(Math.round(raw), min), max);
+}
 
 /** Which mode each remembered kind opens in. Absent means "the kind's default". */
 export type ModeMemory = Readonly<Partial<Record<ComparisonKind, string>>>;
@@ -144,6 +248,10 @@ export const EMPTY_MODE_MEMORY: ModeMemory = {};
 export const DEFAULT_SETTINGS: Settings = {
   openIn: 'new-tab',
   autoOpen: false,
+  // Off, so a click still goes where a click has always gone. Opening behind
+  // the current tab is the right answer for a reviewer queueing three reviews
+  // and a baffling one for a reviewer who pressed the button to read this one.
+  openInBackground: false,
   debugLogging: false,
   // Both off, so a first review looks like GitHub's own until the reviewer
   // says otherwise. `ignoreWhitespace` especially: the default for a setting
@@ -155,6 +263,18 @@ export const DEFAULT_SETTINGS: Settings = {
   // taste frozen into every install's storage, and a later change to it
   // invisible to anyone who had already opened the options page.
   diffTheme: THEME_FOLLOWS_PAGE,
+  // Pierre's own default, restated rather than left unset: the options page has
+  // to draw this choice as selected, and it cannot draw an absence.
+  lineDiff: 'word-alt',
+  collapseTree: false,
+  // Empty, and the type is the frozen literal rather than a fresh array: a
+  // shared mutable default is how one caller's push becomes everybody's
+  // pattern.
+  generatedPatterns: Object.freeze([]),
+  // Off: the review page keeps `Mod+F` until asked to give it back. Releasing
+  // it by default would leave the diff search reachable only by `/`, which is
+  // the key fewer reviewers try first.
+  releaseFindKey: false,
 };
 
 /**
@@ -171,6 +291,57 @@ export function isOpenIn(value: unknown): value is OpenIn {
   // `hasOwn` rather than `in`, so `'constructor'` and friends are not
   // destinations.
   return typeof value === 'string' && Object.hasOwn(OPEN_IN, value);
+}
+
+/** Typed like {@link OPEN_IN}, and for the same reason. */
+const LINE_DIFF: Record<LineDiff, true> = {
+  'word-alt': true,
+  word: true,
+  char: true,
+  none: true,
+};
+
+export function isLineDiff(value: unknown): value is LineDiff {
+  return typeof value === 'string' && Object.hasOwn(LINE_DIFF, value);
+}
+
+/**
+ * How many globs {@link Settings.generatedPatterns} will carry, and how long
+ * each may be.
+ *
+ * Not a judgement about how many a reviewer needs — it is a bound on what a
+ * corrupted or hostile storage blob can make the matcher do. `isNoise` compiles
+ * every pattern to a `RegExp` and runs it against every path in the pull
+ * request, so an unbounded list is an unbounded amount of work on the way to
+ * drawing a diff.
+ */
+export const MAX_PATTERNS = 100;
+export const MAX_PATTERN_LENGTH = 200;
+
+/**
+ * Read a stored glob list, dropping per entry.
+ *
+ * Dropped rather than rejected, like {@link parseSettings} and
+ * {@link parseModeMemory}: one unusable glob must not discard the twenty beside
+ * it that were fine. Blank entries go too, because the options page stores this
+ * as typed lines and an empty line is what a reviewer leaves behind, not a
+ * pattern — and an empty glob matches everything, which would fold away the
+ * whole pull request.
+ */
+export function parsePatterns(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return DEFAULT_SETTINGS.generatedPatterns;
+
+  const patterns: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const glob = entry.trim();
+    if (glob === '' || glob.length > MAX_PATTERN_LENGTH) continue;
+    if (patterns.includes(glob)) continue;
+    patterns.push(glob);
+    if (patterns.length === MAX_PATTERNS) break;
+  }
+
+  return patterns;
 }
 
 /**
@@ -201,10 +372,18 @@ export function parseSettings(raw: unknown): Settings {
   return {
     openIn: isOpenIn(stored.openIn) ? stored.openIn : DEFAULT_SETTINGS.openIn,
     autoOpen: flag('autoOpen'),
+    openInBackground: flag('openInBackground'),
     debugLogging: flag('debugLogging'),
     ignoreWhitespace: flag('ignoreWhitespace'),
     splitView: flag('splitView'),
     hideGenerated: flag('hideGenerated'),
+    // Checked rather than passed through, for the reason `diffTheme` is below:
+    // an unrecognized value reaching Pierre is a diff drawn some way nobody
+    // chose, with nothing on the page to say why.
+    lineDiff: isLineDiff(stored.lineDiff) ? stored.lineDiff : DEFAULT_SETTINGS.lineDiff,
+    collapseTree: flag('collapseTree'),
+    generatedPatterns: parsePatterns(stored.generatedPatterns),
+    releaseFindKey: flag('releaseFindKey'),
     // Checked against what this build can actually draw, rather than passed
     // through. A theme id from a later version, or one Shiki has since dropped,
     // would otherwise reach Pierre and produce a diff rendered without

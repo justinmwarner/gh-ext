@@ -217,6 +217,65 @@ describe('Mod chords, on both platforms', () => {
   });
 });
 
+/**
+ * Handing `Mod+F` back.
+ *
+ * Two claims, and the second is the one that is easy to get wrong. Not firing
+ * is not enough: `handled` is what the page turns into `preventDefault`, so a
+ * released key that still reported itself handled would go on swallowing the
+ * keystroke and the find bar would go on not opening — the setting would look
+ * broken in exactly the way it exists to fix.
+ *
+ * And `/` is untouched. Releasing the contended key must not leave the diff
+ * search unreachable, which is why the flag sits on the binding rather than on
+ * the action the two of them share.
+ */
+describe('releasing the find key', () => {
+  const released = (platform: string) => ({
+    platform,
+    now: 0,
+    pending: null,
+    releaseFindKey: true,
+  });
+
+  it('resolves Mod+F to nothing at all', () => {
+    expect(resolveShortcut(withMod('f', WINDOWS), released(WINDOWS)).action).toBeNull();
+    expect(resolveShortcut(withMod('f', MAC), released(MAC)).action).toBeNull();
+  });
+
+  it('reports it unhandled, so the keystroke is not prevented', () => {
+    expect(resolveShortcut(withMod('f', WINDOWS), released(WINDOWS)).handled).toBe(false);
+  });
+
+  it('leaves `/` bound, so the diff search is still reachable', () => {
+    const slash = resolveShortcut(keydown({ key: '/' }), released(WINDOWS));
+    expect(slash.action).toBe('search-in-diff');
+    expect(slash.handled).toBe(true);
+  });
+
+  it('releases nothing else', () => {
+    // One key, not a remapping screen. `Mod+K` is the neighbouring chord and
+    // is not contended with anything the browser does.
+    expect(resolveShortcut(withMod('k', WINDOWS), released(WINDOWS)).action).toBe(
+      'file-jump',
+    );
+  });
+
+  it('keeps Mod+F when the setting is absent, which is what a caller that does not know gets', () => {
+    expect(resolveShortcut(withMod('f', WINDOWS), ctx(WINDOWS)).action).toBe(
+      'search-in-diff',
+    );
+  });
+
+  it('marks exactly one binding releasable', () => {
+    // A second one would be a remapping screen arriving by increments, which
+    // `Settings.releaseFindKey` argues against at length.
+    const releasable = SHORTCUTS.filter((shortcut) => shortcut.releasable === true);
+    expect(releasable).toHaveLength(1);
+    expect(releasable[0]).toMatchObject({ keys: ['f'], mod: true });
+  });
+});
+
 describe('never while the reviewer is typing', () => {
   const fields: readonly [string, KeyEventLike['target']][] = [
     ['an input', { tagName: 'INPUT', isContentEditable: false }],

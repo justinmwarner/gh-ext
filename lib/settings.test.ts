@@ -12,9 +12,14 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   EMPTY_MODE_MEMORY,
+  MAX_PATTERNS,
+  MAX_PATTERN_LENGTH,
   autoOpenAvailable,
+  isLineDiff,
   isOpenIn,
   parseModeMemory,
+  parsePatterns,
+  parseRailWidth,
   parseSettings,
 } from './settings';
 
@@ -260,5 +265,140 @@ describe('parseModeMemory', () => {
     expect(parseModeMemory({ markdown: 'raw', image: 'nonsense' })).toEqual({
       markdown: 'raw',
     });
+  });
+});
+
+describe('parsePatterns', () => {
+  it('defaults to nothing, so folding cannot arrive already configured', () => {
+    // The same rule ignoreWhitespace answers to: a preference that folds a
+    // file away must not be able to be on without the reviewer asking.
+    expect(DEFAULT_SETTINGS.generatedPatterns).toEqual([]);
+  });
+
+  it('cannot be mutated through the default', () => {
+    // Frozen rather than copied per read: a shared mutable default is how one
+    // caller's push becomes every caller's pattern.
+    expect(() => {
+      (DEFAULT_SETTINGS.generatedPatterns as string[]).push('**/*.go');
+    }).toThrow();
+  });
+
+  it.each([undefined, null, 'string', 42, {}])(
+    'falls back to nothing for the non-array %p',
+    (raw) => {
+      expect(parsePatterns(raw)).toEqual([]);
+    },
+  );
+
+  it('reads a list of globs back unchanged', () => {
+    expect(parsePatterns(['**/*.pb.go', 'api/generated/**'])).toEqual([
+      '**/*.pb.go',
+      'api/generated/**',
+    ]);
+  });
+
+  it('trims the whitespace a typed line arrives with', () => {
+    expect(parsePatterns(['  **/*.pb.go  '])).toEqual(['**/*.pb.go']);
+  });
+
+  it('drops a blank line rather than storing it', () => {
+    // An empty glob matches every path, so storing one would fold away the
+    // whole pull request. A reviewer typing a list leaves blank lines behind.
+    expect(parsePatterns(['**/*.pb.go', '', '   '])).toEqual(['**/*.pb.go']);
+  });
+
+  it('drops a duplicate, which is a second regexp run over every path', () => {
+    expect(parsePatterns(['**/*.lock', '**/*.lock'])).toEqual(['**/*.lock']);
+  });
+
+  it('keeps the good entry beside a bad one', () => {
+    // Per entry, like parseSettings and parseModeMemory.
+    expect(parsePatterns(['**/*.pb.go', 42, null])).toEqual(['**/*.pb.go']);
+  });
+
+  it('drops a pattern longer than the cap', () => {
+    expect(parsePatterns(['a'.repeat(MAX_PATTERN_LENGTH + 1)])).toEqual([]);
+  });
+
+  it('keeps a pattern exactly at the cap', () => {
+    const glob = 'a'.repeat(MAX_PATTERN_LENGTH);
+    expect(parsePatterns([glob])).toEqual([glob]);
+  });
+
+  it('stops at the count cap', () => {
+    // A bound on what a corrupted blob can make the matcher do, not a
+    // judgement about how many globs a reviewer needs: every one of these is
+    // compiled and run against every path in the pull request.
+    const many = Array.from({ length: MAX_PATTERNS + 10 }, (_, at) => `p${at}/**`);
+    expect(parsePatterns(many)).toHaveLength(MAX_PATTERNS);
+  });
+});
+
+describe('isLineDiff', () => {
+  it.each(['word-alt', 'word', 'char', 'none'])('accepts %p', (value) => {
+    expect(isLineDiff(value)).toBe(true);
+  });
+
+  it.each(['line', '', 42, null, undefined])('refuses %p', (value) => {
+    expect(isLineDiff(value)).toBe(false);
+  });
+
+  it('refuses an inherited property name', () => {
+    // hasOwn rather than `in`, so Object.prototype's keys are not granularities.
+    expect(isLineDiff('constructor')).toBe(false);
+  });
+
+  it('keeps Pierre’s own default, restated so the page can draw it', () => {
+    expect(DEFAULT_SETTINGS.lineDiff).toBe('word-alt');
+  });
+
+  it('falls back rather than passing an unknown value to Pierre', () => {
+    // A granularity from a later build reaching the diff column is a diff
+    // drawn some way nobody chose, with nothing on the page to say why.
+    expect(parseSettings({ lineDiff: 'syllable' }).lineDiff).toBe('word-alt');
+  });
+});
+
+describe('parseRailWidth', () => {
+  it('reads a stored width back', () => {
+    expect(parseRailWidth(320, 180, 560)).toBe(320);
+  });
+
+  it.each([undefined, null, '320', Number.NaN, Number.POSITIVE_INFINITY])(
+    'answers null for %p, meaning no answer yet',
+    (raw) => {
+      expect(parseRailWidth(raw, 180, 560)).toBeNull();
+    },
+  );
+
+  it('clamps a width from a wider monitor', () => {
+    // Otherwise the rail leaves no room for the diff and cannot be grabbed to
+    // fix, which is a stuck page rather than a wrong one.
+    expect(parseRailWidth(2000, 180, 560)).toBe(560);
+  });
+
+  it('clamps a width below the minimum', () => {
+    expect(parseRailWidth(10, 180, 560)).toBe(180);
+  });
+
+  it('rounds a fractional width to a whole pixel', () => {
+    expect(parseRailWidth(320.6, 180, 560)).toBe(321);
+  });
+});
+
+describe('the new preferences default off', () => {
+  // Each of these changes what a first review looks like, so each defaults to
+  // what GitHub itself does until the reviewer says otherwise.
+  it.each(['openInBackground', 'collapseTree', 'releaseFindKey'] as const)(
+    '%s',
+    (key) => {
+      expect(DEFAULT_SETTINGS[key]).toBe(false);
+    },
+  );
+
+  it('ignores a non-boolean rather than coercing it', () => {
+    // The string 'false' is truthy, so a loose check would turn a setting on
+    // for someone whose stored value was trying to turn it off.
+    expect(parseSettings({ openInBackground: 'false' }).openInBackground).toBe(false);
   });
 });

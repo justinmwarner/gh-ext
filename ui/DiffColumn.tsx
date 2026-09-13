@@ -66,6 +66,10 @@ import {
   isGenerated,
 } from '@/lib/review/generated';
 import { type PostingComment, postsOnPath } from '@/lib/review/posting';
+// `DEFAULT_SETTINGS` for its frozen empty pattern list, which is shared rather
+// than rebuilt: a fresh `[]` per render would be a new `options` identity and
+// so a re-render of every mounted diff.
+import { DEFAULT_SETTINGS, type LineDiff } from '@/lib/settings';
 import { Composer } from './Composer';
 import { FileBody, hasBodyContent } from './FileBody';
 import { FileCard } from './FileCard';
@@ -201,6 +205,13 @@ export interface DiffColumnProps {
    */
   syntaxTheme?: string;
   /**
+   * How much of a changed line is picked out inside it. From the options page.
+   *
+   * Pierre's own `word-alt` is the default here as well as there, so a column
+   * mounted without the prop draws what it always drew.
+   */
+  lineDiff?: LineDiff;
+  /**
    * Read every file through the whitespace rewrite rather than GitHub's patch.
    *
    * One flag for the whole column, from the options page. It was a set of
@@ -218,6 +229,15 @@ export interface DiffColumnProps {
   ignoreWhitespace?: boolean;
   /** Fold away the diff of a file nobody wrote. From the options page. */
   hideGenerated?: boolean;
+  /**
+   * Paths the reviewer calls generated, on top of the built-in list.
+   *
+   * Read only while {@link hideGenerated} is on, which is not a convenience:
+   * `Settings.generatedPatterns` requires it, because a glob that folds a file
+   * away must not be able to start folding without the reviewer having turned
+   * the folding on. The `hideGenerated &&` in `flags` is where that holds.
+   */
+  generatedPatterns?: readonly string[];
   /**
    * What the repository declared about its own generated files.
    *
@@ -375,9 +395,11 @@ export function DiffColumn({
   blobs = null,
   ignoreWhitespace = false,
   hideGenerated = false,
+  generatedPatterns = DEFAULT_SETTINGS.generatedPatterns,
   gitAttributes = NO_ATTRIBUTES,
   diffStyle = 'unified',
   syntaxTheme = '',
+  lineDiff = 'word-alt',
   ref,
 }: DiffColumnProps) {
   const session = useReviewSession();
@@ -515,14 +537,17 @@ export function DiffColumn({
   const flags = useMemo(() => {
     const built = new Map<string, HeldBack>();
     for (const file of files) {
-      if (hideGenerated && isGenerated(file.path, gitAttributes)) {
+      // The reviewer's own globs ride along with the built-in list, and only
+      // while the setting is on — the `hideGenerated &&` is what makes that
+      // true, and it has to stay in front of the call rather than inside it.
+      if (hideGenerated && isGenerated(file.path, gitAttributes, generatedPatterns)) {
         built.set(file.path, 'generated');
       } else if (recomputed.has(file.path)) {
         built.set(file.path, 'whitespace');
       }
     }
     return built;
-  }, [files, hideGenerated, gitAttributes, recomputed]);
+  }, [files, hideGenerated, generatedPatterns, gitAttributes, recomputed]);
 
   /**
    * The viewed state each card is actually in.
@@ -1227,6 +1252,12 @@ export function DiffColumn({
       // what changing the layout has to do and the reason this is in the
       // dependency list rather than read through a ref.
       diffStyle,
+      // Named rather than left out. Pierre's default is `word-alt` and so is
+      // ours, but leaving it absent would mean the reviewer's `char` or `none`
+      // never reaching it — and §16's worker-pool note is why it can be said
+      // here at all: `lineDiffType` is one of the four options a live pool
+      // would own, and `CODE_VIEW_SAFE_PROPS` turns the pool off.
+      lineDiffType: lineDiff,
       // Omitted rather than passed empty. Pierre falls back to its own
       // light/dark pair only when the key is absent, so an empty string here
       // would be a theme named '' and nothing would highlight.
@@ -1255,7 +1286,7 @@ export function DiffColumn({
         noticeExpansion.current(path, fileDiff, instance);
       },
     }),
-    [loadDiffFiles, diffStyle, syntaxTheme],
+    [loadDiffFiles, diffStyle, syntaxTheme, lineDiff],
   );
 
   /** The source text under the composer's selection, for the suggestion button. */
