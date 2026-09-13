@@ -1,6 +1,6 @@
 # Reviewing a pull request
 
-This guide covers the review page.
+This guide covers the review page, the commit picker and the rich diff modes.
 
 ## Getting started
 
@@ -12,7 +12,7 @@ This guide covers the review page.
 
 ```ts
 const review = await open(pullRequest);
-review.submit({ event: 'COMMENT' });
+review.submit({ event: 'APPROVE' });
 ```
 
 See [the design](../README.md) for the reasoning.

@@ -1,30 +1,29 @@
 {
   "name": "gh-ext",
-  "version": "2.0.4",
+  "version": "2.1.0",
   "server": {
     "host": "0.0.0.0",
     "port": 8080,
     "tls": {
       "enabled": true,
-      "minVersion": "1.2"
+      "minVersion": "1.3"
     },
     "timeouts": {
       "readMs": 5000,
-      "writeMs": 5000
+      "writeMs": 5000,
+      "idleMs": 30000
     }
   },
   "features": [
     "diffs",
     "threads",
-    "checks"
+    "checks",
+    "commits"
   ],
   "logging": {
-    "level": "info",
+    "level": "debug",
     "sinks": [
       "stdout"
     ]
-  },
-  "deprecated": {
-    "legacyApi": true
   }
 }

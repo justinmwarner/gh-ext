@@ -1,4 +1,4 @@
-id,name,role,city
-1,Ada Lovelace,Engineer,London
-2,Grace Hopper,Engineer,New York
-3,Alan Turing,Researcher,Cambridge
+name,id,city,role
+Ada Lovelace,1,London,Engineer
+Grace Hopper,2,New York,Engineer
+Alan Turing,3,Cambridge,Researcher

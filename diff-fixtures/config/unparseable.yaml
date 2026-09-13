@@ -1,9 +1,9 @@
-# Valid on this side. The pull request breaks it on purpose, so the review
-# page has something to say "not valid YAML, at line N" about.
+# Broken on purpose, so the review page has something to say "not valid YAML"
+# about — and can say it with a line number rather than a shrug.
 retries: 3
 backoff:
   initialMs: 250
-  maxMs: 8000
+  maxMs: [8000
 targets:
   - name: primary
     url: https://example.invalid/a

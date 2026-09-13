@@ -1,2 +1,2 @@
 This file deliberately ends without a newline.
-Second line
+Second line (edited)
