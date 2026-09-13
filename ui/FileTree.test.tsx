@@ -353,3 +353,252 @@ describe('following the diff column', () => {
     ]);
   });
 });
+
+/**
+ * Narrowing the tree.
+ *
+ * A different affordance from `Mod+K`, which the panel already offers: that one
+ * finds one file, jumps to it and closes, and this one *stays* — the reviewer
+ * narrows to an area of the change and works down what is left. So the two
+ * claims that matter are that the tree keeps its own order and nesting while it
+ * is narrowed, and that nothing is hidden by a filter the reviewer has
+ * forgotten is on.
+ *
+ * Only the tree narrows. The diff column keeps every file, because a control in
+ * the sidebar that quietly removed files from the review is the kind of thing
+ * `lib/settings.ts` argues at length that this product must not do.
+ */
+describe('filtering the tree', () => {
+  const filter = (): HTMLElement => screen.getByRole('searchbox', { name: /filter files/i });
+  const paths = (): (string | null)[] => rows().map((r) => r.getAttribute('data-path'));
+
+  it('hides nothing at rest, so the box is safe to leave on screen', () => {
+    mount();
+
+    expect(paths()).toHaveLength(6);
+    // And says nothing, rather than standing there empty: the count is a live
+    // region, and one that is always present is one every other surface's has
+    // to be distinguished from.
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('narrows to the files that match, and drops the folders holding none', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'readme');
+
+    expect(paths()).toEqual(['docs/', 'docs/readme.md']);
+  });
+
+  it('matches on the directory too, which is how an area is narrowed to', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'src/');
+
+    expect(paths()).toEqual(['src/', 'src/app.ts', 'src/beta.ts']);
+  });
+
+  it('says how much of the tree is left, so a filter cannot be forgotten', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'readme');
+
+    expect(screen.getByRole('status').textContent).toBe('1 of 4 files');
+  });
+
+  it('says so when nothing matches, rather than showing an empty rail', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'zzz');
+
+    // `queryAll`, because `getAllByRole` throws on none and the whole claim
+    // here is that there are none.
+    expect(screen.queryAllByRole('treeitem')).toHaveLength(0);
+    expect(screen.getByRole('status').textContent).toMatch(/no file matches/i);
+  });
+
+  it('gives the whole tree back when the box is emptied', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'readme');
+    await userEvent.clear(filter());
+
+    expect(paths()).toHaveLength(6);
+  });
+
+  it('clears on Escape, without the reviewer having to select the text', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'readme');
+    await userEvent.keyboard('{Escape}');
+
+    expect((filter() as HTMLInputElement).value).toBe('');
+    expect(paths()).toHaveLength(6);
+  });
+
+  it('opens a folder the reviewer had shut, so its match is not hidden inside it', async () => {
+    // Otherwise the count says one file matched and the tree shows none of it,
+    // which reads as the filter being broken.
+    mount();
+
+    await userEvent.click(row('docs'));
+    expect(screen.queryByRole('treeitem', { name: /readme/ })).toBeNull();
+
+    await userEvent.type(filter(), 'readme');
+
+    expect(row('readme')).toBeDefined();
+  });
+
+  it('leaves the folds as the reviewer left them once the filter is gone', async () => {
+    // Opening folders is what the filter does *while it is on*, not an edit to
+    // how the reviewer had arranged the tree.
+    mount();
+
+    await userEvent.click(row('docs'));
+    await userEvent.type(filter(), 'readme');
+    await userEvent.clear(filter());
+
+    expect(row('docs').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('steps from the box into the tree with the down arrow', async () => {
+    mount();
+
+    await userEvent.type(filter(), 'src/');
+    await userEvent.keyboard('{ArrowDown}');
+
+    expect(document.activeElement?.getAttribute('data-path')).toBe('src/');
+  });
+});
+
+/**
+ * Opening the tree shut.
+ *
+ * For the monorepo case, where a hundred and fifty files across a deep tree
+ * arrive as a wall of rows with no shape to them. The two things worth pinning
+ * are that it folds rather than hides — every directory keeps its row and is
+ * one press from open — and that it is where the tree *starts* rather than a
+ * switch the tree obeys. The second is the one a reviewer would notice going
+ * wrong: forty minutes into a review they have arranged these folds themselves,
+ * and a setting that reapplied itself would throw that away.
+ */
+describe('starting collapsed', () => {
+  const paths = (): (string | null)[] => rows().map((r) => r.getAttribute('data-path'));
+
+  it('opens with every directory expanded unless asked otherwise', () => {
+    mount();
+
+    expect(paths()).toHaveLength(6);
+  });
+
+  it('opens with the directories shut when asked', () => {
+    mount({ collapseTree: true });
+
+    expect(paths()).toEqual(['docs/', 'src/', 'top.ts']);
+  });
+
+  it('keeps a top-level file on screen, which sits in no directory', () => {
+    // Folded, not hidden. Nothing about the change becomes unknowable.
+    mount({ collapseTree: true });
+
+    expect(row('top.ts')).toBeDefined();
+  });
+
+  it('leaves every folder one press from open', () => {
+    mount({ collapseTree: true });
+
+    expect(row('src').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens one when the reviewer presses it, without disturbing the rest', async () => {
+    mount({ collapseTree: true });
+
+    await userEvent.click(row('src'));
+
+    expect(paths()).toEqual(['docs/', 'src/', 'src/app.ts', 'src/beta.ts', 'top.ts']);
+  });
+
+  it('shuts the directories in between too, not only the deepest', () => {
+    const deep = [file('a/b/c/deep.ts'), file('a/top.ts')];
+    mount({ files: deep, collapseTree: true });
+
+    expect(paths()).toEqual(['a/']);
+  });
+
+  it('does not reapply itself when the reviewer has since opened a folder', async () => {
+    // The claim that makes this an initial state rather than a live toggle.
+    // The options page can write while a review is open, and `useSettings`
+    // pushes that straight into this prop.
+    const { rerender } = mount({ collapseTree: true });
+    await userEvent.click(row('src'));
+
+    rerender(
+      <FileTree
+        files={FILES}
+        current={NO_FILE}
+        onSelect={vi.fn()}
+        onSetViewed={vi.fn()}
+        collapseTree
+      />,
+    );
+
+    expect(paths()).toEqual(['docs/', 'src/', 'src/app.ts', 'src/beta.ts', 'top.ts']);
+  });
+
+  it('does not fling the tree open when the setting is turned off mid-review', () => {
+    const { rerender } = mount({ collapseTree: true });
+
+    rerender(
+      <FileTree
+        files={FILES}
+        current={NO_FILE}
+        onSelect={vi.fn()}
+        onSetViewed={vi.fn()}
+        collapseTree={false}
+      />,
+    );
+
+    expect(paths()).toEqual(['docs/', 'src/', 'top.ts']);
+  });
+
+  it('still folds when the setting arrives before the files do', () => {
+    // The ordinary case on the real page, and the reason the seed waits for a
+    // file list: settings come from `storage.local` a tick after mount, and
+    // the pull request arrives over the wire long after that. A tree seeded at
+    // mount would have read the default and never looked again.
+    const { rerender } = mount({ files: [], collapseTree: true });
+    expect(screen.getByText(/no changed files/i)).toBeDefined();
+
+    rerender(
+      <FileTree
+        files={FILES}
+        current={NO_FILE}
+        onSelect={vi.fn()}
+        onSetViewed={vi.fn()}
+        collapseTree
+      />,
+    );
+
+    expect(paths()).toEqual(['docs/', 'src/', 'top.ts']);
+  });
+
+  it('still opens the folder holding the file the column scrolled to', async () => {
+    // The tree follows the column, and a shut folder must not leave it
+    // pointing at a row that is not on screen.
+    const { rerender } = mount({ collapseTree: true });
+
+    await act(async () => {
+      rerender(
+        <FileTree
+          files={FILES}
+          current={{ path: 'src/beta.ts', origin: 'scroll' }}
+          onSelect={vi.fn()}
+          onSetViewed={vi.fn()}
+          collapseTree
+        />,
+      );
+    });
+
+    expect(row('beta.ts')).toBeDefined();
+  });
+});

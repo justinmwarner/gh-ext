@@ -12,8 +12,9 @@ switch to open the review automatically on landing on a pull request.
 Comments with reply and resolve. The pending-review flow. Status checks.
 Approve and request changes. Plus keyboard navigation, viewed state, drafts that
 survive a failed post, multi-line comments, suggestion authoring, noise
-filtering, diff search, expand-unchanged-context, and scoping the diff to one
-commit, a range of commits, or "changes since my last review".
+filtering, diff search, a filter on the file tree, expand-unchanged-context, and
+scoping the diff to one commit, a range of commits, or "changes since my last
+review".
 
 The colours are yours to pick: seventy-five themes, all already in the extension
 so choosing one downloads nothing. A theme dresses the whole product, not just

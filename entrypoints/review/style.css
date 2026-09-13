@@ -940,13 +940,52 @@ button.scope-showing:hover {
   min-height: 0;
 }
 
-/* The tree owns the width the drag gave it and does its own scrolling. */
+/* The tree owns the width the drag gave it and does its own scrolling. A
+   column, because the filter sits above the rows rather than beside them. */
 .filetree {
   display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
   min-height: 0;
   padding: 8px 0 8px 8px;
   overflow: hidden;
+}
+
+/* Outside `.filetree-rows` on purpose: the box must not scroll away from a
+   reviewer who narrowed a long tree and then walked down what was left. */
+.filetree-filter {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 6px;
+  padding-bottom: 6px;
+}
+
+.filetree-search {
+  min-width: 0;
+  padding: 3px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+/* A placeholder is text and answers to the same contrast as any other. The UA
+   default is a fixed grey whatever it is sitting on, which is the problem. */
+.filetree-search::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
+}
+
+/* Empty and therefore zero-height until the filter is doing something. No
+   space is reserved for it: the line is absent on almost every review, and a
+   permanently blank row above the tree would be furniture. */
+.filetree-count {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
 }
 
 .filetree-rows {
