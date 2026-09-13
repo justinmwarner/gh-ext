@@ -23,3 +23,7 @@ store/video/
 
 # Scratch files from probing the live GitHub schema.
 .probe-*
+
+# Worktrees created for isolated feature work. They are checkouts of this same
+# repository, so tracking one would commit the repo into itself.
+.claude/worktrees/
