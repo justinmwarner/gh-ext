@@ -391,11 +391,50 @@ pdf.write(b'trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n'
           % (len(objects) + 1, xref))
 wb('binary/report.pdf', pdf.getvalue())
 
-# A real archive, so the bytes are structured rather than random.
+# A real archive, and one whose two sides differ in every way a listing can
+# report: a member added, one removed, two changed, two that held still, and
+# a directory record that is not a file at all.
+#
+# Two of them are traps for a reader that consults the wrong field.
+# `readme.txt` changes without changing length, so anything comparing sizes
+# calls it unchanged. And every entry is stamped with a different date on
+# each side — which is what a rebuilt archive does — so anything comparing
+# stored bytes calls `data/values.csv` changed when nothing in it moved. Only
+# the CRC-32 in the central directory answers both of those correctly.
+ZIP_DATE = (2026, 6, 1, 9, 0, 0) if A else (2026, 1, 1, 9, 0, 0)
+
+
+def zmember(z, name, text):
+    """One member, dated so the two sides never agree on its timestamp."""
+    info = zipfile.ZipInfo(name, date_time=ZIP_DATE)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    z.writestr(info, text)
+
+
+def zdir(z, name):
+    """A directory record: a name, no content, and the MS-DOS directory bit."""
+    info = zipfile.ZipInfo(name, date_time=ZIP_DATE)
+    info.external_attr = (0o40755 << 16) | 0x10
+    z.writestr(info, b'')
+
+
 zbuf = io.BytesIO()
 with zipfile.ZipFile(zbuf, 'w', zipfile.ZIP_DEFLATED) as z:
-    z.writestr('readme.txt', 'archive contents, %s side\n' % variant)
-    z.writestr('data/values.csv', 'a,b\n1,%d\n' % (2 if A else 1))
+    # Changed, and exactly as long either way.
+    zmember(z, 'readme.txt', 'archive contents, %s side\n' % ('new' if A else 'old'))
+    # Byte for byte identical, under a timestamp that is not.
+    zmember(z, 'data/values.csv', 'a,b\n1,2\n')
+    # Changed, and a different length, so the row has two sizes to show.
+    zmember(z, 'data/rows.csv', 'id,name\n' + ''.join(
+        '%d,row %d\n' % (i, i) for i in range(1, 6 if A else 4)))
+    zdir(z, 'docs/')
+    zmember(z, 'docs/guide.txt', 'how to read this archive\n')
+    if A:
+        zmember(z, 'notes/added.md',
+                '# Added\n\nOnly the after side has this file.\n')
+    else:
+        zmember(z, 'notes/removed.md',
+                '# Removed\n\nOnly the before side had this file.\n')
 wb('binary/archive.zip', zbuf.getvalue())
 
 if A:

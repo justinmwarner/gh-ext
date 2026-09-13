@@ -77,9 +77,20 @@ drawn as plain text everywhere in the review page today.
 
 ## Binary — `binary/`
 
-`report.pdf` is a genuinely valid one-page PDF. `archive.zip` is a real
-archive. `font.woff2` is added and is deliberately *not* a real font — what
-matters is that it is recognised as binary and not rendered.
+`report.pdf` is a genuinely valid one-page PDF. `font.woff2` is added and is
+deliberately *not* a real font — what matters is that it is recognised as
+binary and not rendered.
+
+`archive.zip` is a real archive, and its two sides differ in every way a
+listing can report: `notes/added.md` arrives, `notes/removed.md` goes,
+`data/rows.csv` changes length, and `data/values.csv` and `docs/guide.txt` hold
+still. Two of the entries are traps. `readme.txt` changes without changing
+length, so anything comparing sizes calls it unchanged; and every entry is
+stamped with a different date on each side — which is what a rebuilt archive
+does — so anything comparing stored bytes calls `data/values.csv` changed when
+nothing in it moved. Only the CRC-32 in the central directory answers both.
+`docs/` is an explicit directory record, which has a name and no content and
+should not be listed as a file at all.
 
 ## Edges — `edges/`
 
