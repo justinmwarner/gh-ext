@@ -138,10 +138,17 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    * button on a file header that happened to still be pressed. `Settings`
    * carries the long version of this.
    *
-   * Still nothing else on this page is remembered: not the rail width, not
-   * which files are collapsed, not the per-file comparison mode, whose own
-   * control says so and says why. Those are answers to *this* pull request.
-   * These two are answers to how the reviewer reads diffs.
+   * Still almost nothing else on this page is remembered: not which files are
+   * collapsed, not the per-file comparison mode, whose own control says so and
+   * says why. Those are answers to *this* pull request. These two are answers
+   * to how the reviewer reads diffs.
+   *
+   * The rail's width used to be on that list and is not any more. It turned out
+   * not to be an answer to a pull request at all — it is an answer to a
+   * monitor, and it is the same answer on every pull request opened on that
+   * monitor. So it is kept, under its own key, with no control anywhere for a
+   * reviewer to set it twice: `RAIL_WIDTH_KEY` carries the argument and
+   * `FilesView` does the keeping.
    */
   const settings = useSettings();
   const diffStyle: DiffStyle = settings.splitView ? 'split' : 'unified';
@@ -402,6 +409,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     return path !== null && (targets?.run(action, path) ?? false);
   };
 
+  // The second argument is the one binding the reviewer can hand back to the
+  // browser. Only `Mod+F` answers to it — `/` still opens the diff search — so
+  // releasing it can never leave the search unreachable.
   useKeymap({
     'next-file': () => moveFile(1),
     'previous-file': () => moveFile(-1),
@@ -439,7 +449,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     'submit-review': () => {
       targets?.run('submit-review');
     },
-  });
+  }, { releaseFindKey: settings.releaseFindKey });
 
   // Only what is outstanding. The badge exists because putting the threads
   // behind a view means a reviewer can be reading the diff with comments they
@@ -529,8 +539,14 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               sides={sides}
               diffStyle={diffStyle}
               syntaxTheme={settings.diffTheme}
+              lineDiff={settings.lineDiff}
               ignoreWhitespace={settings.ignoreWhitespace}
               hideGenerated={settings.hideGenerated}
+              // Passed unconditionally; `DiffColumn` consults them only while
+              // `hideGenerated` is on, which is where that rule belongs — it is
+              // a rule about folding, not about what this component hands over.
+              generatedPatterns={settings.generatedPatterns}
+              collapseTree={settings.collapseTree}
               gitAttributes={gitAttributes}
               columnRef={column}
             />

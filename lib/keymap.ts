@@ -81,6 +81,16 @@ export interface Shortcut {
   /** What the help overlay says this does. */
   description: string;
   group: ShortcutGroup;
+  /**
+   * The reviewer can take this binding back, through
+   * {@link KeymapContext.releaseFindKey}.
+   *
+   * A flag on the one binding rather than a rule naming the key, because
+   * `search-in-diff` has two of them and only this one is contended: giving
+   * `Mod+F` back has to leave `/` exactly where it was, and a check written
+   * against the action would take both.
+   */
+  releasable?: true;
 }
 
 /**
@@ -255,12 +265,16 @@ export const SHORTCUTS: readonly Shortcut[] = [
     // but on Windows and Linux `/` is not what opens a find bar — Ctrl+F is —
     // and "override the browser's own find" is only true if that one is taken
     // too. Both are listed in the help, so neither can go undocumented.
+    //
+    // It is also the only binding here that takes a key the reviewer has been
+    // pressing for twenty years, which is why it is the only releasable one.
     action: 'search-in-diff',
     keys: ['f'],
     mod: true,
     shift: 'not-held',
     description: 'Search the diff',
     group: 'Finding things',
+    releasable: true,
   },
   {
     action: 'shortcut-help',
@@ -315,6 +329,19 @@ export interface KeymapContext {
   now: number;
   /** The sequence prefix still waiting for its second key, or null. */
   pending: PendingSequence | null;
+  /**
+   * Leave every {@link Shortcut.releasable} binding to the browser.
+   *
+   * Optional, and absent means "keep them" — the default the reviewer has
+   * until they say otherwise, and the answer every caller that does not know
+   * about the setting should get.
+   *
+   * Resolved to nothing rather than filtered by the caller, because `handled`
+   * is what makes the page call `preventDefault`. A binding suppressed one
+   * layer up would still have swallowed the keystroke on the way past, and the
+   * browser's find bar would go on not opening.
+   */
+  releaseFindKey?: boolean;
 }
 
 export interface KeymapResolution {
@@ -442,6 +469,10 @@ export function resolveShortcut(
     // cannot be typed into a field by accident, and `Mod+Enter` exists to
     // submit from inside the composer.
     if (typing && !single.mod) return NOTHING;
+    // Given back to the browser, which means `NOTHING` rather than a null
+    // action beside `handled: true`: the keystroke has to reach the find bar
+    // unprevented, and `handled` is exactly what stops it.
+    if (single.releasable === true && context.releaseFindKey === true) return NOTHING;
     return { action: single.action, pending: null, handled: true };
   }
 

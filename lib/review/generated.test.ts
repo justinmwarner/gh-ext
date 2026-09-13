@@ -187,3 +187,72 @@ describe('what the repository says', () => {
     expect(isGenerated('src/app.ts', rules)).toBe(false);
   });
 });
+
+/**
+ * The reviewer's own globs, in the tier below the repository's answer.
+ *
+ * Three properties, and the middle one is the decision this tier was added to
+ * make. They sit *beside* the built-in patterns, not above them and not above
+ * `.gitattributes`: every team has one generated path no heuristic could guess,
+ * and none of them has a claim on a path the repository has already spoken
+ * about. A glob typed on an options page is a standing guess about every
+ * repository the reviewer opens; a `.gitattributes` line is a statement about
+ * one path by someone who knows what is in it.
+ */
+describe('what the reviewer says', () => {
+  const MINE = ['src/api/**/*.gen.ts', 'proto/**'];
+
+  it('folds a path the built-in list would never have caught', () => {
+    expect(isGenerated('src/api/client.gen.ts', NO_ATTRIBUTES)).toBe(false);
+    expect(isGenerated('src/api/client.gen.ts', NO_ATTRIBUTES, MINE)).toBe(true);
+  });
+
+  it('adds to the built-in list rather than replacing it', () => {
+    expect(isGenerated('package-lock.json', NO_ATTRIBUTES, MINE)).toBe(true);
+  });
+
+  it('leaves a path neither list names alone', () => {
+    expect(isGenerated('src/app.ts', NO_ATTRIBUTES, MINE)).toBe(false);
+  });
+
+  it('loses to a repository that exempts the same path', () => {
+    // The precedence decision. The reviewer's glob is about every repository
+    // they will ever open; this line is about this file.
+    const rules = parseGitAttributes('src/api/client.gen.ts -linguist-generated');
+
+    expect(isGenerated('src/api/client.gen.ts', rules, MINE)).toBe(false);
+  });
+
+  it('loses to a repository exemption reached through a wildcard, too', () => {
+    // Precedence is by tier, not by how specifically the winning rule was
+    // written — otherwise a precise glob here would beat a broad line there.
+    const rules = parseGitAttributes('src/** -linguist-generated');
+
+    expect(isGenerated('src/api/client.gen.ts', rules, MINE)).toBe(false);
+  });
+
+  it('is not needed for a path the repository already declares generated', () => {
+    const rules = parseGitAttributes('src/api/client.gen.ts linguist-generated');
+
+    expect(isGenerated('src/api/client.gen.ts', rules, [])).toBe(true);
+  });
+
+  it('changes nothing when it is empty, which is the default', () => {
+    expect(isGenerated('src/app.ts', NO_ATTRIBUTES, [])).toBe(false);
+    expect(isGenerated('yarn.lock', NO_ATTRIBUTES, [])).toBe(true);
+  });
+
+  it('is optional, so a caller asking only what the heuristic says need not pass one', () => {
+    expect(isGenerated('yarn.lock', NO_ATTRIBUTES)).toBe(true);
+  });
+
+  it('can only widen, never narrow', () => {
+    // There is no subtractive form and this is what says so. A reviewer who
+    // wants one lockfile back opens that card; `Settings.generatedPatterns`
+    // explains why that is per file rather than a second pattern list.
+    const everything = ['**'];
+
+    expect(isGenerated('src/app.ts', NO_ATTRIBUTES, everything)).toBe(true);
+    expect(isGenerated('yarn.lock', NO_ATTRIBUTES, ['nothing-matches-this'])).toBe(true);
+  });
+});

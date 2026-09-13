@@ -214,10 +214,34 @@ export function parseGitAttributes(text: string): GeneratedRule[] {
  * a path the repository marks `-linguist-generated` is shown even if it is
  * called `yarn.lock`, because somebody went out of their way to say so.
  *
- * Only when the repository said nothing at all about a path do the built-in
- * patterns get a say.
+ * Only when the repository said nothing at all about a path do the guesses get
+ * a say — the built-in patterns and, beside them, whatever globs the reviewer
+ * added on the options page.
+ *
+ * Beside rather than above, and that is the ordering decision worth stating.
+ * `.gitattributes` still outranks the reviewer, because the two are different
+ * kinds of claim: a repository marking a path is a statement about *that path
+ * in particular*, made by someone who knows what is in it, where a glob typed
+ * on the options page is a standing guess about every repository the reviewer
+ * will ever open. Letting the standing guess win would mean a repository that
+ * had explicitly said "show this one" being overruled by a pattern typed
+ * months earlier about a different codebase — and the reviewer would have
+ * nothing on screen telling them which of the two was in force.
+ *
+ * Additive within the tier: `extra` widens what counts as generated and can
+ * never narrow it. A reviewer who wants a lockfile back opens the card, which
+ * is one press and is per file — `Settings.generatedPatterns` explains why a
+ * subtractive form is not offered.
+ *
+ * `extra` is optional so that the callers with no reviewer behind them — the
+ * tests, and anything asking what the built-in heuristic alone says — need not
+ * pass an empty array. Absent means the built-in patterns only.
  */
-export function isGenerated(path: string, rules: readonly GeneratedRule[]): boolean {
+export function isGenerated(
+  path: string,
+  rules: readonly GeneratedRule[],
+  extra: readonly string[] = [],
+): boolean {
   // Backwards, because the last matching line wins and this is the cheapest
   // way to find it.
   for (let at = rules.length - 1; at >= 0; at -= 1) {
@@ -225,5 +249,8 @@ export function isGenerated(path: string, rules: readonly GeneratedRule[]): bool
     if (rule !== undefined && isNoise(path, rule.globs)) return rule.generated;
   }
 
-  return isNoise(path, GENERATED_PATTERNS);
+  // The built-in list first of the two, because it is the one that matches on
+  // most pull requests and `isNoise` compiles a `RegExp` per pattern it has to
+  // try. Either order gives the same answer.
+  return isNoise(path, GENERATED_PATTERNS) || isNoise(path, extra);
 }

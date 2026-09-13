@@ -2,11 +2,15 @@
  * The options page's chrome.
  *
  * Colours come from `ui/tokens.css`, which main.tsx imports ahead of this file
- * and which the review page and the injected card import too.
+ * and which the review page and the injected card import too. A literal hex
+ * here is a defect rather than a style violation: it cannot follow the
+ * reviewer's chosen theme, so it is a patch of Primer left on somebody's Nord.
+ * `ui/tokens.test.tsx` scans this file for exactly that.
  *
- * This used to be an inline <style> in index.html. Inline, it could not share
- * those tokens, so the palette existed here a second time in literal hex and
- * drifted from the review page's copy.
+ * The type scale is 11/12/13/14/22 and nothing else, and hierarchy is carried
+ * by weight and by Foreground Muted rather than by size — there is no room to
+ * shout across eleven pixels. This page is a list of rows: no cards, no grid,
+ * no panel around each setting.
  */
 
 :root {
@@ -19,9 +23,14 @@
      On `:root` rather than `body`, both to match the review page and because
      the user agent reads it there for the canvas and the scrollbars. index.html
      carries the matching <meta name="color-scheme"> so the first paint is
-     right before this file has loaded at all — which matters more now that
-     this is a separate request rather than markup in the head. */
+     right before this file has loaded at all. */
   color-scheme: light dark;
+
+  /* Native controls — and this page is mostly native controls — otherwise draw
+     their tick and their focus in the user agent's own blue, which is a fifth
+     blue on a product that permits one. The review page has had this since it
+     acquired its first checkbox; this page had more of them and none of it. */
+  accent-color: var(--accent-fg);
 }
 
 body {
@@ -31,22 +40,210 @@ body {
   color: var(--fg-default);
   background: var(--canvas-default);
 }
+
 main {
   max-width: 44rem;
 }
+
 h1 {
-  font-size: 1.375rem;
   margin: 0 0 1.5rem;
+  font-size: 1.375rem;
+  font-weight: 600;
 }
-h2 {
-  font-size: 1rem;
-  margin: 2rem 0 0.5rem;
+
+/* The house section heading: `.overview-head h2` on the review page, and the
+   same argument. It was 1rem here, which is off the scale and one of only two
+   sizes on the page bigger than the body text it introduced — a heading that
+   competed with its own content. Title size in muted over a rule is quieter
+   than the rows beneath it, still legible, and separates by weight and colour
+   the way everything else in this system does. */
+section.settings > h2 {
+  margin: 0 0 14px;
+  padding-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border-default);
 }
+
+section.settings {
+  margin: 0 0 28px;
+}
+
+/* --------------------------------------------------------------- the rows */
+
+/* One setting, and whatever it discloses when it is on. Every row separated
+   from the next by real space: `label.check` used to be given `0 0 0.5rem` and
+   then have it taken away again two rules later by an equal-specificity
+   override, so every checkbox on the page sat directly on top of the next
+   one's hint. */
+.setting {
+  margin: 0 0 14px;
+}
+
 label {
   display: block;
-  font-weight: 600;
   margin-bottom: 0.25rem;
+  font-weight: 600;
 }
+
+/* No border and no legend box. A fieldset is the right *semantics* for a radio
+   group — it is what names the three destinations as one question — and the
+   wrong decoration: a bordered panel per group turns a list of rows into a
+   stack of cards. */
+fieldset.choices {
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.choices legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-weight: 600;
+}
+
+fieldset.choices label,
+label.check {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 9px;
+  align-items: start;
+  margin: 0 0 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The last radio closes the group; `label.check` owns no bottom margin at all,
+   because `.setting` around it is what separates one setting from the next.
+   There used to be a second rule here naming `label.check` alongside the
+   selector above at equal specificity, which took its `0 0 0.5rem` straight
+   back off and left every checkbox sitting on the hint of the one below. */
+fieldset.choices label:last-child {
+  margin-bottom: 0;
+}
+
+label.check {
+  margin: 0;
+}
+
+fieldset.choices input,
+label.check input {
+  /* Half the difference between the 21px line box and the 13px control, so
+     the box sits on the first line of the label rather than above it. */
+  margin: 4px 0 0;
+}
+
+label.check input:disabled,
+label.check:has(input:disabled) {
+  cursor: default;
+}
+
+/* The disabled label carries the *explanation* of why the control is off —
+   "Not available when reviews open in this tab" — so it is the last text on
+   this page that should be faded out. A blanket 0.55 measured 2.36:1 on the
+   hint in light mode. Colour instead, and the hint keeps its own. */
+label.check:has(input:disabled) > span {
+  color: var(--fg-muted);
+}
+
+/* A labelled control that is not a checkbox, so it stacks rather than sitting
+   in the two-column grid the check rows use. */
+label.field {
+  display: block;
+  margin: 0;
+  font-weight: 600;
+}
+
+/* A label for something that is read rather than set — the rate limit. Same
+   weight as a control's label, so the two read as the same rank. */
+.field-label {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+/* What a ticked setting reveals, indented under its own checkbox rather than
+   left to look like the next setting along. The inset is the checkbox column
+   plus its gap. */
+.reveal {
+  margin-top: 8px;
+  padding-left: 22px;
+}
+
+.hint {
+  display: block;
+  margin: 0.35rem 0 0;
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+/* A statement about the stored token: what is on this machine, in one line. */
+.state {
+  margin: 0 0 12px;
+}
+
+/* ------------------------------------------------------------ the controls */
+
+/* The review page's button, adopted whole rather than approximated. This page
+   had its own — 0.4rem by 0.85rem, `font: inherit`, no hover and no primary —
+   which is the same control drawn two ways across two screens of one product. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: inherit;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-subtle);
+  cursor: pointer;
+  /* Colour only. Nothing moves, so there is nothing for reduced motion to
+     suppress. */
+  transition: background-color 0.12s ease;
+}
+
+/* Guarded, because Blink still applies `:hover` to a disabled control and a
+   dead button that lights up under the cursor reads as one that should work. */
+.button:not(:disabled):hover {
+  background: var(--neutral-hover);
+}
+
+.button.primary {
+  color: var(--on-success);
+  border-color: var(--success-border);
+  background: var(--success-emphasis);
+}
+
+.button.primary:not(:disabled):hover {
+  background: var(--success-emphasis-hover);
+}
+
+.button.danger {
+  color: var(--danger-fg);
+}
+
+/* Real disabled colours rather than a blanket opacity, the same way the review
+   page does it. `opacity` composites the label along with the fill, and the
+   label is the part that has to stay readable — it is what says the control is
+   off rather than broken. */
+.button:disabled {
+  cursor: default;
+  color: var(--fg-subtle);
+  border-color: var(--border-default);
+  background: var(--canvas-subtle);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+
 /* Matches the review page's unlock field, because the two are the same
    interaction reached from different places.
 
@@ -54,13 +251,39 @@ label {
    draws its own dark form control — measured at #3b3b3b on a #0d1117 page,
    a light grey box on a near-black one — and the placeholder below lands at
    2.43:1 against it. */
-input[type="password"] {
+input[type="password"],
+textarea {
+  display: block;
   width: 100%;
+  max-width: 30rem;
   box-sizing: border-box;
-  padding: 0.4rem 0.6rem;
+  padding: 5px 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
+  line-height: 1.5;
   color: inherit;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+textarea {
+  margin-top: 0.35rem;
+  resize: vertical;
+}
+
+select {
+  display: block;
+  margin: 0.35rem 0 0;
+  max-width: 22rem;
+  width: 100%;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: inherit;
+  /* Both named, for the same reason the token field names them: left to the
+     user agent this draws as a light control on a dark page. */
   background: var(--canvas-default);
   border: 1px solid var(--border-default);
   border-radius: 6px;
@@ -69,7 +292,7 @@ input[type="password"] {
 /* A placeholder is text and answers to the same 4.5:1 as any other text. The
    UA default is #757575 whatever the field is sitting on, which is the whole
    problem. */
-input[type="password"]::placeholder {
+::placeholder {
   color: var(--fg-muted);
   opacity: 1;
 }
@@ -80,178 +303,250 @@ input[type="password"]::placeholder {
   outline: 2px solid var(--accent-fg);
   outline-offset: 1px;
 }
-.actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-button {
-  padding: 0.4rem 0.85rem;
-  font: inherit;
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-  background: var(--canvas-subtle);
-  cursor: pointer;
-}
-/* Real disabled colours rather than a blanket opacity, the same way the review
-   page does it. `opacity` composites the label along with the fill, and the
-   label is the part that has to stay readable — it is what says the control is
-   off rather than broken. */
-button:disabled {
-  cursor: default;
-  color: var(--fg-subtle);
-  border-color: var(--border-default);
-  background: var(--canvas-subtle);
-}
-/* The setup walkthrough. Numbers matter here — this is a sequence
-   someone follows on another site with this page beside it. */
-ol.setup {
-  margin: 0 0 1.5rem;
-  padding-left: 1.25rem;
-  line-height: 1.6;
-}
-ol.setup li { margin-bottom: 0.6rem; }
-ol.setup a { color: inherit; }
-table.perms {
-  border-collapse: collapse;
-  margin: 0.6rem 0 0.2rem;
-  font-size: 0.9em;
-}
-table.perms th,
-table.perms td {
-  text-align: left;
-  padding: 0.25rem 0.9rem 0.25rem 0;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  vertical-align: top;
-}
-table.perms th { font-weight: 600; color: var(--fg-muted); }
-/* The Reviewing section. Radios and a checkbox, each with its
-   consequence written under it — these change what happens when a button
-   is pressed on another site, which is not something to leave to a
-   three-word label. */
-section.settings {
-  margin: 0 0 2rem;
-}
-fieldset.choices {
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-  margin: 0 0 0.75rem;
-  padding: 0.75rem 1rem 0.9rem;
-}
-fieldset.choices legend {
-  font-weight: 600;
-  padding: 0 0.35rem;
-}
-fieldset.choices label,
-label.check {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.1rem 0.55rem;
-  align-items: start;
-  font-weight: 400;
-  margin: 0 0 0.5rem;
-  cursor: pointer;
-}
-fieldset.choices label:last-child,
-label.check {
-  margin-bottom: 0;
-}
-fieldset.choices input,
-label.check input {
-  margin: 0.2rem 0 0;
-}
-label.check input:disabled,
-label.check:has(input:disabled) {
-  cursor: default;
-}
-/* The disabled label carries the *explanation* of why the control is off —
-   "Not available when reviews open in this tab: it would replace the pull
-   request the moment you arrived" — so it is the last text on this page that
-   should be faded out. A blanket 0.55 measured 2.36:1 on the hint in light
-   mode. Colour instead, and the hint keeps its own. */
-label.check:has(input:disabled) > span {
-  color: var(--fg-muted);
-}
-/* A labelled control that is not a checkbox, so it stacks rather than sitting
-   in the two-column grid the check rows use. */
-label.field {
-  display: block;
-  margin: 0 0 0.5rem;
-  font-weight: 600;
+
+/* ------------------------------------------------------------- the picker */
+
+.theme-picker {
+  max-width: 26rem;
 }
 
-label.field select {
+.theme-search {
   display: block;
-  margin: 0.35rem 0 0;
-  padding: 0.3rem 0.5rem;
-  max-width: 22rem;
   width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 5px 10px;
   font: inherit;
-  font-weight: 400;
+  font-size: 13px;
   color: inherit;
-  /* Both named, for the same reason the token field names them: left to the
-     user agent this draws as a light control on a dark page. */
   background: var(--canvas-default);
   border: 1px solid var(--border-default);
   border-radius: 6px;
 }
 
-label.field .hint {
-  font-weight: 400;
+/* An input surface rather than a card: it is the box the reviewer is choosing
+   from, and it scrolls, so it needs an edge to scroll inside. */
+.theme-list {
+  max-height: 17rem;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-default);
 }
 
-label > span > .hint {
-  display: block;
-}
-.hint {
+/* Not an eyebrow: sentence case at label size in muted, which is how every
+   other grouping label in this product is set. */
+.theme-group-name {
+  margin: 10px 6px 4px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--fg-muted);
-  margin: 0.35rem 0 0;
 }
-/* A full border, not a thick left stripe. The stripe is a decoration that
-   reads as a system convention it is not part of, and this panel is important
-   enough to say so with the whole of its edge. */
-.warning {
-  border: 1px solid var(--danger-fg);
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 13px;
   border-radius: 6px;
-  padding: 0.75rem 1rem;
-  margin: 1.5rem 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
 }
-.warning h2 {
-  margin: 0 0 0.5rem;
-  color: var(--danger-fg);
+
+.theme-option:hover {
+  background: var(--neutral-hover);
 }
-.warning p {
-  margin: 0 0 0.5rem;
+
+/* The chosen one has to win against the row above and the row below rather
+   than only against the panel, which is what Accent Muted Background is for.
+   Weight carries it as well, because colour alone is not a state. */
+.theme-option[aria-selected="true"] {
+  font-weight: 600;
+  background: var(--accent-muted-bg);
 }
-.warning p:last-child {
+
+/* Where the keyboard is. Focus itself stays in the search box, so the ring is
+   drawn here by hand; inset, because this container scrolls and an outline at
+   a positive offset is clipped by it. */
+.theme-option[data-active="true"] {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
+
+.theme-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The preview. Every colour in it arrives as an inline style from
+   `lib/theme/palettes.ts`, which is the one honest way to draw seventy-five
+   palettes and the reason there is no hex in this file. The declarations here
+   are the *default's* swatch — no theme, so the page's own live tokens, which
+   makes that row a picture of what "match the page" means right now. */
+.theme-swatch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--canvas-default);
+}
+
+.theme-chip {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.theme-chip:nth-child(1) {
+  background: var(--fg-default);
+}
+
+.theme-chip:nth-child(2) {
+  background: var(--accent-fg);
+}
+
+.theme-chip:nth-child(3) {
+  background: var(--success-fg);
+}
+
+.theme-chip:nth-child(4) {
+  background: var(--danger-fg);
+}
+
+.theme-count {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.theme-count:empty {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------ the walkthrough */
+
+/* The setup sequence. Numbers matter here — this is a list someone follows on
+   another site with this page open beside it. */
+ol.setup {
+  margin: 0 0 18px;
+  padding-left: 1.25rem;
+}
+
+ol.setup li {
+  margin-bottom: 8px;
+}
+
+ol.setup a {
+  color: var(--accent-fg);
+}
+
+table.perms {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+table.perms th,
+table.perms td {
+  padding: 3px 16px 3px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+table.perms th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/* ------------------------------------------------------------ the notices */
+
+/* A full border, not a thick left stripe, and Border Default rather than a
+   colour. This used to be a red panel of 135 words standing at the bottom of
+   the page in every state, which is a warning about nothing the reviewer has
+   just done — and a panel that is always alarming is one nobody reads twice.
+   Red is for what failed. */
+.notice {
+  margin: 14px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+.notice p {
+  margin: 0 0 8px;
+}
+
+.notice p:last-child {
   margin-bottom: 0;
 }
+
+/* The review sheet's `.review-confirm`: an amber edge, no fill, and the
+   question sitting in the same row as the two answers. Attention Foreground's
+   border twin is the one amber that edges a panel, and this is a panel asking
+   about something that cannot be undone. */
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 14px;
+  padding: 8px;
+  font-size: 13px;
+  border: 1px solid var(--attention-border);
+  border-radius: 6px;
+}
+
+.confirm p {
+  flex: 1 1 240px;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------- the reports */
+
 .result {
   margin: 0.75rem 0 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
 .result.bad {
   color: var(--danger-fg);
 }
+
 .result.good {
   color: var(--success-fg);
 }
+
 dl {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 0.25rem 1rem;
   margin: 0;
+  font-size: 13px;
 }
+
 dt {
   color: var(--fg-muted);
 }
+
 dd {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
 code {
+  padding: 1px 5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
   background: var(--canvas-subtle);
-  padding: 0.05rem 0.3rem;
   border-radius: 4px;
 }

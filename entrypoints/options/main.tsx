@@ -1,19 +1,30 @@
 /**
  * The options page.
  *
- * It stores the token — encrypted under a passphrase if the reviewer asked for
- * that, plainly if they did not — and asks the background worker to check it. The page never calls GitHub itself — the
- * worker owns the only `GitHubClient`, so rate limit accounting stays in one
- * place.
+ * Two jobs on one screen: the reviewer's preferences, which save as they are
+ * touched, and the token, which is a credential and behaves like one. They are
+ * kept apart by ordering rather than by tabs — a new install has an empty vault
+ * and gets the token section first, because nobody should have to read about
+ * themes before step one. Once a token is stored it drops back to fifth, where
+ * it belongs. Nothing is ever hidden; only reordered.
  *
- * The vault has four states and this page is the only place all four are
- * reachable, so it is written as one screen per state rather than one screen
- * with things disabled on it.
+ * Each section carries its own `aria-live` result line, so a confirmation
+ * arrives beside the control that earned it rather than at the foot of a page
+ * the reviewer is not looking at.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import { passphraseProblem } from '@/lib/crypto/vault';
+import { resolveMod } from '@/lib/keymap';
 import { logWarn } from '@/lib/log';
 import { ChromeTokenProvider, type VaultState } from '@/lib/github/token-provider';
 import {
@@ -28,18 +39,18 @@ import {
 } from '@/lib/messages';
 import {
   DEFAULT_SETTINGS,
+  type LineDiff,
+  MAX_PATTERNS,
+  MAX_PATTERN_LENGTH,
   type OpenIn,
   type Settings,
   autoOpenAvailable,
+  isLineDiff,
 } from '@/lib/settings';
-import {
-  ACCESSIBLE_THEMES,
-  DARK_THEMES,
-  LIGHT_THEMES,
-  THEME_FOLLOWS_PAGE,
-} from '@/lib/compare/themes';
 import { followLoggingSetting, readSettings, writeSettings } from '@/lib/settings-store';
 import { summarizeDiagnosis } from '@/ui/diagnosisSummary';
+import { platformString } from '@/ui/platform';
+import { ThemePicker } from '@/ui/ThemePicker';
 import { browser } from 'wxt/browser';
 import { applyChromeTheme } from '@/ui/chromeTheme';
 // Before the stylesheet, not after: everything in it refers to these by name.
@@ -68,23 +79,35 @@ function explainRefusal(error: ProtocolError): string {
 const tokens = new ChromeTokenProvider();
 
 /** In the order they are offered, most useful first. */
-const DESTINATIONS: { value: OpenIn; label: string; hint: string }[] = [
+const DESTINATIONS: readonly { value: OpenIn; label: string; hint: string }[] = [
   {
     value: 'new-tab',
     label: 'A new tab',
-    hint: 'Beside the pull request it came from, which stays open behind it.',
+    hint: 'Beside the pull request, which stays open behind it.',
   },
-  {
-    value: 'new-window',
-    label: 'A new window',
-    hint: 'For a second monitor, or beside the pull request rather than over it.',
-  },
-  {
-    value: 'same-tab',
-    label: 'This tab',
-    hint: 'The review replaces the pull request page.',
-  },
+  { value: 'new-window', label: 'A new window', hint: 'For a second monitor.' },
+  { value: 'same-tab', label: 'This tab', hint: 'Replaces the pull request page.' },
 ];
+
+/** Pierre's four, in the order they narrow. */
+const LINE_DIFFS: readonly { value: LineDiff; label: string }[] = [
+  { value: 'word-alt', label: 'By word' },
+  { value: 'word', label: 'By word, alternate' },
+  { value: 'char', label: 'By character' },
+  { value: 'none', label: 'Whole line only' },
+];
+
+/**
+ * The key the browser wants back, written the way this machine writes it.
+ *
+ * `resolveMod` owns the platform decision and is the only thing allowed to make
+ * it; this is the label for the one binding the reviewer can hand over.
+ */
+const FIND_KEY = resolveMod(platformString()) === 'Meta' ? '⌘F' : 'Ctrl+F';
+
+/** Said once, wherever a passphrase is being chosen rather than entered. */
+const PASSPHRASE_HINT =
+  'Never stored and never sent anywhere, so it cannot be recovered. A few ordinary words beat one short cryptic one.';
 
 /**
  * Send a request and get its reply.
@@ -93,9 +116,7 @@ const DESTINATIONS: { value: OpenIn; label: string; hint: string }[] = [
  * enforced — nothing at runtime proves the worker's reply matches `ResultOf<K>`
  * — so it is confined here and every caller above it stays type-safe.
  */
-async function request<K extends MessageKind>(
-  msg: MessageOf<K>,
-): Promise<ResponseOf<K>> {
+async function request<K extends MessageKind>(msg: MessageOf<K>): Promise<ResponseOf<K>> {
   let reply: unknown;
   try {
     reply = await browser.runtime.sendMessage(msg);
@@ -128,13 +149,71 @@ async function request<K extends MessageKind>(
 
 type Result = { tone: 'good' | 'bad'; text: string } | null;
 
+/**
+ * One section's report, in mono under the controls it belongs to.
+ *
+ * Mounted whether or not there is anything in it, because a live region that
+ * arrives at the same instant as its text is one some readers never announce.
+ * Empty it has no height, so an always-present one costs no space.
+ */
+function ResultLine({ result }: { result: Result }) {
+  return (
+    <p
+      className={result === null ? 'result' : `result ${result.tone}`}
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {result?.text ?? ''}
+    </p>
+  );
+}
+
+/**
+ * One setting: a box, what it does, and what happens if you tick it.
+ *
+ * `children` is the disclosure some settings carry — a textarea that only
+ * exists while the box above it is ticked — kept inside the same row so it
+ * reads as part of the setting rather than as the next one.
+ */
+function Check({
+  label,
+  hint,
+  checked,
+  disabled = false,
+  onChange,
+  children,
+}: {
+  label: string;
+  hint: ReactNode;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="setting">
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span>
+          {label}
+          <span className="hint">{hint}</span>
+        </span>
+      </label>
+      {children}
+    </div>
+  );
+}
+
 function RateLimit({ snapshot }: { snapshot: RateLimitSnapshot | null }) {
   if (snapshot === null) {
     return (
       <p className="hint">
-        Unknown. The background worker reports the headers from its most recent
-        GitHub request, and it has not made one since it last started. Validate a
-        token to find out.
+        Unknown until the next GitHub request. Validate the token to find out.
       </p>
     );
   }
@@ -151,19 +230,64 @@ function RateLimit({ snapshot }: { snapshot: RateLimitSnapshot | null }) {
   );
 }
 
+/* ------------------------------------------------------------- preferences */
+
+type SectionId = 'reviewing' | 'diff' | 'appearance' | 'keyboard' | 'diagnostics';
+
 /**
- * Every preference this extension has, in two sections.
+ * Which section reports the save for each field.
  *
- * Saved on change rather than behind a Save button. These are preferences, not
- * a credential: there is nothing to validate, nothing to get half-typed, and
- * the effect of getting one wrong is one tab in the wrong place.
- *
- * One component for both sections because they are one stored object, and a
- * second copy of the read-modify-write below is how two of them start
- * overwriting each other's fields.
+ * Typed as a total record so adding a setting without deciding where its
+ * confirmation appears is a compile error rather than a silent report in the
+ * wrong place.
  */
-function Preferences() {
+const SECTION_OF: Record<keyof Settings, SectionId> = {
+  openIn: 'reviewing',
+  openInBackground: 'reviewing',
+  autoOpen: 'reviewing',
+  // The two dashboard settings. Here because the question they answer — which
+  // pull requests you are shown — is a reviewing question rather than a diff
+  // one. Neither has a control on this page yet: `stalenessDays` is honoured
+  // from its default and `watchedRepos` feeds a repository picker that is not
+  // built. They are in this record because it is total, which is exactly the
+  // check that will make somebody decide where their controls go rather than
+  // adding them wherever there is room.
+  stalenessDays: 'reviewing',
+  watchedRepos: 'reviewing',
+  splitView: 'diff',
+  lineDiff: 'diff',
+  collapseTree: 'diff',
+  hideGenerated: 'diff',
+  generatedPatterns: 'diff',
+  ignoreWhitespace: 'diff',
+  diffTheme: 'appearance',
+  releaseFindKey: 'keyboard',
+  debugLogging: 'diagnostics',
+};
+
+/** How long a confirmation stays before the page goes quiet again. */
+const SAVED_FOR = 2_000;
+
+interface Preferences {
+  settings: Settings | null;
+  update: (patch: Partial<Settings>) => void;
+  resultFor: (section: SectionId) => Result;
+}
+
+/**
+ * The stored preferences, and what happens when one of them is written.
+ *
+ * Saved on change rather than behind a Save button — these are preferences, not
+ * a credential — but not *silently* on change, which is what this used to do. A
+ * write that fails put the page in a state where the control said one thing and
+ * storage held another, with nothing anywhere to say so. So a success reports
+ * `Saved` for two seconds, and a failure reports the reason and puts the
+ * control back to the value that is actually stored.
+ */
+function usePreferences(): Preferences {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [saved, setSaved] = useState<{ section: SectionId; result: Result } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     void readSettings()
@@ -173,232 +297,359 @@ function Preferences() {
       .catch(() => setSettings({ ...DEFAULT_SETTINGS }));
   }, []);
 
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
+
   /**
    * Wear the chosen theme on this page too, as soon as it is chosen.
    *
    * Two things, one line. The first is consistency: PRODUCT.md's fifth
-   * principle says the card, the review page and this page are one thing and
-   * a reviewer arriving here from a dark review page should not notice a
-   * seam. A themed review page and a Primer options page is that seam, and
-   * this is the screen the button on the review page leads to.
+   * principle says the card, the review page and this page are one thing and a
+   * reviewer arriving here from a dark review page should not notice a seam.
    *
-   * The second is that it makes the select below its own preview. Seventy-five
-   * names in a list say very little about what any of them looks like; the
-   * page repainting under the cursor says all of it, and costs nothing extra
-   * because the palette is already in the bundle.
+   * The second is that it makes the picker its own preview at full size. The
+   * swatch beside each name says what a theme is; the page turning under the
+   * cursor says what it is like to sit in.
    */
   useEffect(() => {
     if (settings === null) return;
     applyChromeTheme(document.documentElement, settings.diffTheme);
   }, [settings?.diffTheme]);
 
+  const report = useCallback((section: SectionId, result: Result, fades: boolean) => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    setSaved({ section, result });
+    if (!fades) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setSaved(null);
+    }, SAVED_FOR);
+  }, []);
+
   const update = useCallback(
     (patch: Partial<Settings>) => {
-      if (!settings) return;
+      if (settings === null) return;
+      const previous = settings;
       const next: Settings = { ...settings, ...patch };
       // Moving to the same tab takes auto-open down with it. Leaving the stored
       // flag set would mean switching back to a new tab silently re-enabled
       // something the reviewer last saw greyed out.
       if (!autoOpenAvailable(next.openIn)) next.autoOpen = false;
 
+      // Every patch this page makes names one field, which is what makes the
+      // section it belongs to knowable. `reviewing` is the first section, and
+      // is where an empty patch would report if one ever arrived.
+      const field = Object.keys(patch)[0] as keyof Settings | undefined;
+      const section = field === undefined ? 'reviewing' : SECTION_OF[field];
+
       setSettings(next);
-      void writeSettings(next).catch((error: unknown) => {
-        logWarn('could not save settings', error);
-      });
+      void writeSettings(next).then(
+        () => report(section, { tone: 'good', text: 'Saved' }, true),
+        (error: unknown) => {
+          logWarn('could not save settings', error);
+          // Back to what is stored. A control left showing the value that
+          // failed to save is the page lying about the extension's behaviour.
+          setSettings(previous);
+          report(
+            section,
+            {
+              tone: 'bad',
+              text:
+                error instanceof Error ? error.message : 'That setting was not saved.',
+            },
+            false,
+          );
+        },
+      );
     },
-    [settings],
+    [settings, report],
   );
 
-  if (!settings) return null;
+  const resultFor = useCallback(
+    (section: SectionId): Result => (saved?.section === section ? saved.result : null),
+    [saved],
+  );
 
-  const autoAvailable = autoOpenAvailable(settings.openIn);
+  return { settings, update, resultFor };
+}
+
+interface SectionProps {
+  settings: Settings;
+  update: (patch: Partial<Settings>) => void;
+  result: Result;
+}
+
+function Reviewing({ settings, update, result }: SectionProps) {
+  const available = autoOpenAvailable(settings.openIn);
 
   return (
-    <>
-      <section className="settings">
-        <h2>Reviewing</h2>
+    <section className="settings">
+      <h2>Reviewing</h2>
 
-        <fieldset className="choices">
-          <legend>Open reviews in</legend>
-          {DESTINATIONS.map((destination) => (
-            <label key={destination.value}>
-              <input
-                type="radio"
-                name="openIn"
-                value={destination.value}
-                checked={settings.openIn === destination.value}
-                onChange={() => update({ openIn: destination.value })}
-              />
-              <span>
-                {destination.label}
-                <span className="hint">{destination.hint}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.autoOpen}
-            disabled={!autoAvailable}
-            onChange={(event) => update({ autoOpen: event.target.checked })}
-          />
-          <span>
-            Open a review automatically when I land on a pull request
-            <span className="hint">
-              {autoAvailable
-                ? 'Opened in the background and left there, so nothing moves while you are reading. The card is still on the page if you close it and want it back.'
-                : 'Not available when reviews open in this tab: it would replace the pull request the moment you arrived, and going back would immediately do it again.'}
+      <fieldset className="choices">
+        <legend>Open reviews in</legend>
+        {DESTINATIONS.map((destination) => (
+          <label key={destination.value}>
+            <input
+              type="radio"
+              name="openIn"
+              value={destination.value}
+              checked={settings.openIn === destination.value}
+              onChange={() => update({ openIn: destination.value })}
+            />
+            <span>
+              {destination.label}
+              <span className="hint">{destination.hint}</span>
             </span>
-          </span>
-        </label>
+          </label>
+        ))}
+      </fieldset>
 
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.debugLogging}
-            onChange={(event) => update({ debugLogging: event.target.checked })}
-          />
-          <span>
-            Write diagnostics to the browser console
-            <span className="hint">
-              Off by default, and off is the right setting unless you are
-              investigating something. This extension runs on every github.com
-              page, so anything it logs lands in a console you are probably
-              using for your own work. Turn it on before reporting a bug, then
-              turn it back off.
-            </span>
-          </span>
-        </label>
-      </section>
+      <Check
+        label="Open it without switching to it"
+        hint={
+          available
+            ? 'For queueing up several reviews at once.'
+            : 'Not available when reviews open in this tab.'
+        }
+        checked={settings.openInBackground}
+        disabled={!available}
+        onChange={(on) => update({ openInBackground: on })}
+      />
 
-      {/* Its own section rather than two more checkboxes above. Everything up
-          there answers "what happens when I open a review"; these two answer
-          "what does a diff look like once it is open", and they are the only
-          settings on this page that change what the reviewer is looking at
-          rather than what the extension does. */}
-      <section className="settings">
-        <h2>Reading a diff</h2>
+      <Check
+        label="Open a review automatically on a pull request"
+        hint={
+          available
+            ? 'Opened in the background, so nothing moves while you are reading.'
+            : 'Not available when reviews open in this tab — it would replace the pull request as you arrived.'
+        }
+        checked={settings.autoOpen}
+        disabled={!available}
+        onChange={(on) => update({ autoOpen: on })}
+      />
 
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.splitView}
-            onChange={(event) => update({ splitView: event.target.checked })}
-          />
-          <span>
-            Show the old and new file side by side
-            <span className="hint">
-              Two columns instead of one, on every file of every pull request.
-              Nothing is hidden either way — it is the same changes, arranged
-              differently.
-            </span>
-          </span>
-        </label>
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.hideGenerated}
-            onChange={(event) => update({ hideGenerated: event.target.checked })}
-          />
-          <span>
-            Fold away the diffs of generated files
-            <span className="hint">
-              Lockfiles, minified bundles, protobuf stubs, snapshots and vendored
-              trees. Each one stays in the list with its name and its counts, says
-              on its own row that it was folded, and opens with one press —
-              nothing becomes unknowable, it just stops sitting between the files
-              somebody wrote. A repository that marks its own files{' '}
-              <code>linguist-generated</code> in <code>.gitattributes</code> is
-              obeyed in preference to any of that, in both directions.
-            </span>
-          </span>
-        </label>
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={settings.ignoreWhitespace}
-            onChange={(event) => update({ ignoreWhitespace: event.target.checked })}
-          />
-          <span>
-            Hide changes where only the whitespace moved
-            <span className="hint">
-              Reindented and rewrapped lines stop counting as changes, which is
-              what makes a reformat readable. This is the one setting here that{' '}
-              <strong>removes lines from the diff</strong>, so every file it
-              shortens says so above its body, and a comment left on a line that
-              only moved is listed rather than quietly dropped.
-            </span>
-          </span>
-        </label>
-
-        {/* A select rather than a radio set: seventy-five options is a list to
-            be searched, not a set to be compared, and a native select is the
-            one control that already types-to-find and scrolls on every
-            platform. Grouped by the mode each theme was built for, with the
-            four that answer colour vision deficiency first — they are the
-            reason this setting exists rather than a curiosity in it. */}
-        <label className="field" htmlFor="diffTheme">
-          Theme
-          <select
-            id="diffTheme"
-            value={settings.diffTheme}
-            onChange={(event) => update({ diffTheme: event.target.value })}
-          >
-            <option value={THEME_FOLLOWS_PAGE}>
-              Match the page (default)
-            </option>
-            <optgroup label="Made for colour vision deficiency">
-              {ACCESSIBLE_THEMES.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Light">
-              {LIGHT_THEMES.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Dark">
-              {DARK_THEMES.map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.label}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-          <span className="hint">
-            The code inside a diff <strong>and the extension around it</strong>,
-            this page included. Left on <strong>Match the page</strong> the
-            extension wears GitHub&rsquo;s own palette and follows your system
-            between light and dark; choosing a theme means that one theme
-            everywhere, in the mode it was built for.
-            {' '}Every theme is already in the extension, so picking one costs no
-            download.
-            <br />
-            Worth changing if the default is hard to read: its dimmest token
-            measures 2.14:1 against a white page, where text wants 4.5:1. The
-            two <strong>high contrast</strong> entries go the other way, and the
-            group at the top redraws additions and deletions so they do not rely
-            on telling red from green.
-            <br />
-            One caveat, and it is the honest one: a theme is drawn as its
-            author wrote it. <strong>Match the page</strong> is the only
-            setting here whose contrast has been measured throughout, so if
-            you need that guarantee rather than a preference, it is the one to
-            stay on.
-          </span>
-        </label>
-      </section>
-    </>
+      <ResultLine result={result} />
+    </section>
   );
 }
+
+/**
+ * The reviewer's own list of generated paths, on top of the built-in one.
+ *
+ * Saved when the box is left rather than on every keystroke: a glob is typed a
+ * character at a time and each character is not a decision. The bound is
+ * `lib/settings.ts`'s, checked here so the reviewer is told which line is the
+ * problem rather than finding a pattern silently dropped on the next read.
+ */
+function GeneratedPatterns({
+  value,
+  onChange,
+}: {
+  value: readonly string[];
+  onChange: (patterns: string[]) => void;
+}) {
+  const [draft, setDraft] = useState(() => value.join('\n'));
+  const id = useId();
+
+  const globs = draft
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+
+  const problem =
+    globs.length > MAX_PATTERNS
+      ? `More than ${MAX_PATTERNS} patterns. Remove some lines.`
+      : globs.some((glob) => glob.length > MAX_PATTERN_LENGTH)
+        ? `One pattern is longer than ${MAX_PATTERN_LENGTH} characters. Shorten it.`
+        : null;
+
+  return (
+    <div className="reveal">
+      <label className="field" htmlFor={id}>
+        Also treat these paths as generated
+        <textarea
+          id={id}
+          rows={4}
+          spellCheck={false}
+          value={draft}
+          aria-describedby={problem === null ? undefined : `${id}-problem`}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => {
+            if (problem !== null) return;
+            // Deduplicated on the way out, because the reader deduplicates on
+            // the way in and storage that reads back differently is a control
+            // showing something that was not saved.
+            const next = [...new Set(globs)];
+            if (next.join('\n') === value.join('\n')) return;
+            onChange(next);
+          }}
+        />
+        <span className="hint">
+          One glob per line. <code>**</code>, <code>*</code> and <code>?</code>. A
+          repository&rsquo;s own <code>.gitattributes</code> still wins.
+        </span>
+      </label>
+      <p className="result bad" id={`${id}-problem`} aria-live="polite">
+        {problem ?? ''}
+      </p>
+    </div>
+  );
+}
+
+function ReadingADiff({ settings, update, result }: SectionProps) {
+  const lineDiffId = useId();
+
+  return (
+    <section className="settings">
+      <h2>Reading a diff</h2>
+
+      <Check
+        label="Show the old and new file side by side"
+        hint="Two columns instead of one."
+        checked={settings.splitView}
+        onChange={(on) => update({ splitView: on })}
+      />
+
+      <div className="setting">
+        <label className="field" htmlFor={lineDiffId}>
+          Highlight inside a changed line
+          <select
+            id={lineDiffId}
+            value={settings.lineDiff}
+            onChange={(event) => {
+              if (isLineDiff(event.target.value)) update({ lineDiff: event.target.value });
+            }}
+          >
+            {LINE_DIFFS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <span className="hint">
+            By character reads better for prose, and for a rename inside a line.
+          </span>
+        </label>
+      </div>
+
+      <Check
+        label="Start the file tree collapsed"
+        hint="For large pull requests across a deep tree."
+        checked={settings.collapseTree}
+        onChange={(on) => update({ collapseTree: on })}
+      />
+
+      <Check
+        label="Fold away the diffs of generated files"
+        hint="Lockfiles, minified bundles, snapshots and vendored trees. Each stays in the list with its counts and opens with one press."
+        checked={settings.hideGenerated}
+        onChange={(on) => update({ hideGenerated: on })}
+      >
+        {settings.hideGenerated && (
+          <GeneratedPatterns
+            value={settings.generatedPatterns}
+            onChange={(patterns) => update({ generatedPatterns: patterns })}
+          />
+        )}
+      </Check>
+
+      <Check
+        label="Hide changes where only the whitespace moved"
+        hint={
+          <>
+            <strong>The one setting here that removes lines from the diff.</strong> Every
+            file it shortens says so above its body, and a comment left on a moved line is
+            listed rather than dropped.
+          </>
+        }
+        checked={settings.ignoreWhitespace}
+        onChange={(on) => update({ ignoreWhitespace: on })}
+      />
+
+      <ResultLine result={result} />
+    </section>
+  );
+}
+
+function Appearance({ settings, update, result }: SectionProps) {
+  return (
+    <section className="settings">
+      <h2>Appearance</h2>
+
+      <div className="setting">
+        <ThemePicker
+          value={settings.diffTheme}
+          onChange={(diffTheme) => update({ diffTheme })}
+        />
+        <p className="hint">
+          Applies to the diff and to the extension around it, this page included.{' '}
+          <strong>Match the page</strong> is the only option whose contrast has been
+          measured throughout — every other theme is drawn as its author wrote it.
+        </p>
+      </div>
+
+      <ResultLine result={result} />
+    </section>
+  );
+}
+
+function Keyboard({ settings, update, result }: SectionProps) {
+  return (
+    <section className="settings">
+      <h2>Keyboard</h2>
+
+      <Check
+        label={`Let the browser keep ${FIND_KEY}`}
+        hint={
+          <>
+            The review&rsquo;s own search over changed lines stays on <code>/</code>.
+          </>
+        }
+        checked={settings.releaseFindKey}
+        onChange={(on) => update({ releaseFindKey: on })}
+      />
+
+      <ResultLine result={result} />
+    </section>
+  );
+}
+
+function Diagnostics({
+  settings,
+  update,
+  result,
+  rateLimit,
+}: SectionProps & { rateLimit: RateLimitSnapshot | null }) {
+  return (
+    <section className="settings">
+      <h2>Diagnostics</h2>
+
+      <Check
+        label="Write diagnostics to the browser console"
+        hint="Turn this on before reporting a bug, then turn it back off."
+        checked={settings.debugLogging}
+        onChange={(on) => update({ debugLogging: on })}
+      />
+
+      <div className="setting">
+        <p className="field-label">GitHub rate limit</p>
+        <RateLimit snapshot={rateLimit} />
+      </div>
+
+      <ResultLine result={result} />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ vault */
+
+/** Which destructive action is waiting to be confirmed. */
+type Confirming = 'clear' | 'decrypt' | null;
 
 function App() {
   const [vault, setVault] = useState<VaultState | null>(null);
@@ -410,7 +661,11 @@ function App() {
   const [usePassphrase, setUsePassphrase] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
+  const [confirming, setConfirming] = useState<Confirming>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitSnapshot | null>(null);
+  const confirmId = useId();
+
+  const { settings, update, resultFor } = usePreferences();
 
   const refreshRateLimit = useCallback(async () => {
     const response = await request(message('get-rate-limit', {}));
@@ -429,6 +684,12 @@ function App() {
     void followLoggingSetting();
   }, [refreshRateLimit, refreshVault]);
 
+  // A question about a token that has since changed is not a question worth
+  // leaving open.
+  useEffect(() => {
+    setConfirming(null);
+  }, [vault]);
+
   /** Wipe the secrets held in component state once they have been used. */
   const forgetInputs = useCallback(() => {
     setToken('');
@@ -440,18 +701,29 @@ function App() {
   /**
    * Run a vault operation and report it in one place.
    *
-   * Every one of these can fail in a way the reviewer has to read — a wrong
-   * passphrase, a token with a smart quote in it — so none of them are allowed
-   * to fail silently.
+   * The previous message is left standing while the next one is fetched. It
+   * used to be blanked the instant a button was pressed, which took the reason
+   * for the failure off the screen at the moment the reviewer pressed the
+   * button that was meant to answer it.
+   *
+   * The operation returns its own success line, which is what lets validating
+   * the token come through here too rather than keeping a second copy of the
+   * busy, report and refresh handling for the one case with a name in it.
+   *
+   * `consumes` is what keeps that sharing honest. Saving, encrypting and
+   * unlocking all *spend* what was typed, and holding a passphrase in component
+   * state after it has been used is a secret kept for no reason. Validating
+   * spends nothing — it asks GitHub who the stored token belongs to — so
+   * clearing the fields there would throw away a half-typed passphrase to
+   * report something that had no bearing on it.
    */
   const run = useCallback(
-    async (operation: () => Promise<void>, success: string) => {
+    async (operation: () => Promise<string>, consumes = true) => {
       setBusy(true);
-      setResult(null);
       try {
-        await operation();
-        setResult({ tone: 'good', text: success });
-        forgetInputs();
+        const text = await operation();
+        setResult({ tone: 'good', text });
+        if (consumes) forgetInputs();
       } catch (error) {
         setResult({
           tone: 'bad',
@@ -459,6 +731,7 @@ function App() {
         });
       } finally {
         await refreshVault();
+        setConfirming(null);
         setBusy(false);
       }
     },
@@ -475,7 +748,10 @@ function App() {
 
   const save = useCallback(async () => {
     if (!usePassphrase) {
-      await run(() => tokens.save(token), 'Token saved.');
+      await run(async () => {
+        await tokens.save(token);
+        return 'Token saved.';
+      });
       return;
     }
     const problem = passphraseIssue();
@@ -486,7 +762,10 @@ function App() {
     // A token that cannot be sent is refused inside `save`, where the reviewer
     // can still see what they pasted, rather than stored and left to fail as an
     // unrecognizable TypeError on the first request.
-    await run(() => tokens.save(token, passphrase), 'Token encrypted and saved.');
+    await run(async () => {
+      await tokens.save(token, passphrase);
+      return 'Token encrypted and saved.';
+    });
   }, [usePassphrase, passphraseIssue, run, token, passphrase]);
 
   const encrypt = useCallback(async () => {
@@ -495,374 +774,438 @@ function App() {
       setResult({ tone: 'bad', text: problem });
       return;
     }
-    await run(
-      () => tokens.encrypt(passphrase),
-      'Token encrypted. The unencrypted copy has been deleted.',
-    );
+    await run(async () => {
+      await tokens.encrypt(passphrase);
+      return 'Token encrypted. The unencrypted copy has been deleted.';
+    });
   }, [passphraseIssue, run, passphrase]);
 
   const decrypt = useCallback(
     () =>
-      run(
-        () => tokens.decrypt(),
-        'Passphrase removed. The token is stored unencrypted from now on.',
-      ),
+      run(async () => {
+        await tokens.decrypt();
+        return 'Passphrase removed. The token is stored unencrypted from now on.';
+      }),
     [run],
   );
 
   const unlock = useCallback(
-    () => run(() => tokens.unlock(passphrase), 'Unlocked for this browser session.'),
+    () =>
+      run(async () => {
+        await tokens.unlock(passphrase);
+        return 'Unlocked for this browser session.';
+      }),
     [run, passphrase],
   );
 
   const lock = useCallback(
-    () => run(() => tokens.lock(), 'Locked. The passphrase is needed again to review.'),
+    () =>
+      run(async () => {
+        await tokens.lock();
+        return 'Locked. The passphrase is needed again to review.';
+      }),
     [run],
   );
 
   const clear = useCallback(
-    () => run(() => tokens.clear(), 'Token deleted from this machine.'),
+    () =>
+      run(async () => {
+        await tokens.clear();
+        return 'Token deleted from this machine.';
+      }),
     [run],
   );
 
-  const validate = useCallback(async () => {
-    setBusy(true);
-    setResult(null);
-    try {
-      // Validate what is stored, not what is typed, so the answer describes the
-      // token the worker will actually use.
-      const response = await request(message('validate-token', {}));
-      setResult(
-        response.ok
-          ? { tone: 'good', text: `Authenticated as ${response.data.login}.` }
-          : { tone: 'bad', text: explainRefusal(response.error) },
-      );
-      await refreshRateLimit();
-    } finally {
-      setBusy(false);
-    }
-  }, [refreshRateLimit]);
+  /**
+   * Validate what is stored, not what is typed, so the answer describes the
+   * token the worker will actually use.
+   *
+   * Through `run` like every other operation, so a refusal reports the same
+   * way and the vault state is re-read afterwards — on its own it did neither,
+   * which is invisible until the moment it is not.
+   *
+   * Not as a consumer of what was typed, though. This is the one operation
+   * here that reads rather than writes, and a reviewer part-way through adding
+   * a passphrase may well press it first to check the token is still good.
+   */
+  const validate = useCallback(
+    () =>
+      run(async () => {
+        const response = await request(message('validate-token', {}));
+        // Before the refusal is thrown: a refused request still moved the rate
+        // limit, and that is a number worth having when something is wrong.
+        await refreshRateLimit();
+        if (!response.ok) throw new Error(explainRefusal(response.error));
+        return `Authenticated as ${response.data.login}.`;
+      }, false),
+    [run, refreshRateLimit],
+  );
+
+  const onSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (busy) return;
+      if (vault === 'empty') void save();
+      else if (vault === 'plain') void encrypt();
+      else if (vault === 'locked') void unlock();
+    },
+    [busy, vault, save, encrypt, unlock],
+  );
+
+  const ask = (kind: Exclude<Confirming, null>) =>
+    setConfirming((open) => (open === kind ? null : kind));
+
+  const forgetting = vault === 'locked';
+  const confirmation =
+    confirming === null ? null : (
+      <div className="confirm" id={confirmId}>
+        <p>
+          {confirming === 'decrypt'
+            ? 'Remove the passphrase? The token is stored unencrypted from then on.'
+            : forgetting
+              ? 'Forget this token? An encrypted token that is deleted cannot be brought back.'
+              : 'Delete this token? You will need to paste a new one to review again.'}
+        </p>
+        <button
+          type="button"
+          className="button danger"
+          disabled={busy}
+          onClick={() => void (confirming === 'decrypt' ? decrypt() : clear())}
+        >
+          {confirming === 'decrypt'
+            ? 'Remove passphrase'
+            : forgetting
+              ? 'Forget this token'
+              : 'Delete token'}
+        </button>
+        <button
+          type="button"
+          className="button"
+          disabled={busy}
+          onClick={() => setConfirming(null)}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+
+  const passphraseFields = (existing: boolean) => (
+    <>
+      <div className="setting">
+        <label htmlFor="passphrase">Passphrase</label>
+        <input
+          id="passphrase"
+          type="password"
+          value={passphrase}
+          autoComplete={existing ? 'current-password' : 'new-password'}
+          spellCheck={false}
+          onChange={(event) => setPassphrase(event.target.value)}
+        />
+      </div>
+      {!existing && (
+        <div className="setting">
+          <label htmlFor="confirm">Passphrase again</label>
+          <input
+            id="confirm"
+            type="password"
+            value={confirm}
+            autoComplete="new-password"
+            spellCheck={false}
+            onChange={(event) => setConfirm(event.target.value)}
+          />
+          <p className="hint">{PASSPHRASE_HINT}</p>
+        </div>
+      )}
+    </>
+  );
+
+  /**
+   * Nothing at all until the vault has answered.
+   *
+   * Its answer decides where this section sits, and a section that draws fifth
+   * and then jumps to first is worse than one that arrives a frame late — the
+   * reviewer it jumps for is the one meeting the page for the first time.
+   */
+  const tokenSection =
+    vault === null ? null : (
+      <section className="settings">
+        <h2>GitHub token</h2>
+
+        {vault === 'empty' && (
+          <ol className="setup">
+            <li>
+              Open{' '}
+              <a
+                href="https://github.com/settings/personal-access-tokens/new"
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                github.com/settings/personal-access-tokens/new
+              </a>
+              .
+            </li>
+            <li>Name it, and set an expiry.</li>
+            <li>
+              Under <strong>Repository access</strong>, pick the repositories you review.
+            </li>
+            <li>
+              Under <strong>Permissions &rarr; Repository permissions</strong>, set these
+              five and leave the rest at <em>No access</em>:
+              {/* Transcription rather than prose: this is the other site's own
+                  wording, in the order that site lists it, and it is read with
+                  one eye on each screen. */}
+              <table className="perms">
+                <thead>
+                  <tr>
+                    <th scope="col">Permission</th>
+                    <th scope="col">Access</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Pull requests</td>
+                    <td>
+                      <strong>Read and write</strong>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Contents</td>
+                    <td>Read-only</td>
+                  </tr>
+                  <tr>
+                    <td>Commit statuses</td>
+                    <td>Read-only</td>
+                  </tr>
+                  <tr>
+                    <td>Checks</td>
+                    <td>Read-only</td>
+                  </tr>
+                  <tr>
+                    <td>Metadata</td>
+                    <td>Read-only</td>
+                  </tr>
+                </tbody>
+              </table>
+            </li>
+            <li>Generate the token, copy it, and paste it below.</li>
+          </ol>
+        )}
+
+        {/* A form, so Enter submits in every field rather than only in the one
+            that had a key handler bolted to it. */}
+        <form onSubmit={onSubmit}>
+          {vault === 'empty' && (
+            <>
+              <div className="setting">
+                <label htmlFor="token">GitHub fine-grained personal access token</label>
+                <input
+                  id="token"
+                  type="password"
+                  value={token}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="github_pat_..."
+                  onChange={(event) => setToken(event.target.value)}
+                />
+              </div>
+
+              <p className="notice">
+                If your repositories belong to an organisation, an owner may have to
+                approve the token before it works. Until they do, this extension reports
+                the pull request as out of reach.
+              </p>
+
+              <Check
+                label="Protect it with a passphrase"
+                hint="Optional. You enter it once per browser session."
+                checked={usePassphrase}
+                onChange={setUsePassphrase}
+              />
+
+              {usePassphrase && passphraseFields(false)}
+
+              <div className="actions">
+                <button type="submit" className="button primary" disabled={busy}>
+                  Save token
+                </button>
+              </div>
+            </>
+          )}
+
+          {vault === 'plain' && (
+            <>
+              <p className="state">A token is saved on this machine, unencrypted.</p>
+
+              <div className="actions">
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void validate()}
+                  disabled={busy}
+                >
+                  Validate saved token
+                </button>
+                <button
+                  type="button"
+                  className="button danger"
+                  onClick={() => ask('clear')}
+                  disabled={busy}
+                  aria-expanded={confirming === 'clear'}
+                  aria-controls={confirming === null ? undefined : confirmId}
+                >
+                  Delete token
+                </button>
+              </div>
+
+              {confirmation}
+
+              {passphraseFields(false)}
+
+              <div className="actions">
+                <button type="submit" className="button primary" disabled={busy}>
+                  Encrypt this token
+                </button>
+              </div>
+            </>
+          )}
+
+          {vault === 'locked' && (
+            <>
+              <p className="state">An encrypted token is on this machine.</p>
+
+              {passphraseFields(true)}
+
+              <div className="actions">
+                <button type="submit" className="button primary" disabled={busy}>
+                  Unlock
+                </button>
+                <button
+                  type="button"
+                  className="button danger"
+                  onClick={() => ask('clear')}
+                  disabled={busy}
+                  aria-expanded={confirming === 'clear'}
+                  aria-controls={confirming === null ? undefined : confirmId}
+                >
+                  Forget this token
+                </button>
+              </div>
+
+              {confirmation}
+            </>
+          )}
+
+          {vault === 'unlocked' && (
+            <>
+              <p className="state">Unlocked for this browser session.</p>
+
+              <div className="actions">
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void validate()}
+                  disabled={busy}
+                >
+                  Validate saved token
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void lock()}
+                  disabled={busy}
+                >
+                  Lock now
+                </button>
+                {/* Danger-coloured, though it deletes nothing. What it removes
+                    is a protection, and the only signal separating it from
+                    `Lock now` beside it — which sounds far more drastic and is
+                    entirely reversible — is that colour. */}
+                <button
+                  type="button"
+                  className="button danger"
+                  onClick={() => ask('decrypt')}
+                  disabled={busy}
+                  aria-expanded={confirming === 'decrypt'}
+                  aria-controls={confirming === null ? undefined : confirmId}
+                >
+                  Remove passphrase
+                </button>
+                <button
+                  type="button"
+                  className="button danger"
+                  onClick={() => ask('clear')}
+                  disabled={busy}
+                  aria-expanded={confirming === 'clear'}
+                  aria-controls={confirming === null ? undefined : confirmId}
+                >
+                  Delete token
+                </button>
+              </div>
+
+              {confirmation}
+            </>
+          )}
+        </form>
+
+        <ResultLine result={result} />
+
+        {/* Neutral, and in every vault state. Red was the wrong tone for a
+            standing fact about what a credential can do — a panel that is
+            always alarming is one nobody reads twice — and the write scope is
+            the part that decides how the token should be scoped, so it goes
+            first. */}
+        <div className="notice">
+          <p>
+            <strong>
+              This token can post comments, resolve threads and submit approvals as you.
+            </strong>{' '}
+            Use a fine-grained token limited to the repositories you review, with the
+            shortest expiry you can live with.
+          </p>
+          <p>
+            A passphrase encrypts the token on this machine, so it cannot be read off
+            disk. It does not protect against this extension, which has to decrypt the
+            token to use it — that is true of every extension that holds a credential.
+          </p>
+        </div>
+      </section>
+    );
+
+  const tokenFirst = vault === 'empty';
 
   return (
     <main>
       <h1>A Better Reviewer</h1>
 
-      <Preferences />
+      {tokenFirst && tokenSection}
 
-      {/* Only while there is no token to speak of. Once one is stored this is
-          six inches of instructions for something already done. */}
-      {vault === 'empty' && (
+      {settings !== null && (
         <>
-      <ol className="setup">
-        <li>
-          Open{' '}
-          <a
-            href="https://github.com/settings/personal-access-tokens/new"
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            github.com/settings/personal-access-tokens/new
-          </a>
-          .
-        </li>
-        <li>
-          Give it a name you will recognise later, such as{' '}
-          <strong>A Better Reviewer</strong>, and set an expiry. GitHub will not
-          show you the token again after you leave that page.
-        </li>
-        <li>
-          Under <strong>Repository access</strong>, choose the repositories you
-          review. <strong>Only select repositories</strong> is the safer choice;{' '}
-          <strong>All repositories</strong> is less work but grants far more.
-        </li>
-        <li>
-          Under <strong>Permissions &rarr; Repository permissions</strong>, set
-          exactly these five and leave every other one at <em>No access</em>:
-          <table className="perms">
-            <thead>
-              <tr>
-                <th scope="col">Permission</th>
-                <th scope="col">Access</th>
-                <th scope="col">Why</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Pull requests</td>
-                <td>
-                  <strong>Read and write</strong>
-                </td>
-                <td>Read the review, and post comments, resolves and approvals</td>
-              </tr>
-              <tr>
-                <td>Contents</td>
-                <td>Read-only</td>
-                <td>Fetch the diff, and whole files when you expand context</td>
-              </tr>
-              <tr>
-                <td>Commit statuses</td>
-                <td>Read-only</td>
-                <td>Show the older-style commit statuses</td>
-              </tr>
-              <tr>
-                <td>Checks</td>
-                <td>Read-only</td>
-                <td>
-                  Show GitHub Actions runs. Without it GitHub refuses every
-                  check run individually and the page can only say the checks
-                  are hidden
-                </td>
-              </tr>
-              <tr>
-                <td>Metadata</td>
-                <td>Read-only</td>
-                <td>Required by GitHub whenever any other permission is set</td>
-              </tr>
-            </tbody>
-          </table>
-        </li>
-        <li>
-          Click <strong>Generate token</strong> and copy it. It starts with{' '}
-          <code>github_pat_</code>.
-        </li>
-        <li>
-          Paste it below and press <strong>Save token</strong>. That is the
-          whole setup — a passphrase is offered on the same screen and is
-          entirely optional.
-        </li>
-      </ol>
+          <Reviewing
+            settings={settings}
+            update={update}
+            result={resultFor('reviewing')}
+          />
+          <ReadingADiff settings={settings} update={update} result={resultFor('diff')} />
+          <Appearance
+            settings={settings}
+            update={update}
+            result={resultFor('appearance')}
+          />
+          <Keyboard settings={settings} update={update} result={resultFor('keyboard')} />
+        </>
+      )}
 
-      <p className="hint">
-        If your repositories belong to an organisation, an owner may have to
-        approve the token before it works. GitHub shows it as{' '}
-        <em>Pending owner approval</em> on the token page, and until it is
-        approved this extension will report the pull request as out of reach.
-      </p>
+      {!tokenFirst && tokenSection}
 
-      <label htmlFor="token">GitHub fine-grained personal access token</label>
-      <input
-        id="token"
-        type="password"
-        value={token}
-        autoComplete="off"
-        spellCheck={false}
-        placeholder="github_pat_..."
-        onChange={(event) => setToken(event.target.value)}
-      />
-
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={usePassphrase}
-          onChange={(event) => setUsePassphrase(event.target.checked)}
+      {settings !== null && (
+        <Diagnostics
+          settings={settings}
+          update={update}
+          result={resultFor('diagnostics')}
+          rateLimit={rateLimit}
         />
-        <span>
-          Protect it with a passphrase
-          <span className="hint">
-            Optional. Without one the token is stored as it stands, which is
-            what browser extensions normally do. With one it is encrypted on
-            this machine, and you enter the passphrase once per browser
-            session.
-          </span>
-        </span>
-      </label>
-
-      {usePassphrase && (
-        <>
-          <label htmlFor="passphrase">Passphrase</label>
-          <input
-            id="passphrase"
-            type="password"
-            value={passphrase}
-            autoComplete="new-password"
-            spellCheck={false}
-            onChange={(event) => setPassphrase(event.target.value)}
-          />
-          <label htmlFor="confirm">Passphrase again</label>
-          <input
-            id="confirm"
-            type="password"
-            value={confirm}
-            autoComplete="new-password"
-            spellCheck={false}
-            onChange={(event) => setConfirm(event.target.value)}
-          />
-          <p className="hint">
-            Never stored and never sent anywhere, so it cannot be recovered — if
-            you forget it, delete the token and paste a new one. A few ordinary
-            words beat one short cryptic one.
-          </p>
-        </>
       )}
-
-      <div className="actions">
-        <button type="button" onClick={() => void save()} disabled={busy}>
-          Save token
-        </button>
-      </div>
-        </>
-      )}
-
-      {vault === 'plain' && (
-        <>
-          <p>
-            A token is saved on this machine. It is not encrypted, which is the
-            default and is how browser extensions normally hold a credential.
-          </p>
-
-          <div className="actions">
-            <button type="button" onClick={() => void validate()} disabled={busy}>
-              Validate saved token
-            </button>
-            <button type="button" onClick={() => void clear()} disabled={busy}>
-              Delete token
-            </button>
-          </div>
-
-          <h2>Add a passphrase</h2>
-          <p className="hint">
-            Encrypts the token on this machine so it cannot be read off disk.
-            You will not need to re-enter the token, and you can remove the
-            passphrase again later.
-          </p>
-
-          <label htmlFor="passphrase">Passphrase</label>
-          <input
-            id="passphrase"
-            type="password"
-            value={passphrase}
-            autoComplete="new-password"
-            spellCheck={false}
-            onChange={(event) => setPassphrase(event.target.value)}
-          />
-          <label htmlFor="confirm">Passphrase again</label>
-          <input
-            id="confirm"
-            type="password"
-            value={confirm}
-            autoComplete="new-password"
-            spellCheck={false}
-            onChange={(event) => setConfirm(event.target.value)}
-          />
-
-          <div className="actions">
-            <button type="button" onClick={() => void encrypt()} disabled={busy}>
-              Encrypt this token
-            </button>
-          </div>
-        </>
-      )}
-
-      {vault === 'locked' && (
-        <>
-          <p>
-            There is an encrypted token on this machine. Enter its passphrase to
-            unlock it for this browser session.
-          </p>
-
-          <label htmlFor="passphrase">Passphrase</label>
-          <input
-            id="passphrase"
-            type="password"
-            value={passphrase}
-            autoComplete="current-password"
-            spellCheck={false}
-            onChange={(event) => setPassphrase(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !busy) void unlock();
-            }}
-          />
-
-          <div className="actions">
-            <button type="button" onClick={() => void unlock()} disabled={busy}>
-              Unlock
-            </button>
-            <button type="button" onClick={() => void clear()} disabled={busy}>
-              Forget this token
-            </button>
-          </div>
-          <p className="hint">
-            The passphrase cannot be recovered. If it is lost, forget the token
-            and paste a new one — nothing else on this machine is affected.
-          </p>
-        </>
-      )}
-
-      {vault === 'unlocked' && (
-        <>
-          <p>
-            A token is saved and unlocked for this browser session. It is
-            encrypted on disk and decrypted only in memory.
-          </p>
-
-          <div className="actions">
-            <button type="button" onClick={() => void validate()} disabled={busy}>
-              Validate saved token
-            </button>
-            <button type="button" onClick={() => void lock()} disabled={busy}>
-              Lock now
-            </button>
-            <button type="button" onClick={() => void decrypt()} disabled={busy}>
-              Remove passphrase
-            </button>
-            <button type="button" onClick={() => void clear()} disabled={busy}>
-              Delete token
-            </button>
-          </div>
-          <p className="hint">
-            Locking, closing the browser, or deleting the token all stop this
-            extension reading GitHub until the passphrase is entered again. To
-            replace the token, delete this one and paste a new one.
-          </p>
-        </>
-      )}
-
-      {/* Every vault operation reports here, and until this carried `aria-live`
-          none of them reported to a screen reader at all — including the
-          failures, which are the ones with something to say.
-
-          Mounted whether or not there is anything in it, because a live region
-          that arrives at the same instant as its text is one some readers never
-          announce. Empty it has no height, and its top margin collapses with
-          the warning panel's, so an always-present one costs no space.
-
-          The element itself rather than a visually-hidden twin: a second copy
-          of the text would be read once and found twice, by `getByText` and by
-          anyone reading the DOM. */}
-      <p
-        className={result === null ? 'result' : `result ${result.tone}`}
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {result?.text ?? ''}
-      </p>
-
-      <div className="warning">
-        <h2>What the passphrase does and does not protect</h2>
-        <p>
-          <strong>It protects the token on disk.</strong>{' '}
-          <code>chrome.storage.local</code> is an ordinary file. Encrypting the
-          token means another program running as you, a backup, or someone with
-          the laptop cannot read it without the passphrase.
-        </p>
-        <p>
-          <strong>It does not protect against this extension itself.</strong>{' '}
-          While unlocked, the decrypted token is in memory and any code running
-          inside the extension can read it. That is true of every browser
-          extension that holds a credential, and no client-side design changes
-          it.
-        </p>
-        <p>
-          So it is still worth using a fine-grained token limited to the
-          repositories you review, giving it the shortest expiry you can live
-          with, and revoking it if you suspect this machine is compromised.
-          <strong> This token can write to your pull requests</strong> — post
-          comments, resolve threads and submit approvals as you.
-        </p>
-      </div>
-
-      <h2>GitHub rate limit</h2>
-      <RateLimit snapshot={rateLimit} />
     </main>
   );
 }

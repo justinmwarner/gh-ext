@@ -164,6 +164,26 @@ export function reviewFiles(payload: PrPayload): ReviewFile[] {
       deletions: counted.deletions,
       changeType: row?.changeType ?? fallback.changeType ?? inferChangeType(file),
       viewedState: row?.viewedState ?? 'UNVIEWED',
+      /**
+       * The built-in list only. `Settings.generatedPatterns` is deliberately
+       * not consulted here, and the two rules being adjacent is exactly why it
+       * is worth saying.
+       *
+       * They answer different questions. `noise` decides *how a file opens* —
+       * `defaultModeFor` sends a noise file to Raw rather than to a rendered
+       * comparison, and the tree dims its row — while `generatedPatterns`
+       * decides *whether a diff is folded*, through `isGenerated`. A reviewer
+       * adding `api/generated/**` is saying "I do not need to read this",
+       * which is the second question; nothing in it says the file should stop
+       * rendering as the JSON or Markdown it is if they do open it.
+       *
+       * The scoping rule settles it even where the intent is ambiguous. Those
+       * globs take effect only while `hideGenerated` is on, and that flag is
+       * not in scope here — `reviewFiles` runs on every payload, for a
+       * reviewer who may never have turned folding on. Reading them here would
+       * be the preference taking effect without having been asked for, which
+       * is the one thing `Settings.generatedPatterns` says it must not do.
+       */
       noise: isNoise(file.path, DEFAULT_NOISE_PATTERNS),
     };
   });

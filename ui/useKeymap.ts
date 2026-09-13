@@ -26,11 +26,28 @@ import { platformString } from './platform';
 
 export type ShortcutHandlers = Partial<Record<ShortcutAction, () => void>>;
 
-export function useKeymap(handlers: ShortcutHandlers): void {
+export interface KeymapOptions {
+  /**
+   * Leave `Mod+F` to the browser's own find.
+   *
+   * Handed to the resolver rather than checked here, because the resolver is
+   * what decides whether a keystroke was consumed — and a binding this page
+   * suppressed after the fact would already have been prevented below.
+   */
+  releaseFindKey?: boolean;
+}
+
+export function useKeymap(handlers: ShortcutHandlers, options: KeymapOptions = {}): void {
   // Read inside the listener, which is installed once and outlives every
   // render that produced a handler.
   const latest = useRef(handlers);
   latest.current = handlers;
+
+  // The same reason, one setting smaller: the reviewer can release the key
+  // from the options page while this tab is open, and the listener that has
+  // to notice is the one installed on mount.
+  const settings = useRef(options);
+  settings.current = options;
 
   const pending = useRef<PendingSequence | null>(null);
 
@@ -49,6 +66,7 @@ export function useKeymap(handlers: ShortcutHandlers): void {
           platform: platformString(),
           now: Date.now(),
           pending: pending.current,
+          releaseFindKey: settings.current.releaseFindKey === true,
         },
       );
 

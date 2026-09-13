@@ -129,6 +129,39 @@ export function treeRows(
 }
 
 /**
+ * Every directory a list of paths implies, including the ones in between.
+ *
+ * What "start the tree shut" needs, and it is here rather than in the component
+ * because the answer has to be spelled the way {@link treeRows} spells it —
+ * segment names joined with a trailing slash, empty segments dropped. A set
+ * built any other way would name directories the rows do not have, and the
+ * tree would open with folders that could not be closed and closed ones that
+ * could not be opened.
+ *
+ * Intermediate directories are in it too. `src/` as well as `src/review/`, so
+ * a deep tree collapses to its top level rather than to a spine of single
+ * children the reviewer has to walk down.
+ */
+export function directoryPaths(paths: readonly string[]): Set<string> {
+  const directories = new Set<string>();
+
+  for (const path of paths) {
+    const segments = path.split('/').filter((segment) => segment !== '');
+    // The file name. Dropped rather than read: a path with nothing but a file
+    // name in it implies no directory at all.
+    segments.pop();
+
+    let prefix = '';
+    for (const segment of segments) {
+      prefix += `${segment}/`;
+      directories.add(prefix);
+    }
+  }
+
+  return directories;
+}
+
+/**
  * Whether a row reads as viewed, not viewed, or partly.
  *
  * A folder is only ticked when every file beneath it is, and a DISMISSED file

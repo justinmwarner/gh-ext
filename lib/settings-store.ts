@@ -17,10 +17,12 @@ import { setLoggingEnabled } from './log';
 import {
   CARD_COLLAPSED_KEY,
   MODE_MEMORY_KEY,
+  RAIL_WIDTH_KEY,
   SETTINGS_KEY,
   type ModeMemory,
   type Settings,
   parseModeMemory,
+  parseRailWidth,
   parseSettings,
 } from './settings';
 
@@ -120,6 +122,28 @@ export function onSettingsChanged(onChange: (settings: Settings) => void): () =>
   return () => {
     browser.storage.onChanged.removeListener(listener);
   };
+}
+
+/**
+ * The rail's width, or `null` for "the reviewer has not said".
+ *
+ * The bounds are the caller's rather than this module's. They belong to the
+ * resizer that enforces them, and hard-coding a second copy here is how the
+ * stored value comes to be clamped to a range the rail no longer has —
+ * `parseRailWidth` carries the argument for clamping at all.
+ *
+ * No `onChanged` counterpart, unlike the two settings above. This is written
+ * by the review page and read by the review page, and a second open review
+ * resizing its own rail is answering a question about its own window. Pushing
+ * that across would be one tab reaching over to shove the other's furniture.
+ */
+export async function readRailWidth(min: number, max: number): Promise<number | null> {
+  const stored = await browser.storage.local.get(RAIL_WIDTH_KEY);
+  return parseRailWidth(stored[RAIL_WIDTH_KEY], min, max);
+}
+
+export async function writeRailWidth(width: number): Promise<void> {
+  await browser.storage.local.set({ [RAIL_WIDTH_KEY]: width });
 }
 
 export async function readModeMemory(): Promise<ModeMemory> {

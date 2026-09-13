@@ -64,15 +64,32 @@ export type OpenAction =
  *    anyone configure this, but a settings object stored before that rule
  *    existed still can, so the refusal lives here too.
  * 2. `same-tab` navigates the sender and never consults the registry. Nothing
- *    is being duplicated, so there is nothing to deduplicate.
+ *    is being duplicated, so there is nothing to deduplicate — and nothing for
+ *    `openInBackground` to say either, which is why `update-tab` carries no
+ *    focus flag at all rather than one that is always ignored.
  * 3. An existing review tab is revealed on a click and left strictly alone on
  *    an automatic open — it is already there, and stealing focus for a tab the
  *    reviewer did not ask for is the behaviour this whole design avoids.
- * 4. Otherwise create one, focused only if the reviewer clicked.
+ * 4. Otherwise create one, focused only if the reviewer clicked and did not ask
+ *    for reviews to open behind them.
  */
 export function openTarget(request: OpenRequest): OpenAction {
   const { settings, reason, url, existingTabId, sender } = request;
+  /**
+   * Should this open land the reviewer in it?
+   *
+   * A click says yes and an automatic open says no, and `openInBackground` is
+   * the reviewer overruling the click — the digest case its own doc comment
+   * describes, where three reviews are opened and none of them read yet.
+   *
+   * Only the two *create* arms below read this. Revealing a review tab that
+   * already exists is left alone deliberately: that click is not an open, the
+   * tab was opened at some earlier point and is sitting in the strip already,
+   * and refusing to reveal it would leave the button doing nothing observable
+   * at all.
+   */
   const deliberate = reason === 'click';
+  const arrive = deliberate && !settings.openInBackground;
 
   if (reason === 'auto' && !autoOpenAvailable(settings.openIn)) {
     return { kind: 'none', tabId: null };
@@ -89,13 +106,13 @@ export function openTarget(request: OpenRequest): OpenAction {
   }
 
   if (settings.openIn === 'new-window') {
-    return { kind: 'create-window', url, focused: deliberate };
+    return { kind: 'create-window', url, focused: arrive };
   }
 
   return {
     kind: 'create-tab',
     url,
-    active: deliberate,
+    active: arrive,
     openerTabId: sender.tabId,
     // Immediately after the pull request it came from, rather than at the end
     // of a long tab strip where it reads as unrelated to what you were doing.
