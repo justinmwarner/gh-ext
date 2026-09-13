@@ -11,7 +11,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { Response as ProtocolResponse } from '@/lib/messages';
 import * as background from './background';
-import { clearSideCache, useImageSides, useTextSides } from './fileSides';
+import { PAIR_ARCHIVE } from '@/lib/compare/archive.fixture';
+import { clearSideCache, useArchiveSides, useImageSides, useTextSides } from './fileSides';
 
 const REFS = {
   pr: { owner: 'acme', repo: 'widgets', number: 42 },
@@ -208,5 +209,48 @@ describe('useImageSides', () => {
 
     await waitFor(() => expect(result.current.status).toBe('failed'));
     expect(result.current.reason).toMatch(/too large/i);
+  });
+});
+
+describe('useArchiveSides', () => {
+  it('hands back what is inside an archive rather than its bytes', async () => {
+    // The cache holds one entry per side and an archive may be four megabytes,
+    // so the listing is what is kept. It is also all the comparison reads.
+    answer(() => ({ status: 'ok', base64: PAIR_ARCHIVE, byteLength: 237 }));
+
+    const { result } = renderHook(() =>
+      useArchiveSides({
+        refs: REFS,
+        path: 'fixtures/sample.zip',
+        oldPath: 'fixtures/sample.zip',
+        sides: 'added',
+        enabled: true,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.after?.map((one) => one.path)).toEqual([
+      'data/values.csv',
+      'readme.txt',
+    ]);
+  });
+
+  it('says so when the file is not an archive at all', async () => {
+    // A `.zip` that is really a Git LFS pointer. Silence here would draw an
+    // archive with no files in it, which reads as "nothing changed".
+    answer(() => ({ status: 'ok', base64: btoa('nope'), byteLength: 4 }));
+
+    const { result } = renderHook(() =>
+      useArchiveSides({
+        refs: REFS,
+        path: 'fixtures/sample.zip',
+        oldPath: 'fixtures/sample.zip',
+        sides: 'added',
+        enabled: true,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe('failed'));
+    expect(result.current.reason).toMatch(/could not be read as an archive/i);
   });
 });

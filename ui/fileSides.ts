@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { type ArchiveEntry, readArchive } from '@/lib/compare/archive';
 import { type ImageSize, imageSize } from '@/lib/compare/imageSize';
 import type { ChangeSides } from '@/lib/compare/modes';
 import { decodeBase64 } from '@/lib/github/binary-blobs';
@@ -154,6 +155,38 @@ async function loadImage(
   };
 }
 
+/**
+ * One side of an archive, as its index rather than as its bytes.
+ *
+ * Parsed here rather than in the component, so what the side cache holds is a
+ * list of names and sizes instead of four megabytes of archive. It is also
+ * everything the comparison reads: nothing on this page ever decompresses a
+ * member.
+ */
+async function loadArchive(
+  pr: PrRef,
+  ref: string,
+  path: string,
+): Promise<Loaded<readonly ArchiveEntry[]>> {
+  const response = await request(message('get-blob-bytes', { pr, path, ref }));
+  if (!response.ok) return { ok: false, reason: response.error.message };
+  if (response.data.status !== 'ok') {
+    return {
+      ok: false,
+      reason: `${path} cannot be compared because ${REASONS[response.data.status] ?? 'it could not be read'}.`,
+    };
+  }
+
+  const read = await readArchive(decodeBase64(response.data.base64));
+  if (read.status !== 'ok') {
+    // A `.zip` that is really a Git LFS pointer, or one GitHub sent in part.
+    // Saying nothing would draw an archive with no files in it, which reads as
+    // "nothing inside changed".
+    return { ok: false, reason: `${path} could not be read as an archive.` };
+  }
+  return { ok: true, value: read.entries };
+}
+
 export interface SidesRequest {
   refs: BlobRefs;
   /** Path in the head commit. */
@@ -264,4 +297,11 @@ export function useImageSides(request_: ImageSidesRequest): SidesState<LoadedIma
   return useSides(request_, `image ${mediaType}`, (ref, path) =>
     loadImage(pr, ref, path, mediaType),
   );
+}
+
+export function useArchiveSides(
+  request_: SidesRequest,
+): SidesState<readonly ArchiveEntry[]> {
+  const pr = request_.refs.pr;
+  return useSides(request_, 'archive', (ref, path) => loadArchive(pr, ref, path));
 }

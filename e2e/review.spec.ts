@@ -23,6 +23,7 @@ import { HEADER_BUDGET } from '@/lib/review/columnTail';
 import { REACHED } from '@/ui/currentFile';
 import {
   ADDED_FILE,
+  ARCHIVE_FILE,
   BASE_SHA,
   DELETED_FILE,
   EXEMPTED_FILE,
@@ -46,9 +47,9 @@ const VIEW = '.diff-view';
 /**
  * Every file in the column, in the order `UNIFIED_DIFF` concatenates them.
  *
- * `FILES` alone is not the column. Five more follow it — the image, the table,
- * and the added, deleted and unevenly-modified files — and a walk down the
- * column reaches all of them.
+ * `FILES` alone is not the column. Six more follow it — the image, the table,
+ * the archive, and the added, deleted and unevenly-modified files — and a walk
+ * down the column reaches all of them.
  */
 const COLUMN_ORDER = [
   ...FILES,
@@ -57,6 +58,7 @@ const COLUMN_ORDER = [
   REINDENTED_FILE,
   IMAGE_FILE,
   TABLE_FILE,
+  ARCHIVE_FILE,
   ADDED_FILE,
   DELETED_FILE,
   UNEVEN_FILE,
@@ -2265,7 +2267,11 @@ test('the last card can still be read when the column is full of rich ones', asy
           card.getBoundingClientRect().top - view.getBoundingClientRect().top,
         );
       },
-      [VIEW, TABLE_FILE] as const,
+      // The archive, which sits where the table used to: three cards from the
+      // end of the column. It is the probe rather than the table because it is
+      // now the rich card in that position, and the position is what this
+      // measures — a rich card near the bottom being reachable at all.
+      [VIEW, ARCHIVE_FILE] as const,
     );
 
   const scrollFraction = (fraction: number) =>

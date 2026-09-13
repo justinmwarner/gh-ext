@@ -23,7 +23,7 @@
  * from the fixture and aborts anything it does not recognize.
  */
 
-import { IMAGE_FILE, TABLE_FILE, expect, reviewUrl, test } from './extension';
+import { ARCHIVE_FILE, IMAGE_FILE, TABLE_FILE, expect, reviewUrl, test } from './extension';
 import type { Locator, Page } from '@playwright/test';
 
 const card = (page: Page, path: string): Locator =>
@@ -347,6 +347,41 @@ test('a table is drawn as a grid with the one changed cell marked', async ({
   // The header row is a real <th> and it sticks, which is what makes a wide
   // export readable at all.
   await expect(grid.locator('thead th').nth(1)).toHaveText('part');
+});
+
+/**
+ * The one claim about archives that only a real browser can settle.
+ *
+ * The reader is a lazily imported chunk, and in Node that import is an ordinary
+ * module resolution which cannot fail. Inside an MV3 extension page it is a
+ * script load under a content security policy — so whether the library arrives
+ * at all, and whether a zip survives the worker and the base64 and the message
+ * channel still parsable, is unanswerable anywhere but here.
+ */
+test('a zip is listed by what is inside it, not by the sentence GitHub gives it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await reach(page, ARCHIVE_FILE);
+
+  const grid = body(page, ARCHIVE_FILE).locator('.grid');
+  await expect(grid).toBeVisible();
+
+  // Three members: one unchanged, one added, and one edited without changing
+  // length — which is the case a card comparing sizes would get wrong.
+  await expect(grid.locator('tbody tr')).toHaveCount(3);
+  await expect(body(page, ARCHIVE_FILE).locator('.archive-changed')).toContainText(
+    'readme.txt',
+  );
+  await expect(body(page, ARCHIVE_FILE).locator('.archive-added')).toContainText('notes.md');
+
+  await modeButton(page, ARCHIVE_FILE, 'Changed files').click();
+  await expect(grid.locator('tbody tr')).toHaveCount(2);
+  await expect(grid).not.toContainText('values.csv');
 });
 
 test('raw puts the ordinary diff back, in the same card', async ({

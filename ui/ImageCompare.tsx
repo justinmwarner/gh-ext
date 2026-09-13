@@ -54,6 +54,7 @@
  */
 
 import { useId, useState } from 'react';
+import { kb } from './bytes';
 import type { LoadedImage } from './fileSides';
 
 export type ImageVariant = 'side-by-side' | 'swipe' | 'onion' | 'difference';
@@ -69,9 +70,6 @@ export interface ImageCompareProps {
   before: LoadedImage | null;
   after: LoadedImage | null;
 }
-
-const kb = (bytes: number): string =>
-  bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024).toLocaleString()} KB`;
 
 const dimensions = (size: Measured | null): string =>
   size === null ? '' : `${size.width} × ${size.height}`;
