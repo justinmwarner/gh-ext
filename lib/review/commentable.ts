@@ -8,23 +8,25 @@
  * screen was never touched by the pull request, and a block the reviewer can
  * see is no longer evidence that GitHub will take a comment on it.
  *
- * **UNVERIFIED, and it is the premise.** That GitHub's
- * `addPullRequestReviewThread` rejects a `line` outside the diff is asserted
- * from general knowledge of the API. It is not recorded in
- * `docs/reference/github-review-api.md`, which was written against the live
- * schema, and it has not been executed. It must be, and that file updated,
- * before any message shown to a reviewer claims it as a fact.
+ * **Executed on 2026-09-12, and it is the premise.** That GitHub's
+ * `addPullRequestReviewThread` refuses a `line` outside the diff was asserted
+ * from general knowledge of the API and had never been run. It has been now,
+ * against a real pull request, and it is true — but the refusal is nothing like
+ * a 422. It is **HTTP 200 with no `errors` array and `thread` set to `null`**:
+ * a success carrying nothing, which `publishThread` reads as "the comment
+ * reached GitHub" before submitting the review it opened to hold it. A comment
+ * posted on a line outside the diff is therefore not rejected in any way the
+ * reviewer or this application would notice. It is lost, and they are told it
+ * posted. `docs/reference/github-review-api.md` §4 has the responses.
  *
- * The predicate is worth having either way, because it decides which of two
- * shapes a comment takes rather than whether a comment is possible at all. A
- * block inside a hunk posts as an ordinary line comment; a block outside every
- * hunk posts with `subjectType: FILE`, against the file rather than a line. If
- * the premise turns out to be wrong, the second path is still the honest one —
- * a line comment on a line nobody changed shows up on github.com attached to
- * context the reader has to go looking for. And if the premise is right, the
- * alternative is an affordance that invites a reviewer to write a paragraph and
- * then loses it to a 422, which is the worst of the three outcomes by some
- * distance.
+ * So this predicate is the only thing standing in the way of that, which is a
+ * stronger claim than the one it was written under. It decides which of two
+ * shapes a comment takes: a block inside a hunk posts as an ordinary line
+ * comment; a block outside every hunk posts with `subjectType: FILE`, against
+ * the file rather than a line. The second path was defensible even if the
+ * premise had turned out false — a line comment on a line nobody changed shows
+ * up on github.com attached to context the reader has to go looking for — and
+ * now it is the only correct one.
  *
  * Computed from the patch rather than guessed from the file's size or the
  * hunk headers' declared counts. The counts in a header are what the header

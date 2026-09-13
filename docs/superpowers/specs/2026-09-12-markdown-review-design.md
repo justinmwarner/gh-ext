@@ -347,15 +347,18 @@ What it buys is a reduction in total machinery, not an addition:
 ### Everything is commentable, and the fallback is explicit
 
 GitHub's `addPullRequestReviewThread` takes `path`, `line` and `side`.
-**UNVERIFIED:** that it rejects a line outside the diff is asserted from general
-knowledge of the API and is *not* recorded in
-`docs/reference/github-review-api.md`; it must be executed against the live API
-and the reference updated, because the whole shape of this section depends on
-it.
+**Executed on 2026-09-12** against `justinmwarner/gh-ext#1`, in a pending review
+that was discarded afterwards, and recorded in
+`docs/reference/github-review-api.md` §1 and §4. It refuses a line outside the
+diff — and the refusal is HTTP 200 with no `errors` array and `thread: null`,
+which is a success carrying nothing. `publishThread` cannot tell that from a
+comment that posted. So this section's premise holds, and holds harder than it
+was written: the predicate below is not choosing between two good shapes, it is
+the only thing between a reviewer and a comment that disappears in silence.
 
-Assuming it does: a rendered view shows the *whole* new document, so on any
-sizeable README most blocks are outside every hunk. The decision is that every
-block still gets an affordance.
+A rendered view shows the *whole* new document, so on any sizeable README most
+blocks are outside every hunk. The decision is that every block still gets an
+affordance.
 
 - A block whose line falls inside a hunk posts an ordinary line comment. Which
   lines qualify is computed from the patch `fileDiffFor` already parses, by a new
@@ -506,9 +509,11 @@ size.
 
 ## 10. Open items
 
-1. **UNVERIFIED** — that GitHub rejects a comment on a line outside the diff.
-   Execute it against the live API; update `docs/reference/github-review-api.md`
-   either way. §7 depends on the answer.
+1. ~~**UNVERIFIED** — that GitHub rejects a comment on a line outside the diff.~~
+   **Closed on 2026-09-12.** Executed against `justinmwarner/gh-ext#1` in a
+   pending review that was discarded afterwards. It refuses — silently: HTTP
+   200, no `errors`, `thread: null`. §4 of `docs/reference/github-review-api.md`
+   has the four responses and the method; §7 above says what it means here.
 2. **UNVERIFIED** — `markdown-it` advisory history and behaviour on pathological
    inputs, to the standard §3.7 applied to `marked`.
 3. ~~**UNVERIFIED** — per-block sanitising equals whole-document sanitising.~~
