@@ -20,3 +20,6 @@ store/video/
 # Local Claude Code settings. Machine-specific, and not something a public
 # repository should carry.
 .claude/settings.local.json
+
+# Scratch files from probing the live GitHub schema.
+.probe-*

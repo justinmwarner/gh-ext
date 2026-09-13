@@ -113,3 +113,38 @@ function decoded(segment: string): string | null {
     return null;
   }
 }
+
+/**
+ * The dashboard's route.
+ *
+ * A constant rather than a literal at each site, for the same reason
+ * {@link reviewHash} is a function: the worker builds this URL and the page
+ * reads it back, and two spellings of one route fail as a blank page rather
+ * than as an error.
+ */
+export const DASHBOARD_HASH = '#/prs';
+
+/**
+ * Everything the review page can be pointed at.
+ *
+ * There used to be one route and {@link parseReviewHash} was the whole router.
+ * The dashboard is the second, so the page now has to tell "a pull request",
+ * "the list" and "neither" apart — and `null` could only ever say the last of
+ * those.
+ *
+ * An unrecognised hash is `none` rather than defaulting to the dashboard. A
+ * stale bookmark should say it is stale; landing somewhere else instead is how
+ * a reviewer ends up unsure whether what they bookmarked still exists.
+ */
+export type Route = { kind: 'pr'; pr: PrRef } | { kind: 'dashboard' } | { kind: 'none' };
+
+/** Read any of the review page's routes out of `location.hash`. */
+export function parseRoute(hash: string): Route {
+  const pr = parseReviewHash(hash);
+  if (pr !== null) return { kind: 'pr', pr };
+
+  const path = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (path === DASHBOARD_HASH.slice(1)) return { kind: 'dashboard' };
+
+  return { kind: 'none' };
+}

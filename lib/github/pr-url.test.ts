@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parsePrUrl, parseReviewHash, reviewHash } from './pr-url';
+import {
+  DASHBOARD_HASH,
+  parsePrUrl,
+  parseReviewHash,
+  parseRoute,
+  reviewHash,
+} from './pr-url';
 
 const ref = { owner: 'octocat', repo: 'hello-world', number: 42 };
 
@@ -139,5 +145,31 @@ describe('a hash nobody could have produced', () => {
       repo: 'my-repo',
       number: 7,
     });
+  });
+});
+
+describe('parseRoute', () => {
+  it('reads a pull request route', () => {
+    expect(parseRoute('#/pr/octocat/hello-world/42')).toEqual({ kind: 'pr', pr: ref });
+  });
+
+  it('reads the dashboard route', () => {
+    expect(parseRoute(DASHBOARD_HASH)).toEqual({ kind: 'dashboard' });
+  });
+
+  it('reads the dashboard route without its leading hash', () => {
+    expect(parseRoute('/prs')).toEqual({ kind: 'dashboard' });
+  });
+
+  it('calls an empty hash no route rather than the dashboard', () => {
+    // The review page opened with a bare URL has always explained itself
+    // rather than guessing. Making the empty hash mean the dashboard would
+    // turn a stale bookmark into a silent redirect.
+    expect(parseRoute('')).toEqual({ kind: 'none' });
+  });
+
+  it('calls anything else no route', () => {
+    expect(parseRoute('#/prs/extra')).toEqual({ kind: 'none' });
+    expect(parseRoute('#/nonsense')).toEqual({ kind: 'none' });
   });
 });

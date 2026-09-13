@@ -288,3 +288,152 @@ export const VIEWER_PENDING_REVIEW = `query ViewerPendingReview($owner: String!,
   }
 }
 `;
+
+/**
+ * What the dashboard reads off a pull request it is only listing.
+ *
+ * Deliberately without `reviewThreads` — see {@link DASHBOARD_THREAD_FIELDS}.
+ * Everything here is a scalar or a one-node connection, so a hundred and fifty
+ * of these cost almost nothing.
+ *
+ * `mergeStateStatus` is in here on the strength of a probe rather than of the
+ * documentation, which says it needs push access. It does not: executed
+ * against `facebook/react` at `viewerPermission: READ` on 2026-09-13, it
+ * returned `BLOCKED` normally. Re-verify with a fine-grained token before the
+ * Ready to merge bucket is trusted — see the open questions in the spec.
+ */
+export const DASHBOARD_PR_FIELDS = `fragment DashboardPr on PullRequest {
+  id number title url isDraft createdAt updatedAt headRefOid
+  repository { nameWithOwner isPrivate }
+  author { login }
+  viewerDidAuthor
+  reviewDecision
+  viewerLatestReview { state commit { oid } }
+  reviewRequests(first: 1) { totalCount }
+  additions deletions changedFiles isReadByViewer
+  mergeStateStatus
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+}`;
+
+/**
+ * The conversation counts, spread into the authored search and nowhere else.
+ *
+ * This fragment is the whole cost of the dashboard and the reason it is
+ * separate. Spread into all four searches at `first: 100` with the nested
+ * `comments(last: 1)`, the document measured **155 points and 30,450 nodes**.
+ * Restricted to the authored search at `first: 25` it measures **17 points and
+ * 3,100 nodes** — the same information, because the counts are read only by
+ * the blocked-on-you rule and that rule returns nothing unless the viewer
+ * wrote the pull request. Both figures are from live execution on 2026-09-13.
+ *
+ * `first: 25` rather than 100 is a budget, not a belief about how many threads
+ * a pull request has. `totalCount` is selected so the shortfall is visible
+ * rather than silent, which is the same bargain `REVIEW_THREAD_FIELDS` strikes
+ * with `comments(first: 50)` above.
+ *
+ * `comments(last: 1)` is what separates a conversation waiting on the author
+ * from one they already answered. Without it every pull request with an open
+ * thread sits in blocked-on-you forever, including the ones where the author
+ * replied last and is waiting on somebody else.
+ */
+export const DASHBOARD_THREAD_FIELDS = `fragment DashboardThreads on PullRequest {
+  reviewThreads(first: 25) {
+    totalCount
+    nodes {
+      isResolved
+      comments(last: 1) { nodes { author { login } } }
+    }
+  }
+}`;
+
+/**
+ * The four searches the dashboard is built from, in one request.
+ *
+ * Four rather than one because GitHub's qualifiers do not compose into a
+ * single question. `involves:` covers author, assignee, mentions and
+ * commenter, and does **not** cover a review request — so a pull request whose
+ * only connection to the reviewer is that somebody asked them to look at it is
+ * invisible to it. That is the single most important row on this page.
+ *
+ * Two of them exclude `author:@me`. Overlap is not a correctness problem —
+ * `collectSummaries` merges by id — but it is wasted budget, and the exclusion
+ * also makes the merge's "first record wins" rule easy to reason about: the
+ * only pull request that can now appear twice is one the reviewer both
+ * commented on and reviewed, and those two records are identical.
+ *
+ * Aliased into one document because four separate requests cost four round
+ * trips and the same points. Executed live on 2026-09-13.
+ */
+export const DASHBOARD_QUERY = `query Dashboard($requested: String!, $mine: String!, $involved: String!, $reviewed: String!) {
+  viewer { login }
+  requested: search(query: $requested, type: ISSUE, first: 50) {
+    issueCount
+    pageInfo { hasNextPage }
+    nodes { ... on PullRequest { ...DashboardPr } }
+  }
+  mine: search(query: $mine, type: ISSUE, first: 50) {
+    issueCount
+    pageInfo { hasNextPage }
+    nodes { ... on PullRequest { ...DashboardPr ...DashboardThreads } }
+  }
+  involved: search(query: $involved, type: ISSUE, first: 50) {
+    issueCount
+    pageInfo { hasNextPage }
+    nodes { ... on PullRequest { ...DashboardPr } }
+  }
+  reviewed: search(query: $reviewed, type: ISSUE, first: 50) {
+    issueCount
+    pageInfo { hasNextPage }
+    nodes { ... on PullRequest { ...DashboardPr } }
+  }
+}
+${DASHBOARD_PR_FIELDS}
+${DASHBOARD_THREAD_FIELDS}
+`;
+
+/**
+ * The search strings, which are data rather than part of the document.
+ *
+ * `sort:updated-desc` on every one: the first fifty of eighty-eight has to be
+ * the fifty that moved most recently, or the cap silently drops exactly the
+ * pull requests a reviewer is most likely to want.
+ *
+ * `@me` rather than the viewer's login, so nothing has to be interpolated into
+ * a search string at the call site.
+ */
+export const DASHBOARD_SEARCHES = {
+  requested: 'is:pr is:open review-requested:@me sort:updated-desc',
+  mine: 'is:pr is:open author:@me sort:updated-desc',
+  involved: 'is:pr is:open involves:@me -author:@me sort:updated-desc',
+  reviewed: 'is:pr is:open reviewed-by:@me -author:@me sort:updated-desc',
+} as const;
+
+/**
+ * Every repository this account has opened a pull request in.
+ *
+ * The direct answer to "have I forgotten one". `includeUserRepositories: true`
+ * is required or the reviewer's own repositories are excluded, which on a
+ * personal account is most of them. Private repositories are returned when the
+ * token can see them — 19 came back for the developing account on 2026-09-13,
+ * cost 1.
+ *
+ * `first: 100` with no pagination is deliberate. A hundred repositories you
+ * have personally opened a pull request in is far outside what this feature is
+ * for, and `totalCount` is selected so the shortfall can be stated rather than
+ * hidden if it ever happens.
+ */
+export const CONTRIBUTED_REPOS_QUERY = `query ContributedRepos {
+  viewer {
+    login
+    repositoriesContributedTo(
+      first: 100
+      contributionTypes: [PULL_REQUEST]
+      includeUserRepositories: true
+      orderBy: { field: PUSHED_AT, direction: DESC }
+    ) {
+      totalCount
+      nodes { nameWithOwner isPrivate }
+    }
+  }
+}
+`;
