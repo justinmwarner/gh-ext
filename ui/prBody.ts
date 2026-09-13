@@ -2,14 +2,18 @@
  * The pull request description, as text.
  *
  * GitHub sends the body pre-rendered as `bodyHTML`. It is not injected here:
- * no `dangerouslySetInnerHTML`, no sanitizer dependency, no hand-rolled
- * allow-list. The markup is reduced to plain text and handed to React as a text
- * child, which escapes it — so nothing anybody can put in a description can
- * become a live element on this page.
+ * no `dangerouslySetInnerHTML`, no sanitiser, no hand-rolled allow-list. The
+ * markup is reduced to plain text and handed to React as a text child, which
+ * escapes it — so nothing anybody can put in a description can become a live
+ * element on this page.
  *
  * **Formatting is lost.** Headings, links, emphasis, tables and code fences all
- * come out as their words. That is the deliberate cost of not shipping a
- * renderer; the Overview links to GitHub for the formatted version.
+ * come out as their words; the Overview links to GitHub for the formatted
+ * version. That used to be the cost of taking no renderer and no sanitiser as
+ * dependencies, and that argument is spent: the rendered Markdown mode brought
+ * both, and `sanitizeMarkdownHtml` is now the thing a description would go
+ * through. Nobody has moved it, which is a different statement from the one
+ * this comment used to make and the honest one.
  *
  * Two passes, and the order matters:
  *

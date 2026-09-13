@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ShortcutAction } from '@/lib/keymap';
 import type { PrPayload } from '@/lib/messages';
 import {
   BOTH_SIDES,
@@ -385,17 +386,38 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     [selectFromCommand],
   );
 
+  /**
+   * Offer a keystroke to the card the reviewer is on before the column takes it.
+   *
+   * `J`, `K` and `c` mean the same thing on every card and are answered in two
+   * different places, because a card showing a comparison has no rows for the
+   * column to move between. A rendered Markdown document claims them for its
+   * own path — see `ui/shortcutTargets.tsx` for why the claim is scoped — and
+   * anything that does not answer falls through to the diff, which is where
+   * these have always gone.
+   */
+  const onCurrentCard = (action: ShortcutAction): boolean => {
+    const path = latest.current.current.path;
+    return path !== null && (targets?.run(action, path) ?? false);
+  };
+
   useKeymap({
     'next-file': () => moveFile(1),
     'previous-file': () => moveFile(-1),
-    'next-hunk': () => column.current?.goToHunk(1),
-    'previous-hunk': () => column.current?.goToHunk(-1),
+    'next-hunk': () => {
+      if (!onCurrentCard('next-hunk')) column.current?.goToHunk(1);
+    },
+    'previous-hunk': () => {
+      if (!onCurrentCard('previous-hunk')) column.current?.goToHunk(-1);
+    },
     'next-thread': () => moveThread(1, false),
     'previous-thread': () => moveThread(-1, false),
     'next-unresolved-thread': () => moveThread(1, true),
     'previous-unresolved-thread': () => moveThread(-1, true),
     'toggle-viewed': toggleViewedOnCurrent,
-    'comment-on-line': () => column.current?.commentOnSelection(),
+    'comment-on-line': () => {
+      if (!onCurrentCard('comment-on-line')) column.current?.commentOnSelection();
+    },
     'reply-to-thread': replyToFocused,
     'toggle-resolved': toggleResolvedOnFocused,
     'file-jump': () => setOverlay({ kind: 'search', mode: 'files' }),

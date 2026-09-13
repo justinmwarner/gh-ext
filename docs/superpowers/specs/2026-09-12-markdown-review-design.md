@@ -129,25 +129,60 @@ existing.
 
 ### What it costs
 
-Measured with `esbuild --bundle --minify`, gzipped:
+The three candidates weighed against each other on a scratch `esbuild --bundle
+--minify` build, gzipped. This compares renderers; it does not measure this
+project, and that distinction is why the real number below was owed:
 
 | Renderer | Bundled gz | Source positions | Packages |
 | --- | --- | --- | --- |
-| `marked` 18.0.11 (current) | 13,191 B | none | 1 |
+| `marked` 18.0.11 | 13,191 B | none | 1 |
 | **`markdown-it` 15.0.2** | **41,665 B** | `token.map`, every block | **1** |
 | `unified` + `remark-parse` + `remark-gfm` + `remark-rehype` + `rehype-stringify` | 50,144 B | `node.position`, every node | 5 |
-
-**+28,474 B gzipped**, which roughly doubles what the Markdown feature cost when
-it shipped (+25,860 B for `marked` and `dompurify` together). That is the price
-of the defects in §3 and of the anchors in §5, and it was accepted knowingly.
 
 remark was rejected: it costs more, needs five packages, and the extra it buys —
 positions on *inline* nodes — is not wanted, because GitHub anchors a comment to
 a line and not to a word.
 
+**Measured on the real build, 2026-09-12.** `npx wxt build` at `04ad174^`
+(`marked` 18.0.12) and at `04ad174` (`markdown-it` 15.0.2) — the swap and
+nothing else — in a clean worktree with `npm ci` at each, which is how §2 of
+`2026-09-04-rich-diff-types-comparison.md` measured the rich modes. Gzipped with
+`gzip -9`:
+
+| Artifact | Before | After | Delta |
+| --- | --- | --- | --- |
+| `chunks/review-*.js` | 864,218 B | 918,687 B | **+54,469 B (+6.3%)** |
+| same, gzipped | 247,276 B | 275,528 B | **+28,252 B (+11.4%)** |
+| `assets/review-*.css` | 39,278 B | 39,278 B | 0 |
+| same, gzipped | 7,573 B | 7,573 B | 0 |
+
+**The estimate held.** The scratch figure claimed +28,474 B gzipped and the real
+one is +28,252 B — 222 bytes lower, 0.8% out. That is closer than a scratch
+build has any right to be in general, and the reason it is close here is the
+shape of the change rather than luck: one dependency in, one out, nothing shared
+between them for the bundler to fold away, and not a byte of stylesheet either
+way. The cost was accepted knowingly and it is the cost that was described.
+
+It roughly doubles what the Markdown feature cost when it shipped (+25,860 B for
+`marked` and `dompurify` together). That is the price of the defects in §3 and
+of the anchors in §5.
+
+For scale, everything on this branch *after* the swap — the anchors, the block
+split, the comment affordance, the composer path, the keyboard, the drawer —
+adds **+1,896 B gzipped** to the same chunk and +177 B to the stylesheet,
+measured the same way at `c840192`. The renderer is very nearly the whole cost
+of the feature, and the rest of it is rounding.
+
 ### Due diligence
 
 - `markdown-it` 15.0.2, MIT, `time.modified` 2026-09-12. Actively maintained.
+- **No `@types/markdown-it`.** It was installed, found to be redundant, and
+  removed: 15.0.2 ships first-party declarations through its `exports` map, and
+  the DefinitelyTyped package is still on 14.x, so adding it puts a stale-major
+  type surface beside a newer runtime — a trap rather than a safety net.
+  Confirmed by removing it and re-running `tsc --noEmit` clean.
+- **`marked` is removed from `dependencies`.** Nothing imports it once this
+  lands; "replaces" means the old one goes rather than lingering unreferenced.
 - No `eval(` and no `new Function` anywhere in `dist/` or `lib/` — grepped,
   which is the same check §3.7 ran on `marked` for MV3.
 - `npm audit --omit=dev` on a tree containing it: zero.
@@ -173,9 +208,25 @@ becomes a text change, which is something this diff can mark. Two `<img>` tags
 with different `src` attributes are invisible to a word diff that strips
 attributes before comparing." A checkbox is the same shape exactly — state in an
 attribute, invisible to the diff — and it has the additional problem that the
-sanitiser forbids `input` outright, so nothing can reach the page anyway. As a
-text marker the checked state is a character, the diff marks it, and §3.1 is
-fixed rather than papered over.
+sanitiser forbids `input` outright, so nothing can reach the page anyway.
+
+**Correction, made while implementing this on 2026-09-12.** The paragraph above
+originally claimed this rule fixes §3.1, and it does not. `markdown-it` has no
+task-list support at all, so `- [x] ship it` arrives as literal text and the
+renderer swap in decision 1 restores the diff mark on its own — which showed up
+as only one of the two tests for §3.1 failing before the rule was written. What
+the rule actually earns is narrower and still worth having: the marker reads as
+the control it stands in for rather than as stray punctuation, and `[X]` and
+`[x]` normalise to one document so a case change is not drawn as an edit. The
+source comment says the same thing. Decision 1 is load-bearing for §3.1;
+decision 4.1 is not, and the record should not credit it.
+
+The marker is ASCII `[ ]` and `[x]`, not the ballot-box characters this section
+first suggested. Two reasons, either sufficient: U+2610 and U+2611 need a symbol
+font the reviewer may not have, and they would make the rendered view disagree
+with the Raw view one press away, on a card whose whole purpose is flipping
+between the two. The brackets also diff better — `htmlDiff` marks the single
+interior character that carries the state and leaves the brackets standing.
 
 ---
 
@@ -215,6 +266,38 @@ Both halves get a test that fails if either is loosened, and the comment in
 `ui/markdownHtml.ts` is amended to explain the exception rather than leaving the
 next reader to find it by grep.
 
+### 5.1 Three things found while building this, on 2026-09-12
+
+**Stamping breaks the `unchanged` comparison, and the fix is `htmlDiff`'s own
+rule one layer up.** Two sides that render identically no longer compare equal
+once each carries its own anchors — one says `L`, the other `R`. So
+`compareMarkdown` strips anchors for the two decisions that must not see
+bookkeeping — the `maxRenderedChars` gate and the `unchanged` equality test —
+while `unsafeHtml` is always the anchored form. That is exactly `htmlDiff`'s
+"strip attributes for matching, never for emission", and stripping for the size
+gate too is deliberate rather than incidental: an anchor is about forty-five
+characters a block that `toWords` never pays for, since a tag is one token
+whatever its attributes, so counting them would shrink the accepted document
+size in exchange for measuring nothing real.
+
+**A raw HTML block gets no anchor, so it cannot be commented on.**
+`markdown-it` gives `html_block` a `map`, but its renderer returns
+`token.content` verbatim — the attribute never reaches the output. A README
+containing a hand-written `<table>` or `<details>` therefore has a block with no
+comment affordance. This is a real gap in §7's "everything is commentable" and
+the affordance must not pretend otherwise: a block with no anchor gets the
+file-level path, not a missing control. `inline` tokens do carry a `map`,
+contrary to what this document first assumed, but stamping one is useless —
+`renderInline` walks children and never prints the container.
+
+**An unchanged block is emitted as the new side's tag, so it carries `R`.**
+`htmlDiff`'s `equal` branch slices `newWords`, and tags are compared with
+attributes stripped, so a `<p>` present on both sides emits the new document's
+anchor. The old side's `L` survives only where its tag falls inside a delete or
+replace region — a genuinely removed block. That is the right behaviour rather
+than a limitation: one element on screen is one block of the new document, and
+it should name the line a comment on it would actually reach.
+
 ---
 
 ## 6. Decision 4 — the document is split into per-block React elements
@@ -247,9 +330,32 @@ Three probes, all passing against this tree:
 - `DOMParser` executes no script and fetches nothing — an inert document has no
   browsing context.
 
-**UNVERIFIED:** the second claim rests on one sample. The existing sanitiser
-test suite must be re-run through the split path before this is relied on, and
-that is a task in the plan rather than an assumption here.
+**Verified on 2026-09-12, and the claim now rests on something.** The sanitiser
+corpus moved into `ui/markdownHtml.fixture.ts` so that suite cannot gain an
+attack the split path never sees. Twenty-seven shapes — fifteen attacks, four
+must-survive documents, and eight chosen to straddle the cut, including foreign
+content between blocks, unclosed tags across a boundary, and SVG and MathML
+nested inside a table cell — were compared per-block against whole-document by a
+depth-tagged walk recording tag, sorted attributes and text. **All twenty-seven
+are identical.** A second sweep asserts independently that the output is
+harmless, since the comparison alone would pass if both paths were equally
+broken. Both were mutation-checked.
+
+**The first probe's claim was too strong, and building it found where.**
+"Splitting loses only inter-block whitespace" holds for `markdown-it` output and
+is false for raw HTML: `<div>a</div> and more` is one `html_block` followed by a
+top-level text node, and dropping it would be the rendered view silently losing
+authored text. Non-whitespace top-level text is kept as its own block;
+whitespace-only nodes are still dropped.
+
+**One behaviour was traded rather than preserved.** A Mermaid fence inside a
+list item or a blockquote is no longer drawn — it stays as its marked-up source.
+The old imperative placement could reach anywhere in the subtree; a block-level
+component cannot, and drawing one would mean splitting a block around its own
+descendants, which is the surgery this arrangement exists to remove. Top-level
+fences, which is where almost every diagram is, are unaffected. Accepted rather
+than fixed: the source stays on screen and readable, so nothing becomes
+unknowable, and it is recorded in the README's known limits.
 
 What it buys is a reduction in total machinery, not an addition:
 
@@ -269,15 +375,18 @@ What it buys is a reduction in total machinery, not an addition:
 ### Everything is commentable, and the fallback is explicit
 
 GitHub's `addPullRequestReviewThread` takes `path`, `line` and `side`.
-**UNVERIFIED:** that it rejects a line outside the diff is asserted from general
-knowledge of the API and is *not* recorded in
-`docs/reference/github-review-api.md`; it must be executed against the live API
-and the reference updated, because the whole shape of this section depends on
-it.
+**Executed on 2026-09-12** against `justinmwarner/gh-ext#1`, in a pending review
+that was discarded afterwards, and recorded in
+`docs/reference/github-review-api.md` §1 and §4. It refuses a line outside the
+diff — and the refusal is HTTP 200 with no `errors` array and `thread: null`,
+which is a success carrying nothing. `publishThread` cannot tell that from a
+comment that posted. So this section's premise holds, and holds harder than it
+was written: the predicate below is not choosing between two good shapes, it is
+the only thing between a reviewer and a comment that disappears in silence.
 
-Assuming it does: a rendered view shows the *whole* new document, so on any
-sizeable README most blocks are outside every hunk. The decision is that every
-block still gets an affordance.
+A rendered view shows the *whole* new document, so on any sizeable README most
+blocks are outside every hunk. The decision is that every block still gets an
+affordance.
 
 - A block whose line falls inside a hunk posts an ordinary line comment. Which
   lines qualify is computed from the patch `fileDiffFor` already parses, by a new
@@ -305,6 +414,26 @@ Outdated threads, threads GitHub sent no line for, and threads belonging to a
 different commit stay in `UnanchoredThreads` with the reasons it already gives.
 Today every thread on a `.md` file in the rendered mode is in that drawer, so
 this is strictly better in every case and much better in the common one.
+
+**A thread that lands in no block at all also goes to the drawer**, under a
+seventh reason — `no-block`, added on 2026-09-12. Blocks carry ranges and those
+ranges do not tile the file: the blank line between two paragraphs is in none of
+them, and a raw `html_block` carries no range at all for the reason §5.1 gives.
+A comment on such a line is inside a hunk, so `layoutThreads` makes it an
+annotation — and a rich card is handed `emptyDiffFor`, which has no rows, so
+Pierre drops that annotation in silence. Drawn nowhere, listed nowhere, and no
+error raised anywhere: the exact failure `ui/UnanchoredThreads.tsx` calls the
+worst outcome available.
+
+Matching such a thread to the nearest block at or before its line was considered
+and refused. That draws a reviewer's comment beside prose it was not written
+about, which is the misattribution the `outdated` verdict already refuses to
+make, and it is worse than the drawer because nothing on screen would admit to
+it. Only the rendered view knows which lines its blocks covered, so
+`MarkdownCompare` reports what it could not place and `ui/FileBody.tsx` lists
+it; the sentence sends the reviewer to Raw, which shows the comment on its line.
+The same channel carries a comment still in flight, where losing it would lose
+writing that is on GitHub nowhere.
 
 ### The keyboard needs no new bindings
 
@@ -391,6 +520,10 @@ jsdom, under `ui/`:
 - Strikethrough renders as `<s>` and is not painted as a deletion.
 - A thread on a line inside a block renders under that block; an outdated one
   stays in the drawer.
+- A thread on a line *between* two blocks — a blank separator, or a line inside
+  a raw `html_block` — reaches the drawer rather than nowhere. Driven through
+  the whole column, because the defect is in the join between two halves that
+  are each individually correct: `ui/comparisonModes.test.tsx`.
 - The file-level composer says so, and seeds its blockquote.
 - The mode preference flips sibling cards and survives a remount.
 
@@ -400,21 +533,39 @@ Playwright, against the production build:
   file-level, with GitHub mocked at the service worker.
 - The mode preference surviving a reload and a second pull request.
 
-§5 of the comparison spec records that the rendered Markdown mode has **no
-browser coverage** today. It should not stay that way through a change this
-size.
+§5 of the comparison spec records that the rendered Markdown mode had **no
+browser coverage**. That is now out of date, and this branch is what dated it:
+`e2e/review.spec.ts` carries four specs against the production build — the prose
+is marked and none of it executes, a diagram is drawn rather than left as
+source, a block can be commented on, and the mode outlives the page.
 
 ---
 
 ## 10. Open items
 
-1. **UNVERIFIED** — that GitHub rejects a comment on a line outside the diff.
-   Execute it against the live API; update `docs/reference/github-review-api.md`
-   either way. §7 depends on the answer.
+1. ~~**UNVERIFIED** — that GitHub rejects a comment on a line outside the diff.~~
+   **Closed on 2026-09-12.** Executed against `justinmwarner/gh-ext#1` in a
+   pending review that was discarded afterwards. It refuses — silently: HTTP
+   200, no `errors`, `thread: null`. §4 of `docs/reference/github-review-api.md`
+   has the four responses and the method; §7 above says what it means here.
 2. **UNVERIFIED** — `markdown-it` advisory history and behaviour on pathological
-   inputs, to the standard §3.7 applied to `marked`.
-3. **UNVERIFIED** — per-block sanitising equals whole-document sanitising in
-   general. One sample is not a proof; the existing suite is.
-4. The +28,474 B is a bundle-size claim about a scratch build. Re-measure with
-   `npx wxt build` before and after, the way §2 of the comparison spec did, and
-   record the real number.
+   inputs, to the standard §3.7 applied to `marked`. Still open, and the only
+   item on this list that was open when the branch started and still is.
+3. ~~**UNVERIFIED** — per-block sanitising equals whole-document sanitising.~~
+   **Closed on 2026-09-12.** Twenty-seven shapes compared structurally, all
+   identical, both directions mutation-checked. §6 has the detail.
+4. ~~The +28,474 B is a bundle-size claim about a scratch build.~~ **Closed on
+   2026-09-12.** Re-measured with `npx wxt build` at `04ad174^` and `04ad174`:
+   **+28,252 B gzipped**, 222 bytes under the estimate and no stylesheet cost at
+   all. §4 has the table and the figures for the rest of the branch.
+5. **Opened on 2026-09-12, by closing item 1.** A comment on an *expanded
+   context* line may be lost the same silent way, and nothing on that path
+   checks. `composerFor` in `ui/composerAnchor.ts` has three refusals —
+   cross-side, invalid range, other-commit — and none of them asks whether the
+   line is one the patch contains. Expanding unchanged context puts exactly such
+   rows under a gutter, and the probe refused a line three rows outside a hunk
+   with HTTP 200 and `thread: null`. Whether GitHub takes *any* expanded line is
+   not settled by that one probe; github.com's own interface offers the gesture,
+   so it may send something other than a bare `line`. Execute it, and if it
+   refuses, `commentableLines` is already the predicate that would guard it.
+   Outside this feature's scope and larger than it.

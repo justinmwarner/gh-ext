@@ -8,9 +8,10 @@
  *
  * - raw is reachable from every file, and going back to it really does put the
  *   card back where it started
- * - the mode is per file, so two images can be in different ones at once
- * - nothing is remembered across a mount, which is what every other piece of
- *   interface state on this page does
+ * - the mode is per file for every kind but Markdown, so two images can be in
+ *   different ones at once
+ * - and for those kinds nothing survives a mount, as with the rest of the
+ *   interface state on this page
  * - the switcher is operable from the keyboard
  *
  * Layout is not asserted anywhere in this file. jsdom performs none, an `<img>`
@@ -20,8 +21,12 @@
 
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { browser } from 'wxt/browser';
+import { ANCHOR_ATTRIBUTE } from '@/lib/compare/markdownAnchors';
+import type { ReviewThread } from '@/lib/github/types';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
+import { MODE_MEMORY_KEY } from '@/lib/settings';
 import { DraftStore } from '@/lib/review/drafts';
 import { DiffColumn } from './DiffColumn';
 import { request } from './background';
@@ -30,7 +35,7 @@ import { clearSideCache } from './fileSides';
 import { memoryStore } from './memoryStore.fixture';
 import { codeViewItems } from './diffItems';
 import { diffHasRendered } from './pierreDom.fixture';
-import { pullRequestNode } from './prPayload.fixture';
+import { pullRequestNode, reviewThread } from './prPayload.fixture';
 import type { ReviewFile } from './reviewFiles';
 import { ReviewSessionProvider } from './reviewSession';
 
@@ -86,12 +91,26 @@ beforeEach(() => {
   }
 });
 
-function mount(files: readonly ReviewFile[]) {
+/**
+ * The Markdown preference, which one press below writes and every later mount
+ * would otherwise read.
+ *
+ * `ui/testSetup.ts` installs one fake storage area per test *file* rather than
+ * per test, so pressing Raw on a `.md` card leaves every `.md` card after it
+ * opening raw — including the two sanitiser tests at the bottom, which mount a
+ * document expecting to find it rendered. The failure they produce says nothing
+ * about sanitising and names the wrong test.
+ */
+afterEach(async () => {
+  await browser.storage.local.remove(MODE_MEMORY_KEY);
+});
+
+function mount(files: readonly ReviewFile[], threads: readonly ReviewThread[] = []) {
   return render(
     <ReviewSessionProvider
       pullRequest={pullRequestNode()}
       prRef={PR_REF}
-      threads={[]}
+      threads={[...threads]}
       drafts={new DraftStore(memoryStore())}
     >
       <DiffColumn
@@ -213,7 +232,16 @@ describe('raw as the escape hatch', () => {
   });
 });
 
-describe('the mode is per file', () => {
+/**
+ * Both claims below are about the kinds whose mode is a per-file choice, which
+ * is every kind but Markdown — `lib/compare/modes.ts` names the exception and
+ * `ui/DiffColumn.test.tsx` asserts it, beside the storage it is held in.
+ *
+ * Images are what the rule was written for, so they are what it is checked on:
+ * one was redrawn and wants side by side, the next moved four pixels and wants
+ * the difference blend, and neither reviewer press may undo the other.
+ */
+describe('the mode is per file, for every kind but Markdown', () => {
   it('leaves one image alone when another is switched', async () => {
     const user = userEvent.setup();
     mount([
@@ -227,7 +255,7 @@ describe('the mode is per file', () => {
     expect(modeButton('b.png', 'Side by side')).toHaveProperty('ariaPressed', 'true');
   });
 
-  it('remembers nothing across a mount, like every other control here', async () => {
+  it('puts an image back to its default at the next mount', async () => {
     const user = userEvent.setup();
     const first = mount([file({ path: 'a.png', isBinary: true, patch: '' })]);
     await user.click(modeButton('a.png', 'Raw'));
@@ -659,7 +687,14 @@ describe('a Markdown file written by an attacker', () => {
     for (const element of [view, ...view.querySelectorAll('*')]) {
       for (const attribute of element.attributes) {
         expect(attribute.name).not.toMatch(/^on/i);
-        expect(attribute.name).not.toMatch(/^data-/);
+        // One data attribute is admitted by name — the source anchor the
+        // rendered mode writes on every block — so the sweep exempts that one
+        // and nothing else. `data-thread` and `data-reply-for` are both in the
+        // document above and both still have to go, which is the half of this
+        // assertion that was ever protecting anything.
+        if (attribute.name !== ANCHOR_ATTRIBUTE) {
+          expect(attribute.name).not.toMatch(/^data-/);
+        }
         expect(attribute.name).not.toBe('id');
         expect(attribute.name).not.toBe('style');
       }
@@ -680,7 +715,18 @@ describe('a Markdown file written by an attacker', () => {
     // observable here in either case, and asserting on a global the attack
     // tried to set would be a test that cannot fail. What is asserted is what
     // reached the document, which is the thing the sanitiser controls.
-    for (const element of [view, ...view.querySelectorAll('*')]) {
+    //
+    // Over the sanitised markup rather than the whole card, and the narrowing
+    // is forced rather than chosen: React 19 assigns a no-op `onclick` to a
+    // host element carrying `onClick` and to its parent — `trapClickOnNon-
+    // InteractiveElement` — so the comment button on every block would fail
+    // this sweep while saying nothing about the sanitiser. `.markdown-block-
+    // content` is exactly the markup the pull request wrote.
+    const authored = [...view.querySelectorAll('.markdown-block-content')].flatMap(
+      (content) => [content, ...content.querySelectorAll('*')],
+    );
+    expect(authored.length).toBeGreaterThan(0);
+    for (const element of authored) {
       for (const property of ['onerror', 'onload', 'onmouseover', 'onclick', 'ontoggle']) {
         expect((element as unknown as Record<string, unknown>)[property]).toBeFalsy();
       }
@@ -704,5 +750,114 @@ describe('a Markdown file written by an attacker', () => {
     expect(document.querySelectorAll('[data-reply-for]')).toHaveLength(0);
     expect(document.getElementById('root')).toBeNull();
     expect(document.querySelector('.markdown-rendered style')).toBeNull();
+  });
+});
+
+/**
+ * The threads a rendered document has nowhere to put, which is the one way
+ * this feature can lose a comment outright.
+ *
+ * The rendered view draws blocks, and a block carries the range of source
+ * lines it was built from. A thread whose line falls *between* two of those
+ * ranges — the blank line separating two paragraphs is the ordinary case —
+ * belongs to no block, so nothing in the document draws it. Nor does the
+ * per-file list catch it: `layoutThreads` is given GitHub's real patch, where
+ * that line is inside a hunk, so it makes an annotation — and the card is
+ * handed a diff with no rows, so Pierre drops that annotation in silence.
+ * Drawn nowhere, listed nowhere, and no error anywhere.
+ *
+ * Matching such a thread to the nearest block above it was considered and
+ * refused: that draws a reviewer's comment beside prose it was not written
+ * about, which is the same misattribution the `outdated` verdict already
+ * refuses to make. It falls through to the drawer instead, which is where
+ * every thread this application cannot place already goes.
+ *
+ * Driven through the whole column rather than through `MarkdownCompare` alone,
+ * because the defect is in the join: both halves are individually correct and
+ * neither can see the gap between them.
+ */
+describe('a comment the rendered document has no block for', () => {
+  const README = 'README.md';
+
+  /** One hunk covering the whole of a three-line document. */
+  const patchFor = (before: string, after: string): string =>
+    [
+      `diff --git a/${README} b/${README}`,
+      '@@ -1,3 +1,3 @@',
+      ' # Title',
+      ' ',
+      `-${before}`,
+      `+${after}`,
+      '',
+    ].join('\n');
+
+  const sides = (before: string, after: string) => (ref: string): string =>
+    `# Title\n\n${ref === BLOBS.baseSha ? before : after}\n`;
+
+  const listed = (): Element | null => body(README).querySelector('.unanchored [data-thread]');
+
+  /**
+   * The drawer is one commit behind the document, deliberately.
+   *
+   * Only the rendered view knows which lines its blocks covered, so it reports
+   * what it could not place from an effect and the card lists it on the render
+   * after that. Waiting for the document and then asserting on the drawer in
+   * the same tick is a race that passes on an idle machine and fails on a busy
+   * one — which is exactly what it did.
+   */
+  const untilListed = async () => {
+    await waitFor(() => expect(listed()).not.toBeNull());
+  };
+
+  it('lists a thread on the blank line between two paragraphs', async () => {
+    // Line 2 is the separator. It is inside the hunk, so it is a line GitHub
+    // would take a comment on and a line `layoutThreads` anchors — and there
+    // is no block on it, because a blank line renders as nothing at all.
+    answerWith(sides('Alpha.', 'Beta.'));
+    mount(
+      [file({ path: README, patch: patchFor('Alpha.', 'Beta.') })],
+      [reviewThread({ path: README, line: 2 })],
+    );
+
+    await untilListed();
+    // Once, and in the drawer. Drawn in the document as well would be the same
+    // comment read twice, beside prose it was not written about.
+    expect(body(README).querySelectorAll('[data-thread]')).toHaveLength(1);
+    expect(
+      body(README).querySelector('[data-listed-reason="no-block"]'),
+    ).not.toBeNull();
+  });
+
+  it('lists a thread inside raw HTML the renderer passes through', async () => {
+    // `markdown-it` returns an `html_block` verbatim, so the anchor attribute
+    // never reaches the output and the block has no line at all — §5.1 of the
+    // design spec. Same hole, a different way in.
+    const before = '<table><tr><td>raw</td></tr></table>';
+    const after = '<table><tr><td>new</td></tr></table>';
+    answerWith(sides(before, after));
+    mount(
+      [file({ path: README, patch: patchFor(before, after) })],
+      [reviewThread({ path: README, line: 3 })],
+    );
+
+    await untilListed();
+    expect(body(README).querySelectorAll('[data-thread]')).toHaveLength(1);
+  });
+
+  it('leaves a thread the document can place where the document put it', async () => {
+    // The other half, and the one that makes the fix worth having rather than
+    // merely safe: a thread with a block of its own is still drawn beside the
+    // paragraph it was written about, and is not also listed below.
+    answerWith(sides('Alpha.', 'Beta.'));
+    mount(
+      [file({ path: README, patch: patchFor('Alpha.', 'Beta.') })],
+      [reviewThread({ path: README, line: 3 })],
+    );
+
+    await waitFor(() =>
+      expect(body(README).querySelector('.markdown-block [data-thread]')).not.toBeNull(),
+    );
+    expect(body(README).querySelectorAll('[data-thread]')).toHaveLength(1);
+    expect(listed()).toBeNull();
   });
 });

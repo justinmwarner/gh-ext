@@ -17,6 +17,9 @@ import { compareMarkdown } from '@/lib/compare/markdown';
 import { mermaidBlocks, sideText } from './mermaidBlocks';
 import { sanitizeMarkdownHtml } from './markdownHtml';
 
+/** A fixed nonce: these tests are about the card, not about the anchors on it. */
+const NONCE = 'b3f1c0de-0000-4000-8000-000000000000';
+
 const DIAGRAM = `graph TD
   A[Start] --> B{Choice}
   B -->|yes| C[Do it]
@@ -27,7 +30,7 @@ const doc = (diagram: string, prose = 'Some prose.'): string =>
 
 /** Run the real pipeline, then parse it the way the card does. */
 function rendered(before: string, after: string): HTMLElement {
-  const comparison = compareMarkdown(before, after);
+  const comparison = compareMarkdown(before, after, NONCE);
   expect(comparison.status).toBe('ok');
   const host = document.createElement('div');
   host.innerHTML = sanitizeMarkdownHtml(comparison.unsafeHtml ?? '');

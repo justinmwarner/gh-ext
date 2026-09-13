@@ -54,7 +54,7 @@ function Harness({ body = 'This allocates once per row.' }: { body?: string }) {
           void session.postThread({
             path: 'src/app.ts',
             body,
-            anchor: { line: 12, side: 'RIGHT' },
+            anchor: { subject: 'line', line: 12, side: 'RIGHT' },
           });
         }}
       >

@@ -61,7 +61,7 @@ function Harness() {
           void session.postThread({
             path: 'src/app.ts',
             body: 'a comment',
-            anchor: { line: 2, side: 'RIGHT' },
+            anchor: { subject: 'line', line: 2, side: 'RIGHT' },
           });
         }}
       >

@@ -18,12 +18,15 @@ import type { ReactNode } from 'react';
 import { type CodeViewItem, parsePatchFiles } from '@pierre/diffs';
 import { CodeView } from '@pierre/diffs/react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { browser } from 'wxt/browser';
 import { ADD_THREAD, START_REVIEW } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore } from '@/lib/review/drafts';
 import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
+import { fileAnchor } from '@/lib/review/selection';
+import { MODE_MEMORY_KEY } from '@/lib/settings';
 import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
 import { request } from './background';
 import { fileDiffFor, fileDiffSignature } from './diffItems';
@@ -117,11 +120,30 @@ function Poster({ line }: { line: number }) {
         void session.postThread({
           path: 'src/app.ts',
           body: 'Written before the diff moved.',
-          anchor: { line, side: 'RIGHT' },
+          anchor: { subject: 'line', line, side: 'RIGHT' },
         });
       }}
     >
       post off-hunk
+    </button>
+  );
+}
+
+/** The same, for a comment that is about the file and names no line at all. */
+function FilePoster() {
+  const session = useReviewSession();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void session.postThread({
+          path: 'src/app.ts',
+          body: 'The introduction reads as if it were still a draft.',
+          anchor: fileAnchor(),
+        });
+      }}
+    >
+      post on file
     </button>
   );
 }
@@ -1090,6 +1112,36 @@ describe('starting a comment from the gutter', () => {
     expect(document.querySelectorAll('[data-posting]')).toHaveLength(1);
   });
 
+  it('lists a comment in flight that is about the file and not a line', async () => {
+    // The body is where such a comment belongs rather than where it ended up:
+    // its thread will arrive `subjectType: FILE` and be listed in the same
+    // place. What is being guarded against is the sentence above it, which
+    // names a line number — a comment that has none must not be introduced as
+    // having been written on line `undefined`.
+    requestMock.mockReturnValue(new Promise(() => {}));
+    mount(
+      [file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })],
+      {},
+      [],
+      <FilePoster />,
+    );
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'post on file' }));
+    });
+
+    const listed = document.querySelector('[data-unplaceable-posting="src/app.ts"]');
+    expect(listed?.textContent).toContain('on the file as a whole');
+    expect(listed?.textContent).not.toContain('undefined');
+    // The words `threadPosition` will use for the thread that replaces it.
+    expect(listed?.textContent).toContain('Whole file');
+    expect(
+      screen.getByText('The introduction reads as if it were still a draft.'),
+    ).toBeDefined();
+    expect(document.querySelectorAll('[data-posting]')).toHaveLength(1);
+  });
+
   it('explains a drag across both sides instead of posting it', async () => {
     // Pierre hands back `{ side: 'deletions', endSide: 'additions' }` for this
     // gesture. GitHub has no way to express such a comment, so the reviewer is
@@ -1762,5 +1814,65 @@ describe('DiffColumn, folding generated files', () => {
     expect(
       within(card(BUNDLE)).queryByRole('button', { name: /whitespace/i }),
     ).toBeNull();
+  });
+});
+
+describe('remembering how markdown is compared', () => {
+  // The fake storage area in ui/testSetup.ts lives on globalThis for the whole
+  // file. Without this, the first test here decides what every later test in
+  // the file sees, and the failure names the wrong test.
+  afterEach(async () => {
+    await browser.storage.local.remove(MODE_MEMORY_KEY);
+  });
+
+  const pressed = (path: string, label: string): string | null =>
+    within(card(path)).getByRole('button', { name: label }).getAttribute('aria-pressed');
+
+  it('pressing a mode on one markdown card flips the others', async () => {
+    mount([
+      file({ path: 'docs/a.md' }),
+      file({ path: 'docs/b.md' }),
+      file({ path: 'assets/logo.png', isBinary: true }),
+    ]);
+    // Settles the column's opening read of the preference, which resolves a
+    // tick after mount, so what is asserted below is the press rather than a
+    // race with it.
+    //
+    // It is no longer load-bearing: a press made inside that tick used to be
+    // undone by the read finishing, and `useModeMemory` now marks itself
+    // superseded so the reviewer's own action outranks a read issued before
+    // they took it. `ui/useModeMemory.test.tsx` pins that directly.
+    await act(async () => {});
+
+    fireEvent.click(within(card('docs/a.md')).getByRole('button', { name: 'Raw' }));
+
+    for (const path of ['docs/a.md', 'docs/b.md']) {
+      await waitFor(() => {
+        expect(pressed(path, 'Raw')).toBe('true');
+      });
+    }
+
+    // The rule is Markdown-only. An image in the same column must not move.
+    expect(pressed('assets/logo.png', 'Side by side')).toBe('true');
+  });
+
+  it('a per-file choice on an unremembered kind still stands alone', async () => {
+    mount([
+      file({ path: 'assets/a.png', isBinary: true }),
+      file({ path: 'assets/b.png', isBinary: true }),
+    ]);
+
+    fireEvent.click(within(card('assets/a.png')).getByRole('button', { name: 'Onion skin' }));
+
+    expect(pressed('assets/b.png', 'Side by side')).toBe('true');
+  });
+
+  it('a remembered mode decides how the next review opens', async () => {
+    await browser.storage.local.set({ [MODE_MEMORY_KEY]: { markdown: 'raw' } });
+    mount([file({ path: 'docs/a.md' })]);
+
+    await waitFor(() => {
+      expect(pressed('docs/a.md', 'Raw')).toBe('true');
+    });
   });
 });

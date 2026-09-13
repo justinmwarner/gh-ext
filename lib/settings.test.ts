@@ -11,8 +11,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
+  EMPTY_MODE_MEMORY,
   autoOpenAvailable,
   isOpenIn,
+  parseModeMemory,
   parseSettings,
 } from './settings';
 
@@ -201,6 +203,62 @@ describe('how a diff is drawn', () => {
     expect(parseSettings({ splitView: true, ignoreWhitespace: 'yes' })).toEqual({
       ...DEFAULT_SETTINGS,
       splitView: true,
+    });
+  });
+});
+
+describe('parseModeMemory', () => {
+  // `markdown:rendered` rather than `raw`, which every kind offers and which
+  // would therefore pass against an implementation asking `modesFor` about the
+  // wrong kind entirely. It also pins the decision the function argues for: a
+  // `needsBothSides` mode is accepted here and narrowed per file later, so a
+  // later "tightening" that rejected it at this altitude would fail.
+  it('reads a remembered markdown mode', () => {
+    expect(parseModeMemory({ markdown: 'markdown:rendered' })).toEqual({
+      markdown: 'markdown:rendered',
+    });
+  });
+
+  it.each([null, undefined, 'raw', 42, []])('falls back on %p', (raw) => {
+    expect(parseModeMemory(raw)).toEqual({});
+  });
+
+  // `toEqual({})` is true of the shared constant as well, so without this the
+  // fallback could go back to handing every caller the same object and no test
+  // would notice.
+  it('falls back on a fresh object rather than the shared one', () => {
+    expect(parseModeMemory(null)).not.toBe(EMPTY_MODE_MEMORY);
+  });
+
+  // Pins intent rather than catching a regression, and is worth having for
+  // that: the mode id check below shadows this one behaviourally, since no
+  // number or null can match an id, so deleting the `typeof` guard would break
+  // the types and no test. What the guard says is that a stored value of the
+  // wrong shape is an ordinary thing to find rather than a reason to throw.
+  it.each([42, null])('drops the non-string value %p', (mode) => {
+    expect(parseModeMemory({ markdown: mode })).toEqual({});
+  });
+
+  // A kind this build does not remember, written by a later one.
+  it('drops a kind that is not remembered', () => {
+    expect(parseModeMemory({ image: 'image:swipe' })).toEqual({});
+  });
+
+  // A mode id from a later build, or one that has since been withdrawn.
+  it('drops an unknown mode id', () => {
+    expect(parseModeMemory({ markdown: 'markdown:side-by-side' })).toEqual({});
+  });
+
+  // A real mode, but not one this kind offers. Storing it would put a control
+  // on the card that the file cannot answer.
+  it('drops a mode belonging to another kind', () => {
+    expect(parseModeMemory({ markdown: 'image:swipe' })).toEqual({});
+  });
+
+  // Per field, like parseSettings: one bad entry must not discard a good one.
+  it('keeps a good entry beside a bad one', () => {
+    expect(parseModeMemory({ markdown: 'raw', image: 'nonsense' })).toEqual({
+      markdown: 'raw',
     });
   });
 });

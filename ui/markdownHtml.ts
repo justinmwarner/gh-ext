@@ -29,6 +29,7 @@
  */
 
 import DOMPurify from 'dompurify';
+import { ANCHOR_ATTRIBUTE } from '@/lib/compare/markdownAnchors';
 
 /**
  * Elements removed on top of DOMPurify's defaults.
@@ -101,16 +102,36 @@ const PURIFY_CONFIG = {
   FORBID_TAGS: FORBIDDEN_TAGS,
   FORBID_ATTR: FORBIDDEN_ATTRIBUTES,
   /**
-   * No `data-*`.
+   * No `data-*`, with one name excepted below.
    *
-   * This page finds things by data attribute and then acts on what it finds:
-   * `DiffColumn` locates a thread with `querySelectorAll('[data-thread]')`, and
-   * `Shell` locates a reply box with `querySelector('[data-reply-for="…"]')`
-   * and casts the result to a textarea. Either of those pointed at an element a
-   * pull request supplied is a bug with no script in it anywhere, and a
-   * rendered README has no legitimate use for one.
+   * What the rule protects is not the prefix, it is a handful of specific
+   * queries this page runs and then *acts* on the result of: `DiffColumn`
+   * locates a thread with `querySelectorAll('[data-thread]')`, and `Shell`
+   * locates a reply box with `querySelector('[data-reply-for="…"]')` and casts
+   * the result to a textarea. Either of those pointed at an element a pull
+   * request supplied is a bug with no script in it anywhere.
+   *
+   * `ADD_ATTR` admits exactly one name, `data-md-anchor`, which the rendered
+   * Markdown mode writes on every block so that a comment can name the line the
+   * block came from. Neither query above can be reached through it: they match
+   * on their own names, matched whole, and this list has one entry that is
+   * neither of them. Verified, because "surely `ADD_ATTR` respects
+   * `ALLOW_DATA_ATTR`" is exactly the kind of belief that turns out to be
+   * upside down — there is a test asserting that `data-thread` is still
+   * stripped with this set.
+   *
+   * **Whether the attribute survives and whether it can be believed are two
+   * questions, and this file answers only the first.** A `.md` file may write
+   * `data-md-anchor` into its own raw HTML and, from here on, that attribute
+   * reaches the page. What stops a forged one redirecting a reviewer's comment
+   * to a line the author chose is that its value has to bear a nonce minted at
+   * render time; `lib/compare/markdownAnchors.ts` has the argument and refuses
+   * anything else. Anyone widening this list owes both answers again: what
+   * query does the new name reach, and what makes its value trustworthy once it
+   * is through.
    */
   ALLOW_DATA_ATTR: false,
+  ADD_ATTR: [ANCHOR_ATTRIBUTE],
 };
 
 /**

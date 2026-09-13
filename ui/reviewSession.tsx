@@ -1045,19 +1045,40 @@ export function ReviewSessionProvider({
     return opened;
   }, [findOpenReview, openReview]);
 
+  /**
+   * Both shapes of comment, told apart by what is left out.
+   *
+   * The rule is the same one `ADD_THREAD` documents and it is why the file case
+   * works at all: an unsupplied variable is dropped from the coerced input,
+   * whereas an explicit null is sent as a null. A thread about the file has no
+   * line and no side, and GitHub reads their *absence* beside
+   * `subjectType: FILE`; sending `line: null` would be a statement about a line
+   * rather than silence about one.
+   *
+   * `subjectType` is left unsupplied for a line comment, which is what every
+   * comment this page has ever posted did — and every one of them came back a
+   * LINE thread, so GitHub's default is not in doubt. Sending `'LINE'`
+   * explicitly would make the two branches symmetric and state on the wire what
+   * the request means, which is a real argument. It loses to the fact that
+   * `line` and `side` already state it: a second field carrying the same fact
+   * is a field that can contradict the first, and adding it would change every
+   * request the existing path makes in order to change nothing.
+   */
   const addThread = useCallback(
     (reviewId: string, { path, body, anchor }: NewThreadInput) =>
       mutate(ADD_THREAD, {
         pullRequestReviewId: reviewId,
         path,
         body,
-        line: anchor.line,
-        side: anchor.side,
-        // Left out entirely rather than sent null: an unsupplied variable is
-        // dropped from the coerced input, an explicit null is sent as a null.
-        ...(anchor.startLine !== undefined && anchor.startSide !== undefined
-          ? { startLine: anchor.startLine, startSide: anchor.startSide }
-          : {}),
+        ...(anchor.subject === 'file'
+          ? { subjectType: 'FILE' }
+          : {
+              line: anchor.line,
+              side: anchor.side,
+              ...(anchor.startLine !== undefined && anchor.startSide !== undefined
+                ? { startLine: anchor.startLine, startSide: anchor.startSide }
+                : {}),
+            }),
       }),
     [mutate],
   );
@@ -1236,16 +1257,18 @@ export function ReviewSessionProvider({
    *
    * The composer writes the draft before handing the comment over and no
    * longer waits around to clear it, so clearing it is this file's job now.
-   * Built from the same three fields the composer used, which is what makes
-   * the two agree — see `draftKey`.
+   * Built out of the same fields the composer used, which is what makes the
+   * two agree — see `draftKey`.
+   *
+   * Total, where it used to answer null for a comment about the file. That
+   * null was a statement that file drafts had no storage key, and the
+   * rendered Markdown view — which writes one every time a reviewer comments
+   * on a block outside the diff — is why they now do. Left as it was, every
+   * such comment would keep its draft after GitHub had the comment, and the
+   * next composer on that file would open holding words already posted.
    */
   const draftFor = useCallback(
-    ({ path, anchor }: NewThreadInput): DraftLocation => ({
-      prId,
-      path,
-      line: anchor.line,
-      side: anchor.side,
-    }),
+    ({ path, anchor }: NewThreadInput): DraftLocation => ({ prId, path, anchor }),
     [prId],
   );
 

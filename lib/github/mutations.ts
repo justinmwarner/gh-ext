@@ -50,6 +50,12 @@ const THREAD_FIELDS = `
  *
  * For a multi-line comment pass `startLine` + `startSide` alongside `line` +
  * `side`; for a single-line comment leave both `start*` variables unsupplied.
+ *
+ * The same rule is what makes a comment on the *file* expressible: pass
+ * `subjectType: FILE` and leave `line` and `side` out altogether. Sending them
+ * as nulls would be a statement about a line rather than silence about one.
+ * A line comment leaves `subjectType` unsupplied in turn — see `addThread` in
+ * `ui/reviewSession.tsx`, which argues that one.
  */
 export const ADD_THREAD = `mutation AddThread(
   $pullRequestId: ID

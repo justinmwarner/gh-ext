@@ -11,7 +11,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DraftStore, type KeyValueStore, draftKey } from '@/lib/review/drafts';
-import type { CommentAnchor } from '@/lib/review/selection';
+import type { LineAnchor } from '@/lib/review/selection';
 import { Composer, type ComposerProps } from './Composer';
 import { START_REVIEW } from '@/lib/github/mutations';
 import { request } from './background';
@@ -34,9 +34,9 @@ afterEach(() => {
 const PR_REF = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 const PR_ID = 'PR_kwDOABCD';
 
-const SINGLE: CommentAnchor = { line: 2, side: 'RIGHT' };
+const SINGLE: LineAnchor = { subject: 'line', line: 2, side: 'RIGHT' };
 
-const KEY = draftKey({ prId: PR_ID, path: 'src/app.ts', line: 2, side: 'RIGHT' });
+const KEY = draftKey({ prId: PR_ID, path: 'src/app.ts', anchor: SINGLE });
 
 const FAILURE = {
   ok: false,
@@ -123,7 +123,7 @@ describe('Composer', () => {
 
   it('names both ends of a multi-line selection', () => {
     mount({
-      anchor: { line: 9, side: 'RIGHT', startLine: 5, startSide: 'RIGHT' },
+      anchor: { subject: 'line', line: 9, side: 'RIGHT', startLine: 5, startSide: 'RIGHT' },
     });
 
     expect(screen.getByText(/lines 5-9/i)).toBeDefined();
@@ -131,7 +131,9 @@ describe('Composer', () => {
 
   it('sends the start fields for a multi-line comment', async () => {
     answersPublish();
-    mount({ anchor: { line: 9, side: 'RIGHT', startLine: 5, startSide: 'RIGHT' } });
+    mount({
+      anchor: { subject: 'line', line: 9, side: 'RIGHT', startLine: 5, startSide: 'RIGHT' },
+    });
 
     await userEvent.type(box(), 'a range comment');
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));

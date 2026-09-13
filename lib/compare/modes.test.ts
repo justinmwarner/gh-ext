@@ -16,6 +16,7 @@ import {
   changeSides,
   defaultModeFor,
   imageMediaType,
+  isRememberedKind,
   modeIndex,
   modesFor,
   modesForFile,
@@ -350,4 +351,20 @@ describe('markdown, which gets a rendered diff rather than a rendered preview', 
       comparisonKind(file({ path: '', oldPath: 'docs/old.md', changeType: 'DELETED' })),
     ).toBe('markdown');
   });
+});
+
+describe('isRememberedKind', () => {
+  it('remembers markdown', () => {
+    expect(isRememberedKind('markdown')).toBe(true);
+  });
+
+  // The argument in ModeSwitcher.tsx is specific to these: two images in one
+  // pull request are answering different questions, so a kind-wide preference
+  // would make each choice undo the last.
+  it.each(['image', 'svg', 'table', 'structured', 'notebook', 'none'] as const)(
+    'does not remember %s',
+    (kind) => {
+      expect(isRememberedKind(kind)).toBe(false);
+    },
+  );
 });

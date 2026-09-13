@@ -53,7 +53,7 @@ import type {
   LineAnnotation,
   SelectedLineRange,
 } from '@pierre/diffs';
-import { RAW, resolveModeForFile } from '@/lib/compare/modes';
+import { RAW, comparisonKind, isRememberedKind, resolveModeForFile } from '@/lib/compare/modes';
 import type { FileViewedState } from '@/lib/github/types';
 import type { DiffPayload } from '@/lib/messages';
 import type { AnchorableSides } from '@/lib/review/diffScope';
@@ -98,6 +98,7 @@ import {
   renderedLines,
   sourceLines,
 } from './reviewThreads';
+import { useModeMemory } from './useModeMemory';
 
 /**
  * Reading one file without its whitespace, on demand and never by default.
@@ -410,6 +411,14 @@ export function DiffColumn({
    * next moved four pixels and wants the difference blend. A single mode would
    * make each choice undo the last.
    *
+   * Markdown is the one kind that argument does not reach, and its mode lives in
+   * `modeMemory` instead: there are two modes, and which of them a reviewer
+   * wants is a fact about the reviewer rather than about the file. So a Markdown
+   * path is never written here, and `changeMode` keeps it that way rather than
+   * relying on it — the lookup below reads this map first, so an entry that did
+   * get in would outrank the preference and pin one card while its neighbours
+   * moved.
+   *
    * Sparse, and deliberately not seeded with every file's default. The default
    * is a function of the file, so writing it down would only create a second
    * copy to keep in step with the first — and the file list is replaced
@@ -419,6 +428,7 @@ export function DiffColumn({
   const [chosenModes, setChosenModes] = useState<ReadonlyMap<string, string>>(
     () => new Map(),
   );
+  const [modeMemory, rememberMode] = useModeMemory();
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
   const [expansionError, setExpansionError] = useState<string | null>(null);
@@ -575,8 +585,9 @@ export function DiffColumn({
    * A file marked viewed is the third, and it is the one that also fires
    * mid-review: ticking the box folds the card on the spot, and a reload finds
    * it folded because GitHub remembers the tick. It is not a persisted
-   * interface preference — nothing here persists one, see `ModeSwitcher` — it
-   * is read off the same state the checkbox draws itself from.
+   * interface preference — the one of those is the Markdown mode above, and
+   * `ModeSwitcher` argues for why it is allowed to be the only one — it is read
+   * off the same state the checkbox draws itself from.
    *
    * A file the rewrite merely *shortened* is not folded. There is still a diff
    * in it worth reading, and it is already marked.
@@ -791,6 +802,17 @@ export function DiffColumn({
       const listed: PostingComment[] = [];
 
       for (const entry of entries) {
+        // A comment about the file names no line, so there is no row to hang an
+        // annotation on. It goes in the body list, which is where its thread
+        // will appear once GitHub answers it — not a fallback, the same place.
+        // The alternative, skipping it, would take the reviewer's words off the
+        // screen for the length of the post, which is the single failure
+        // `lib/review/posting.ts` exists to prevent.
+        if (entry.anchor.subject === 'file') {
+          listed.push(entry);
+          continue;
+        }
+
         const side = entry.anchor.side === 'LEFT' ? 'deletions' : 'additions';
         const { line } = entry.anchor;
         // Expanded context counts, exactly as it does for a thread: those rows
@@ -861,18 +883,44 @@ export function DiffColumn({
   const modes = useMemo(() => {
     const built = new Map<string, string>();
     for (const file of files) {
-      built.set(file.path, resolveModeForFile(file, chosenModes.get(file.path)));
+      // Per-file first, then the remembered preference for the kind, then the
+      // file's own default. A remembered mode the file cannot offer — a one-sided
+      // `.md`, where `markdown:rendered` is `needsBothSides` — falls back inside
+      // `resolveModeForFile` rather than here.
+      const chosen = chosenModes.get(file.path) ?? modeMemory[comparisonKind(file)];
+      built.set(file.path, resolveModeForFile(file, chosen));
     }
     return built;
-  }, [files, chosenModes]);
+  }, [files, chosenModes, modeMemory]);
 
-  const changeMode = useCallback((path: string, mode: string) => {
-    setChosenModes((previous) => {
-      const next = new Map(previous);
-      next.set(path, mode);
-      return next;
-    });
-  }, []);
+  const changeMode = useCallback(
+    (path: string, mode: string) => {
+      const pressed = files.find((file) => file.path === path);
+      const kind = pressed === undefined ? 'none' : comparisonKind(pressed);
+
+      if (isRememberedKind(kind)) {
+        // The press is a preference rather than a choice about this one file, so
+        // the per-file entries for the kind are forgotten: left in place they
+        // would outrank the preference and the other cards would not move.
+        setChosenModes((previous) => {
+          const next = new Map(previous);
+          for (const file of files) {
+            if (comparisonKind(file) === kind) next.delete(file.path);
+          }
+          return next;
+        });
+        rememberMode(kind, mode);
+        return;
+      }
+
+      setChosenModes((previous) => {
+        const next = new Map(previous);
+        next.set(path, mode);
+        return next;
+      });
+    },
+    [files, rememberMode],
+  );
 
   /**
    * Which cards have something to put in a body besides a comparison.
@@ -1246,6 +1294,10 @@ export function DiffColumn({
             unanchored={layouts.get(file.path)?.listed ?? NO_LISTED}
             posting={postings.get(file.path)?.listed ?? NO_POSTING}
             blobs={blobs}
+            /* Derived from `sidesKey` rather than read off `sides`, which is a
+               fresh object every render — and this callback's identity decides
+               whether Pierre rebuilds every annotation row under it. */
+            anchorable={sidesKey === 'ad'}
           />
         );
       }
@@ -1270,6 +1322,7 @@ export function DiffColumn({
       layouts,
       postings,
       blobs,
+      sidesKey,
     ],
   );
 

@@ -28,6 +28,12 @@ import { splitBody } from './suggestion';
 
 /** Where it sits, in the same words `threadPosition` uses for a real thread. */
 export function postingPosition(entry: PostingComment): string {
+  // "Whole file" to the letter, because this card is replaced by a thread that
+  // will say exactly that — see `threadPosition`. Anything else here, however
+  // much better it read on its own, would change wording under the reviewer at
+  // the moment GitHub answers, which looks like the comment having moved.
+  if (entry.anchor.subject === 'file') return 'Whole file';
+
   const { line, startLine } = entry.anchor;
   return startLine !== undefined && startLine !== line
     ? `Lines ${startLine}-${line}`

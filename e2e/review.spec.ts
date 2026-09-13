@@ -2553,13 +2553,15 @@ test('a Mermaid diagram in a .md file is drawn rather than left as its source', 
   expect(first).toContain('Render');
 
   // The unchanged diagram folds its source away, because the source is then
-  // the picture written out longhand.
-  await expect(card.locator('pre.md-diagram-drawn')).toHaveCount(1);
+  // the picture written out longhand. The fold class is on the element holding
+  // the source rather than on the `<pre>`: a diagram's block is a picture and a
+  // source, and only the source half folds.
+  await expect(card.locator('.md-diagram-drawn pre')).toHaveCount(1);
 
   // The changed one keeps it, because a drawn diagram carries no marks and
   // the old version is not on screen — the marked-up source below it is the
   // only place the change is visible.
-  const kept = card.locator('pre.md-diagram-source');
+  const kept = card.locator('.md-diagram-source pre');
   await expect(kept).toHaveCount(1);
   await expect(kept.locator('ins')).toContainText('Accept');
   await expect(kept.locator('del')).toContainText('Reject');
@@ -2570,6 +2572,125 @@ test('a Mermaid diagram in a .md file is drawn rather than left as its source', 
   const second = await sourceOf(1);
   expect(second).toContain('Accept');
   expect(second).not.toContain('Reject');
+});
+
+/**
+ * Commenting on rendered Markdown, in a browser that lays the page out.
+ *
+ * The unit tests reach the button through the accessibility tree, which says
+ * nothing about whether a reviewer could get at it: the affordance is hidden
+ * until the block it belongs to is hovered, and jsdom applies no stylesheet, so
+ * "it is in the document" and "it can be pressed" are the same claim there and
+ * different claims here. The gutter it sits in is `padding-left` on the block,
+ * which is also only real once something is doing layout.
+ */
+test('a rendered Markdown block can be commented on', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+
+  const card = fileBody(page, MARKDOWN_FILE);
+  await expect(card.locator('.markdown-rendered')).toBeVisible();
+
+  // Every block, not most of them: a control missing from one paragraph reads
+  // as a defect, and a raw HTML block is the one that would be missing it.
+  const blocks = card.locator('.markdown-rendered > .markdown-block');
+  const buttons = card.locator('.markdown-rendered > .markdown-block > .markdown-comment');
+  expect(await buttons.count()).toBe(await blocks.count());
+
+  // Out of the way until it is wanted, and then there. Playwright counts an
+  // element at zero opacity as visible, so the reveal is asserted on the
+  // computed value — left to the click it would pass either way and say
+  // nothing about what a reviewer can see.
+  //
+  // The hover and the assertion retry together because the card is still
+  // settling: it draws two Mermaid diagrams after its first paint and the
+  // column re-measures around them, so a block can move out from under a
+  // pointer that was over it a moment ago. Hovering once and then waiting
+  // fails perhaps one run in two.
+  const first = blocks.first();
+  const button = first.locator('.markdown-comment');
+  await expect(button).toHaveCSS('opacity', '0');
+  await expect(async () => {
+    await first.hover();
+    await expect(button).toHaveCSS('opacity', '1', { timeout: 1000 });
+  }).toPass();
+
+  await button.click();
+
+  await expect(card.locator('.composer')).toBeVisible();
+  await expect(card.locator('.composer-input')).toBeFocused();
+});
+
+/**
+ * The other `.md` file in the column, and the one nothing here presses.
+ *
+ * Named here rather than in the fixture because nothing else wants it. Its
+ * whole job is to be a Markdown card the reviewer never touched, which is what
+ * tells a preference apart from a choice about one file. `MARKDOWN_FILE` is
+ * served real Markdown and this one is not, and that is fine: the claim made
+ * of it is about which button is pressed, not about what the body draws.
+ */
+const SECOND_MARKDOWN_FILE = 'docs/changelog.md';
+
+/**
+ * The Markdown mode, across a reload.
+ *
+ * The only honest check there is of it. The preference lives in
+ * `browser.storage.local`, and every unit test of that hands the code a fake —
+ * so "it persists" has so far been a claim about a `Map` in the test process
+ * rather than about a browser profile. The pair that has never run is the one
+ * that matters: a write from an extension page, and a read back by a page that
+ * was loaded from nothing.
+ */
+test('the markdown mode outlives the page', async ({ context, extensionId, api }) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Through the tree rather than by scrolling. The column virtualizes and this
+  // card is far enough down it that nothing has mounted it yet, so there is no
+  // card to scroll into view until a row puts one there.
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+  const raw = page
+    .locator(`[data-file-card="${MARKDOWN_FILE}"]`)
+    .getByRole('button', { name: 'Raw', exact: true });
+  // Scoped to the body, which is a separate element from the card — see
+  // `fileBody`. Looked for inside the card, `.markdown-rendered` is absent in
+  // either mode, and every assertion below would hold without testing one.
+  const prose = fileBody(page, MARKDOWN_FILE).locator('.markdown-rendered');
+
+  // Where a `.md` card opens when nobody has ever said otherwise.
+  await expect(raw).toHaveAttribute('aria-pressed', 'false');
+  await expect(prose).toBeVisible();
+
+  await raw.click();
+  await expect(raw).toHaveAttribute('aria-pressed', 'true');
+  await expect(prose).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator('.shell')).toBeVisible();
+  await page.locator(`[data-path="${MARKDOWN_FILE}"]`).click();
+
+  // Nothing was pressed on this page, and the card is raw anyway.
+  await expect(raw).toHaveAttribute('aria-pressed', 'true');
+  await expect(prose).toHaveCount(0);
+
+  // And so is the `.md` file that was never pressed on either page, which is
+  // the half a per-file memory would fail: remembering the *file* would bring
+  // this one back rendered and still satisfy everything above.
+  await page.locator(`[data-path="${SECOND_MARKDOWN_FILE}"]`).click();
+  await expect(
+    page
+      .locator(`[data-file-card="${SECOND_MARKDOWN_FILE}"]`)
+      .getByRole('button', { name: 'Raw', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('the syntax theme is the reviewer\'s, and choosing one lets it colour the diff', async ({

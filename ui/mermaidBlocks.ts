@@ -95,8 +95,15 @@ export function sideText(root: Node, drop: 'INS' | 'DEL'): string {
  * A non-breaking space the author typed themselves is rewritten too. Inside a
  * diagram that only ever appears in a label, where a plain space is what it
  * was standing in for anyway.
+ *
+ * Exported for `./markdownBlocks.ts`, which undoes the same substitution in
+ * the plain text of every block — the text that seeds the blockquote on a
+ * file-level comment. A non-breaking space the diff inserted is this pipeline's
+ * bookkeeping, and quoting it back to the author would be quoting a character
+ * nobody wrote. The same caveat as above applies and is the better trade: one
+ * an author typed is quoted as an ordinary space.
  */
-const undoNonBreakingSpaces = (text: string): string => text.replace(/ /g, ' ');
+export const undoNonBreakingSpaces = (text: string): string => text.replace(/ /g, ' ');
 
 /** Whether a `<code>` element is a Mermaid fence, however the lang was cased. */
 function isMermaidCode(code: Element): boolean {

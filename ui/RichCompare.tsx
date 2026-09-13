@@ -31,11 +31,12 @@ import { compareMarkdown } from '@/lib/compare/markdown';
 import { compareNotebooks, parseNotebook } from '@/lib/compare/notebook';
 import { compareStructured } from '@/lib/compare/structured';
 import { compareTables, delimiterFor, parseDelimited } from '@/lib/compare/tabular';
+import { commentableLines } from '@/lib/review/commentable';
 import type { BlobRefs } from './blobLoader';
 import { useImageSides, useTextSides } from './fileSides';
 import { ImageCompare, type ImageVariant } from './ImageCompare';
 import { JsonFormatted, JsonKeyPaths } from './JsonCompare';
-import { MarkdownCompare } from './MarkdownCompare';
+import { MarkdownCompare, type UnplacedComments } from './MarkdownCompare';
 import { NotebookCompare } from './NotebookCompare';
 import type { ReviewFile } from './reviewFiles';
 import { TableCompare } from './TableCompare';
@@ -65,9 +66,41 @@ export interface RichCompareProps {
    * than showing a control that never resolves.
    */
   refs: BlobRefs | null;
+  /**
+   * Whether a line number in the diff on screen means what a line number in the
+   * pull request's own diff means.
+   *
+   * False while a narrowed scope is showing, and it is the one thing here that
+   * cannot be got wrong quietly. The rendered Markdown view is built from the
+   * two commits `refs` names, so under a narrowed scope its blocks are lines of
+   * *that* compare — and `addPullRequestReviewThread` has nowhere to say which
+   * commit a line was counted in. A comment posted from such a block would look
+   * posted, on prose the reviewer never read. `lib/review/diffScope.ts` has the
+   * whole argument; `composerFor` refuses for the same reason one file over.
+   *
+   * A boolean rather than `AnchorableSides` because the object is rebuilt every
+   * render, and this one travels through a `renderAnnotation` callback whose
+   * identity decides whether Pierre rebuilds a row.
+   */
+  anchorable: boolean;
+  /**
+   * Where the rendered Markdown view sends the comments it has no block for.
+   *
+   * A pass-through and nothing more, but it is not optional at either end. The
+   * rendered view is the only thing that knows which lines its blocks cover,
+   * and a card whose body drops that answer on the floor is a card that never
+   * tells the reviewer a comment exists. `FileBody` owns the drawer it goes to.
+   */
+  onUnplaced: (unplaced: UnplacedComments) => void;
 }
 
-export function RichCompare({ file, mode, refs }: RichCompareProps) {
+export function RichCompare({
+  file,
+  mode,
+  refs,
+  anchorable,
+  onUnplaced,
+}: RichCompareProps) {
   const kind = comparisonKind(file);
   const sides = changeSides(file);
   const active = mode !== RAW.id && kind !== 'none' && refs !== null;
@@ -123,12 +156,35 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
   // Rendering and word-diffing two documents, which is the expensive step in
   // this file — see `HTML_DIFF_BUDGET`. Memoized on the two sides, so a
   // re-render caused by anything else on the card does not pay for it again.
+  //
+  // The nonce is minted here rather than in `lib/` because `lib/` is pure and
+  // has no source of randomness, and it is minted *inside the memo* so that it
+  // is exactly as stable as the document it stamps: one value for as long as
+  // the two sides do not move, a fresh one the moment they do. A nonce hoisted
+  // to module scope, or held in a ref for the life of the card, would be a
+  // value the reviewer's own browser has already put in the DOM once — and the
+  // whole of `markdownAnchors.ts` rests on a `.md` file never having seen the
+  // nonce its anchors will be checked against.
   const markdown = useMemo(
     () =>
       kind !== 'markdown' || text.status !== 'ready'
         ? null
-        : compareMarkdown(text.before, text.after),
+        : compareMarkdown(text.before, text.after, crypto.randomUUID()),
     [kind, text.status, text.before, text.after],
+  );
+
+  /**
+   * Which lines of this file a comment on a rendered block could name.
+   *
+   * Empty when the diff on screen is not the pull request's own, which is not a
+   * degradation so much as the honest answer: every block then falls back to a
+   * file-level comment, and a file-level comment names no line and is right in
+   * any scope. Memoized because the walk is over the whole patch and a document
+   * of several hundred blocks asks the result one question each.
+   */
+  const commentable = useMemo(
+    () => (anchorable ? commentableLines(file.patch) : new Set<string>()),
+    [anchorable, file.patch],
   );
 
   const notebook = useMemo(() => {
@@ -211,7 +267,14 @@ export function RichCompare({ file, mode, refs }: RichCompareProps) {
   }
 
   if (markdown !== null) {
-    return <MarkdownCompare comparison={markdown} />;
+    return (
+      <MarkdownCompare
+        comparison={markdown}
+        path={file.path}
+        commentable={commentable}
+        onUnplaced={onUnplaced}
+      />
+    );
   }
 
   return null;

@@ -3,21 +3,34 @@
  *
  * Three properties, and each is a decision rather than a default.
  *
- * **Per file, not per type.** Two images in the same pull request can be in
- * different modes at once, because they are answering different questions: one
- * was redrawn and wants side-by-side, the next moved four pixels and wants the
- * difference blend. A single global mode would make the second reviewer action
- * undo the first.
+ * **Per file for most kinds, per kind for Markdown.** Two images in the same
+ * pull request can be in different modes at once, because they are answering
+ * different questions: one was redrawn and wants side-by-side, the next moved
+ * four pixels and wants the difference blend. A single global mode would make
+ * the second reviewer action undo the first.
  *
- * **It remembers nothing.** This page persists no interface state anywhere —
- * not the rail width, not a fold the reviewer made by hand — and a mode that
- * survived a reload would be the one exception, silently deciding what the
- * reviewer sees on a file they have never opened.
+ * Markdown is the exception, and the exception is narrow because the argument
+ * above does not reach it. There are two modes, and which one a reviewer wants
+ * is a fact about the reviewer rather than about the change — some people read
+ * prose changes as rendered documents and some read them as source. So a press
+ * on a `.md` card sets a preference for every `.md` card and persists it.
+ * `lib/compare/modes.ts` names the kinds this is true of.
  *
- * A file marked viewed does open folded across a reload, and that is not a
- * counter-example: nothing about it is stored here. It is read off GitHub's
- * own viewed state, the same state the checkbox beside this draws itself
- * from, which is also why unticking the box on github.com unfolds it here.
+ * **What it remembers is a view, never a concealment.** The page persists no
+ * other interface state — not the rail width, not a fold made by hand — and
+ * the objection to persisting any of it was that a preference set last Tuesday
+ * would silently decide what a reviewer sees on a file they have never opened.
+ * That objection is answered here rather than ignored: both Markdown modes show
+ * the whole change, Raw is always present and always last, and it is one press
+ * away on the card already on screen. Contrast `ignoreWhitespace` in
+ * `lib/settings.ts`, which *hides lines* and therefore needed an options-page
+ * home under a sentence saying what it hides. This does not, and must not grow
+ * into something that does.
+ *
+ * A file marked viewed does open folded across a reload, and that is still not
+ * a counter-example: nothing about it is stored here. It is read off GitHub's
+ * own viewed state, the same state the checkbox beside this draws itself from,
+ * which is also why unticking the box on github.com unfolds it here.
  *
  * **Plain buttons, each its own tab stop.** A roving-tabindex radio group would
  * be one stop per file rather than one per mode, which is tidier to tab

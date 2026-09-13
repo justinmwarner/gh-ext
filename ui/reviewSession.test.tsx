@@ -23,6 +23,10 @@ import {
 } from '@/lib/github/mutations';
 import type { ReviewThread } from '@/lib/github/types';
 import { DraftStore, type KeyValueStore, draftKey } from '@/lib/review/drafts';
+import { type LineAnchor, fileAnchor } from '@/lib/review/selection';
+
+/** The line every draft assertion in this file is about. */
+const LINE_TWO: LineAnchor = { subject: 'line', line: 2, side: 'RIGHT' };
 import { request } from './background';
 import { memoryStore } from './memoryStore.fixture';
 import { pullRequestNode, reviewComment, reviewThread } from './prPayload.fixture';
@@ -43,7 +47,7 @@ beforeEach(() => {
 
 const PR_REF = { owner: 'acme', repo: 'widgets', number: 42 } as const;
 
-const ANCHOR = { line: 2, side: 'RIGHT' } as const;
+const ANCHOR = { subject: 'line', line: 2, side: 'RIGHT' } as const;
 
 /** Drives the session directly, so the plumbing is what is under test. */
 function Harness() {
@@ -61,6 +65,18 @@ function Harness() {
         }}
       >
         post
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void session.postThread({
+            path: 'src/app.ts',
+            body: 'a comment on the file',
+            anchor: fileAnchor(),
+          });
+        }}
+      >
+        post on file
       </button>
       <button
         type="button"
@@ -405,7 +421,7 @@ describe('a comment on its way', () => {
 
   it('is gone once GitHub has it, and so is its draft', async () => {
     const store = memoryStore({
-      [draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', line: 2, side: 'RIGHT' })]:
+      [draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', anchor: LINE_TWO })]:
         'a comment',
     });
     answerByDocument();
@@ -419,7 +435,7 @@ describe('a comment on its way', () => {
     await waitFor(async () => {
       expect(
         await store.get(
-          draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', line: 2, side: 'RIGHT' }),
+          draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', anchor: LINE_TWO }),
         ),
       ).toBeNull();
     });
@@ -466,12 +482,7 @@ describe('a comment on its way', () => {
   });
 
   it('discards a failed comment, and its draft with it', async () => {
-    const key = draftKey({
-      prId: 'PR_kwDOABCD',
-      path: 'src/app.ts',
-      line: 2,
-      side: 'RIGHT',
-    });
+    const key = draftKey({ prId: 'PR_kwDOABCD', path: 'src/app.ts', anchor: LINE_TWO });
     const store = memoryStore({ [key]: 'a comment' });
     answerByDocument({ [START_REVIEW]: REFUSED });
     mount({}, [reviewThread({ path: 'src/app.ts', line: 2 })], store);
@@ -663,6 +674,48 @@ describe('postThread', () => {
         expect('startLine' in variablesOf(0)).toBe(false);
         expect('startSide' in variablesOf(0)).toBe(false);
       });
+  });
+
+  it('sends a line comment as the whole request, and nothing else', async () => {
+    // The half of the file-comment change that had to stay still. Every comment
+    // ever posted from this page goes down this branch, so the assertion is the
+    // entire variables object rather than the fields that interest today —
+    // `subjectType` included, which is absent here and must stay absent.
+    requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
+    mount({ viewerLatestReview: { id: 'PRR_pending', state: 'PENDING' } });
+
+    await userEvent.click(screen.getByRole('button', { name: 'post' }));
+
+    await waitFor(() => expect(requestMock).toHaveBeenCalled());
+    expect(variablesOf(0)).toEqual({
+      pullRequestReviewId: 'PRR_pending',
+      path: 'src/app.ts',
+      body: 'a comment',
+      line: 2,
+      side: 'RIGHT',
+    });
+  });
+
+  it('sends a comment about the file with no line to be wrong about', async () => {
+    requestMock.mockResolvedValue({ ok: true, data: { data: {} } });
+    mount({ viewerLatestReview: { id: 'PRR_pending', state: 'PENDING' } });
+
+    await userEvent.click(screen.getByRole('button', { name: 'post on file' }));
+
+    await waitFor(() => expect(requestMock).toHaveBeenCalled());
+    expect(variablesOf(0)).toEqual({
+      pullRequestReviewId: 'PRR_pending',
+      path: 'src/app.ts',
+      body: 'a comment on the file',
+      subjectType: 'FILE',
+    });
+    // Said again with `in`, which `toEqual` cannot say: the two must be missing
+    // from the variables rather than present and undefined. GitHub drops an
+    // unsupplied variable from the coerced input and sends an explicit null as
+    // a null, and a null `line` is a claim about a line rather than silence
+    // about one.
+    expect('line' in variablesOf(0)).toBe(false);
+    expect('side' in variablesOf(0)).toBe(false);
   });
 
   it('adds the thread GitHub returned so the reviewer sees it at once', async () => {

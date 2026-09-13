@@ -5,7 +5,8 @@ PR data. Every query, enum, and input shape below was executed or introspected �
 none of it is recalled or inferred.
 
 Validation targets: `pierrecomputer/pierre#1` (query shape),
-`microsoft/vscode#333811` (real threads, 40 check contexts, an outdated thread).
+`microsoft/vscode#333811` (real threads, 40 check contexts, an outdated thread),
+`justinmwarner/gh-ext#1` (mutation behaviour, 2026-09-12).
 
 ---
 
@@ -50,6 +51,18 @@ three during re-review.
 
 Threads are `LINE` or `FILE`. File-level threads have no meaningful line anchor
 and must render in a per-file header region, not in the diff body.
+
+GitHub nevertheless returns `line: 1` and `originalLine: 1` on a thread created
+with `subjectType: FILE` — **not** null (executed 2026-09-12, below). So
+`subjectType` has to be tested *before* `line`, or a whole-file comment anchors
+to the first line of the file and is drawn against whatever is there.
+
+### A line outside the diff is HTTP 200 with a `null` thread
+
+`addPullRequestReviewThread` does not create the thread and does not say so.
+There is no `errors` array and no HTTP error — the response is a success
+carrying nothing. Any caller that reads `ok` as "posted" loses the comment
+without a message. Executed 2026-09-12; §4 has the responses and the method.
 
 ---
 
@@ -231,6 +244,42 @@ exclusive in practice.
 
 For a multi-line comment set `startLine` + `startSide` alongside `line` + `side`.
 For single-line, omit the `start*` fields.
+
+> **Executed 2026-09-12.** Whether a `line` outside the diff is refused had been
+> asserted from general knowledge and never run. It is refused — and the shape of
+> the refusal is worse than the assumption it replaces.
+>
+> Target: `justinmwarner/gh-ext#1`, file `diff-fixtures/docs/guide.md`, whose
+> two hunks cover lines 1–6 and 12–18 on `RIGHT`. So lines 7–11 are real lines
+> of the head file that no hunk contains.
+>
+> | Sent | Response |
+> |---|---|
+> | `line: 9`, `side: RIGHT` — a real line, outside every hunk | `200` `{"data":{"addPullRequestReviewThread":{"thread":null}}}` |
+> | `line: 999` — past the end of the file | identical |
+> | `line: 3` — inside the first hunk (control) | `thread { line: 3, originalLine: 3, diffSide: RIGHT, isOutdated: false }` |
+> | `subjectType: FILE`, no `line` | `thread { line: 1, originalLine: 1, subjectType: FILE }` |
+>
+> **There is no `errors` array.** Not a 422, not a GraphQL error, not a null
+> `data` — HTTP 200 with `data` fully populated and `thread` set to `null`. The
+> comment is simply not created, and nothing in the response says a word about
+> it. That is the same failure shape §8 describes for a denied field, and it
+> breaks the same naive code: `publishThread` in `ui/reviewSession.tsx` treats a
+> 200 with no errors as "the comment reached GitHub", reads the thread out, gets
+> null, and goes on to submit the review it opened — so the reviewer is told
+> their comment posted and it exists nowhere.
+>
+> This is what makes `commentableLines` in `lib/review/commentable.ts` load
+> bearing rather than tidy. It is the only thing standing between a reviewer
+> commenting on rendered prose outside a hunk and a comment that vanishes in
+> silence; the file-level fallback beside it is not a nicety either.
+>
+> **Method, since this file writes to a real pull request.** Every attempt went
+> into a `PENDING` review opened for the probe with `addPullRequestReview` and
+> destroyed afterwards with `deletePullRequestReview`. A pending review is
+> visible to nobody but its author and sends no notification, so nothing was
+> ever published and the pull request's four reviews and three threads were
+> unchanged before and after. Repeat it that way.
 
 ### Reply — `addPullRequestReviewThreadReply`
 

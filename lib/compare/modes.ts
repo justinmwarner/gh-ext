@@ -439,3 +439,37 @@ export function modeIndex(id: string): number {
 
 /** How many distinct indices `modeIndex` can return. */
 export const MODE_SLOTS = ALL_MODE_IDS.length;
+
+/**
+ * The kinds whose mode is a preference rather than a per-file choice.
+ *
+ * Markdown alone, and the narrowness is the point. `ui/ModeSwitcher.tsx`
+ * argues for per-file modes with a case that is true of every other kind here:
+ * two images in one pull request want different modes, because one was redrawn
+ * and wants side by side while the next moved four pixels and wants the
+ * difference blend. A kind-wide preference makes the second choice undo the
+ * first.
+ *
+ * Markdown is the exception because the choice is a property of the reader
+ * rather than of the change. There are two modes, some people read prose
+ * changes as rendered documents and some read them as source, and nobody
+ * changes their mind about that per file.
+ */
+const REMEMBERED_KINDS: ReadonlySet<ComparisonKind> = new Set<ComparisonKind>(['markdown']);
+
+/**
+ * Takes a `string` and narrows it, rather than taking a `ComparisonKind`.
+ *
+ * The caller that matters reads keys off stored JSON, where every key is a
+ * `string`, so a signature demanding a `ComparisonKind` would make it assert
+ * the very thing it is calling this to find out — and then assert it twice more
+ * further down the loop. `isOpenIn` and `isDiffTheme` are both written this way
+ * for the same reason, and `parseSettings` reads a whole stored object without
+ * a cast because they are.
+ */
+export function isRememberedKind(kind: string): kind is ComparisonKind {
+  // The only cast, and it is contained: `Set.prototype.has` accepts anything,
+  // and this set holds nothing but real kinds, so a false answer is the honest
+  // one for every string that is not one.
+  return REMEMBERED_KINDS.has(kind as ComparisonKind);
+}
