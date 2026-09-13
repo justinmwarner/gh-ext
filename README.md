@@ -221,8 +221,11 @@ how to validate a mutation without performing one.
 ## Known limits
 
 - The pull request description renders as plain text; formatting is lost. The
-  overview panel links to GitHub for the formatted version. This is the cost of
-  taking neither a Markdown renderer nor a sanitizer as a dependency.
+  overview panel links to GitHub for the formatted version. That used to be the
+  cost of taking neither a Markdown renderer nor a sanitizer as a dependency;
+  the rendered Markdown mode brought both, so the cost is gone and what is left
+  is a description nobody has moved onto them. GitHub sends it pre-rendered as
+  `bodyHTML`, so the move would need the sanitizer alone.
 - Applying a suggestion is not supported — GitHub exposes no public endpoint for
   it. Authoring and rendering suggestions are.
 - Discarding a pending review is wired but hidden behind `SHOW_DISCARD` in
