@@ -680,6 +680,13 @@ files as `.txt` so that it goes on testing what it was built to test; the
 consequence is that **the Markdown mode has no browser coverage**, which is the
 main thing worth fixing about it once B lands.
 
+**Closed on 2026-09-12**, by the branch that made rendered prose commentable.
+The fixture's `docs/` entries are real `.md` files now — `docs/readme.md` opens
+on the rendered diff and is in `FILES` deliberately, so that a rich card sits in
+the middle of the column and a regression in the tail is caught here rather than
+by a reviewer who cannot reach the last file. `e2e/review.spec.ts` carries four
+Markdown specs against the production build.
+
 **Fixed on 2026-09-05.** `lib/review/columnTail.ts` sizes `.column-tail` to
 cover the shortfall, on the one element whose height the viewer does measure.
 Two things were learned doing it, both from the shipped package and neither

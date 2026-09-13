@@ -520,6 +520,10 @@ jsdom, under `ui/`:
 - Strikethrough renders as `<s>` and is not painted as a deletion.
 - A thread on a line inside a block renders under that block; an outdated one
   stays in the drawer.
+- A thread on a line *between* two blocks — a blank separator, or a line inside
+  a raw `html_block` — reaches the drawer rather than nowhere. Driven through
+  the whole column, because the defect is in the join between two halves that
+  are each individually correct: `ui/comparisonModes.test.tsx`.
 - The file-level composer says so, and seeds its blockquote.
 - The mode preference flips sibling cards and survives a remount.
 
@@ -529,9 +533,11 @@ Playwright, against the production build:
   file-level, with GitHub mocked at the service worker.
 - The mode preference surviving a reload and a second pull request.
 
-§5 of the comparison spec records that the rendered Markdown mode has **no
-browser coverage** today. It should not stay that way through a change this
-size.
+§5 of the comparison spec records that the rendered Markdown mode had **no
+browser coverage**. That is now out of date, and this branch is what dated it:
+`e2e/review.spec.ts` carries four specs against the production build — the prose
+is marked and none of it executes, a diagram is drawn rather than left as
+source, a block can be commented on, and the mode outlives the page.
 
 ---
 
@@ -543,7 +549,8 @@ size.
    200, no `errors`, `thread: null`. §4 of `docs/reference/github-review-api.md`
    has the four responses and the method; §7 above says what it means here.
 2. **UNVERIFIED** — `markdown-it` advisory history and behaviour on pathological
-   inputs, to the standard §3.7 applied to `marked`.
+   inputs, to the standard §3.7 applied to `marked`. Still open, and the only
+   item on this list that was open when the branch started and still is.
 3. ~~**UNVERIFIED** — per-block sanitising equals whole-document sanitising.~~
    **Closed on 2026-09-12.** Twenty-seven shapes compared structurally, all
    identical, both directions mutation-checked. §6 has the detail.
@@ -551,3 +558,14 @@ size.
    2026-09-12.** Re-measured with `npx wxt build` at `04ad174^` and `04ad174`:
    **+28,252 B gzipped**, 222 bytes under the estimate and no stylesheet cost at
    all. §4 has the table and the figures for the rest of the branch.
+5. **Opened on 2026-09-12, by closing item 1.** A comment on an *expanded
+   context* line may be lost the same silent way, and nothing on that path
+   checks. `composerFor` in `ui/composerAnchor.ts` has three refusals —
+   cross-side, invalid range, other-commit — and none of them asks whether the
+   line is one the patch contains. Expanding unchanged context puts exactly such
+   rows under a gutter, and the probe refused a line three rows outside a hunk
+   with HTTP 200 and `thread: null`. Whether GitHub takes *any* expanded line is
+   not settled by that one probe; github.com's own interface offers the gesture,
+   so it may send something other than a bare `line`. Execute it, and if it
+   refuses, `commentableLines` is already the predicate that would guard it.
+   Outside this feature's scope and larger than it.
