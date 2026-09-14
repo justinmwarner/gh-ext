@@ -392,7 +392,7 @@ const anchorSignature = (thread: {
  * reviewer who has started scrolling on their own. For the jump, the file
  * scroll has already happened by then and that is most of the answer.
  */
-const REACH_FRAMES = 8;
+export const REACH_FRAMES = 8;
 
 /**
  * A press on a card's own control, and the card it was made on.
@@ -1495,7 +1495,33 @@ export function DiffColumn({
   }, []);
 
   const reported = useRef<string | null>(null);
+  /**
+   * The file a {@link reach} is currently travelling to, if one is.
+   *
+   * While it is set, the column says nothing about where it is. A scroll it
+   * asked for fires `scroll` all the way along, and reporting the cards it
+   * passes over is not news — it is the column narrating its own journey. The
+   * damage is not the noise: each report arrives back as a move with origin
+   * `scroll`, `shouldScrollDiff` is false for that origin, and the effect
+   * driving the journey is therefore torn down a few files short of its
+   * destination. `n` landed on the file *before* the one holding the first
+   * thread, and a tree click on a distant file landed near it rather than on
+   * it — which is the same bug wearing two faces.
+   *
+   * A count rather than a flag, because two journeys overlap. Pressing `n`
+   * sets the file *and* the thread: the column scrolls to the card, and the
+   * jump below then scrolls to the thread inside it. With one slot between
+   * them the first to finish handed the column its voice back while the second
+   * was still moving, and the report that got out named the card above the
+   * thread — which is exactly the case `block: 'center'` creates.
+   *
+   * A ref rather than state: it is read inside a scroll handler that must not
+   * re-render to find out, and it is written from `requestAnimationFrame`
+   * loops that a render would restart.
+   */
+  const reaching = useRef(0);
   const handleScroll = useCallback(() => {
+    if (reaching.current > 0) return;
     const path = topmostFile(cardTops());
     // Scroll fires at frame rate and most frames are still on the same file.
     // The reducer would absorb the repeats, but only after React had rendered
@@ -1505,16 +1531,106 @@ export function DiffColumn({
     onScrollTo(path);
   }, [onScrollTo, cardTops]);
 
-  // Follow the tree — and only the tree. Scrolling because the column scrolled
-  // is the other half of the feedback loop the origin exists to break. The
-  // dependencies are the two primitives rather than `current` itself, so a
-  // state object that was rebuilt without moving does not re-scroll.
+  /**
+   * Bring a card to the top, and keep asking until it is actually there.
+   *
+   * One ask is not enough, and the reason is measurement. `itemMetrics` are
+   * height *estimates* used until an item has been laid out, and a collapsed
+   * item is a header alone — nothing like the estimate for a diff. So a column
+   * with collapsed cards between here and the target resolves the offset
+   * against the accumulated error, scrolls to it, measures what that brought
+   * into view, and settles somewhere other than where it was sent. Clicking a
+   * collapsed file in the tree landed on a neighbour, which is the bug this is
+   * the fix for. A freshly remounted viewer has the same problem for the same
+   * reason, which is why the card controls below already worked this way.
+   *
+   * Asked before scrolling rather than after, and the order is load-bearing.
+   * `CodeView.suspendScrollInteractions` puts `pointer-events: none` on the
+   * sticky container for 120ms after *any* scroll it is asked for, and that
+   * container holds the card headers. A card already at the top has nothing to
+   * scroll to, so a call made anyway buys nothing and spends those 120ms
+   * making the header's own controls dead to a press.
+   *
+   * "Arrived" is `topmostFile(cardTops())` — deliberately the same question
+   * `handleScroll` answers, so that arriving means here what it means when the
+   * column reports where the reviewer is. And it gives up after
+   * {@link REACH_FRAMES} rather than looping without a deadline, because a
+   * retry with no end is a loop that fights a reviewer who has started
+   * scrolling on their own.
+   */
+  /**
+   * Take the guard for one journey, and give back a way to release it.
+   *
+   * Idempotent, because every caller releases twice — once when it arrives or
+   * gives up, and once from its effect's cleanup — and a double decrement
+   * would unmute the column while the other journey was still running.
+   *
+   * `reported` is refreshed when the last journey ends rather than left as it
+   * was, so the dedupe in `handleScroll` is measuring from the truth. Left
+   * stale it would swallow the reviewer's next scroll if that scroll happened
+   * to land back on the file the column was on before all this started.
+   */
+  const hold = useCallback((): (() => void) => {
+    reaching.current += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      reaching.current -= 1;
+      if (reaching.current === 0) reported.current = topmostFile(cardTops());
+    };
+  }, [cardTops]);
+
+  const reach = useCallback(
+    (path: string): (() => void) => {
+      let frame = 0;
+      let attempts = 0;
+      const done = hold();
+
+      const settle = () => {
+        if (topmostFile(cardTops()) === path) return done();
+        viewer.current?.scrollTo({ type: 'item', id: path, align: 'start' });
+        attempts += 1;
+        if (attempts >= REACH_FRAMES) return done();
+        frame = requestAnimationFrame(settle);
+      };
+
+      // The first attempt before paint rather than on the next frame, so the
+      // common case — a measured card, a neighbour one row away — never draws
+      // a frame at the wrong offset.
+      settle();
+      return () => {
+        cancelAnimationFrame(frame);
+        done();
+      };
+    },
+    [cardTops, hold],
+  );
+
+  /**
+   * Follow the tree — and only the tree.
+   *
+   * Scrolling because the column scrolled is the other half of the feedback
+   * loop the origin exists to break, and `shouldScrollDiff` is where that is
+   * decided.
+   *
+   * On `current` itself rather than on its two primitives, which is a change
+   * from how this read for a long time. The note that stood here said the
+   * primitives were what kept a state object rebuilt without moving from
+   * re-scrolling — and that was right while *any* repeat returned the
+   * identical state. `currentFile.ts` now rebuilds only for a press, and a
+   * press on the file the reviewer is already on is a request rather than an
+   * echo: bring that header back to the top. The primitives cannot see it,
+   * because neither of them has changed. The object can.
+   */
   const target = current.path;
   const acts = shouldScrollDiff(current);
   useEffect(() => {
     if (!acts || target === null) return;
-    viewer.current?.scrollTo({ type: 'item', id: target, align: 'start' });
-  }, [acts, target]);
+    return reach(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `current` is the
+    // dependency; `acts` and `target` are read off it and listed for clarity.
+  }, [current, acts, target, reach]);
 
   /**
    * A press on a card's own control returns the column to that card.
@@ -1565,36 +1681,10 @@ export function DiffColumn({
   const returnToken = returnTo?.token ?? 0;
   useEffect(() => {
     if (returnPath === null) return;
-
-    let frame = 0;
-    let attempts = 0;
-
-    const settle = () => {
-      // Asked before scrolling rather than after, and the order is the whole
-      // of what keeps this from costing the reviewer the press that follows.
-      // `CodeView.suspendScrollInteractions` puts `pointer-events: none` on
-      // the sticky container for 120ms after *any* scroll it is asked for, and
-      // that container holds the card headers — which is to say it holds the
-      // very control that was just pressed. A card already at the top has
-      // nothing to scroll to, so a call made anyway buys nothing and spends
-      // those 120ms making `ModeSwitcher` dead to a second press. Raw then
-      // Grid, quicker than the timer, is a reviewer changing their mind at a
-      // perfectly ordinary speed.
-      if (topmostFile(cardTops()) === returnPath) return;
-      viewer.current?.scrollTo({ type: 'item', id: returnPath, align: 'start' });
-      attempts += 1;
-      if (attempts >= REACH_FRAMES) return;
-      frame = requestAnimationFrame(settle);
-    };
-
-    // The first attempt before paint rather than on the next frame, so the
-    // common case — a card that was already measured, a mode press that did
-    // not remount anything — never draws a frame at the wrong offset.
-    settle();
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [returnPath, returnToken, cardTops]);
+    // `returnToken` is named but unread: a second press on the same card is
+    // the same path, and re-running is the whole point of the token.
+    return reach(returnPath);
+  }, [returnPath, returnToken, reach]);
 
   /**
    * The second half of a jump from the Overview.
@@ -1613,6 +1703,26 @@ export function DiffColumn({
 
     let frame = 0;
     let attempts = 0;
+    let quiet = REACH_FRAMES;
+
+    /**
+     * Silent for the length of the jump, for the reason {@link reaching} gives
+     * — with one wrinkle this half has and the other does not.
+     *
+     * `scrollIntoView({ block: 'center' })` puts the *thread* in the middle of
+     * the viewport, which leaves the card above it at the top. So the column's
+     * honest answer to "which file is topmost" is the file before the one the
+     * reviewer was sent to, and reporting it makes the tree highlight the
+     * wrong row while they read the thread. It only showed up once the file
+     * order changed and the thread's file stopped being the first card, with
+     * nothing above it to be reported instead.
+     *
+     * Held for a few frames past the scroll rather than released at it: scroll
+     * events are dispatched after the fact, so clearing this the moment
+     * `scrollIntoView` returns would let the very report it exists to swallow
+     * straight through.
+     */
+    const speak = hold();
 
     const reach = () => {
       const container = scroller.current;
@@ -1637,18 +1747,29 @@ export function DiffColumn({
         if (typeof found.scrollIntoView === 'function') {
           found.scrollIntoView({ block: 'center' });
         }
+        // Then wait out the scroll it just caused before speaking again.
+        frame = requestAnimationFrame(settle);
         return;
       }
 
       attempts += 1;
       if (attempts < REACH_FRAMES) frame = requestAnimationFrame(reach);
+      else speak();
+    };
+
+    /** Count the jump's scroll out, then hand the column its voice back. */
+    const settle = () => {
+      quiet -= 1;
+      if (quiet > 0) frame = requestAnimationFrame(settle);
+      else speak();
     };
 
     frame = requestAnimationFrame(reach);
     return () => {
       cancelAnimationFrame(frame);
+      speak();
     };
-  }, [jumpId, jumpToken]);
+  }, [jumpId, jumpToken, hold]);
 
   return (
     <main

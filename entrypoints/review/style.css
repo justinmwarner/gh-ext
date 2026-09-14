@@ -1189,7 +1189,11 @@ button.scope-showing:hover {
   color: var(--fg-muted);
 }
 
-.tree-chevron::before {
+/* Only a folder gets an arrow. Every row gets the span, because it is what
+   keeps the icons in one column — see `FileTree.tsx`. `[aria-expanded]`
+   unqualified is the test for "this row is a folder": a file never carries the
+   attribute, and a folder carries it whichever way it is turned. */
+.tree-row[aria-expanded] .tree-chevron::before {
   content: '';
   width: 0;
   height: 0;
@@ -1219,16 +1223,42 @@ button.scope-showing:hover {
   font-weight: 600;
 }
 
-/* Linguist's colour, and nothing more. The row already carries a checkbox, a
-   name, a status letter and two counts; a detailed file-type icon on top of
-   that is decoration competing with information. */
-.tree-dot {
+/* Material Icon Theme's drawing for the file's type, or for the folder.
+
+   A 7px Linguist-coloured square stood here, and the swap is not decoration
+   for its own sake: a colour can say a file *has* a type and cannot say which,
+   so the dot only worked for a reviewer who already knew the code — and its
+   twenty-one hexes lived in a `.tsx` file, which is the one place the Named
+   Colour Rule's test does not look. The drawings carry their own colour, so
+   nothing here names one.
+
+   The slot holds its width whether or not the drawing has loaded. The tables
+   behind these are a dynamic import — `ui/useFileIcons.ts` argues for why — and
+   a rail that laid out twice would shunt every file name sideways a frame
+   after the reviewer started reading them. */
+.tree-icon-slot {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  margin: 0 3px 0 2px;
-  border-radius: 2px;
-  background: var(--fg-subtle);
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 1px;
+}
+
+.tree-icon {
+  width: 16px;
+  height: 16px;
+  /* These are somebody's logos at 16px. Letting the browser smooth them on a
+     non-integer device pixel ratio is what turns a crisp mark into a smudge. */
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* A file nobody is here to read is dimmed, and its icon goes with it —
+   otherwise a lockfile's row reads as quiet with one bright spot on it. The
+   name's rule below says why this is `--fg-muted` territory rather than
+   something fainter. */
+.tree-row[data-noise='true'] .tree-icon {
+  opacity: 0.55;
 }
 
 .tree-name {
@@ -4194,4 +4224,134 @@ button.scope-showing:hover {
      it off-centre by exactly the rail's width. */
   flex: 1 1 auto;
   margin: 0;
+}
+
+/* The diff's shape while a commit comparison is in flight.
+
+   `ui/DiffSkeleton.tsx` argues for why this case gets a skeleton when the
+   initial payload deliberately gets nothing. The short version: a compare is
+   always a round trip and always displaces something already on screen.
+
+   The pulse is `background-color` only. DESIGN.md allows colour, transform and
+   opacity and then narrows it further — "on the review page really just
+   colour" — so the boxes change tone rather than sliding a highlight across
+   themselves. A sweeping gradient would also be the one gradient on a page
+   whose Don'ts list rules them out. */
+.diff-skeleton {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  gap: 12px;
+  padding: 12px 0 0;
+  overflow: hidden;
+}
+
+.skeleton-rail {
+  flex: 0 0 296px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border-muted);
+}
+
+.skeleton-row,
+.skeleton-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 17px;
+}
+
+.skeleton-column {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skeleton-card {
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.skeleton-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--canvas-subtle);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.skeleton-line {
+  padding: 0 12px;
+}
+
+.skeleton-box {
+  display: block;
+  border-radius: 3px;
+  background: var(--neutral-hover);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-tick {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+
+.skeleton-name,
+.skeleton-code {
+  height: 9px;
+}
+
+.skeleton-gutter {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 9px;
+}
+
+.skeleton-title {
+  width: 180px;
+  height: 11px;
+}
+
+.skeleton-counts {
+  width: 64px;
+  height: 9px;
+}
+
+/* Staggered so the rail reads as a list settling rather than as one slab
+   blinking. `nth-child` rather than a per-row inline delay, because the delay
+   is a property of the drawing and inline styles are where this file's rules
+   stop applying. */
+.skeleton-row:nth-child(2n) .skeleton-box,
+.skeleton-line:nth-child(3n) .skeleton-box {
+  animation-delay: 0.2s;
+}
+
+.skeleton-row:nth-child(3n) .skeleton-box,
+.skeleton-line:nth-child(3n + 1) .skeleton-box {
+  animation-delay: 0.4s;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    background-color: var(--canvas-inset);
+  }
+  50% {
+    background-color: var(--neutral-hover);
+  }
+}
+
+/* The shapes are the informative part; the pulse only says "still working",
+   which the live region says in words. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-box {
+    animation: none;
+  }
 }

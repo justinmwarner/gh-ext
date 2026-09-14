@@ -21,7 +21,25 @@ const patchOf = (path: string, added: number, removed: number): string =>
   ].join('\n');
 
 describe('reviewFiles', () => {
-  it('keeps the diff order and joins the GraphQL metadata by path', () => {
+  it('lays the files out the way the tree draws them, not the way the diff arrived', () => {
+    // The bug this replaced: the column drew GitHub's order and the tree
+    // re-sorted into folders-first, so a root-level file came first on one
+    // surface and last on the other. One walk decides it now, and it is the
+    // tree's — see `fileOrder`.
+    const payload = prPayloadWithFiles([
+      fileFixture({ path: 'README.md' }),
+      fileFixture({ path: 'src/app.ts' }),
+      fileFixture({ path: 'docs/guide.md' }),
+    ]);
+
+    expect(reviewFiles(payload).map((f) => f.path)).toEqual([
+      'docs/guide.md',
+      'src/app.ts',
+      'README.md',
+    ]);
+  });
+
+  it('joins the GraphQL metadata by path', () => {
     const payload = prPayloadWithFiles([
       fileFixture({
         path: 'src/b.ts',
@@ -39,16 +57,17 @@ describe('reviewFiles', () => {
       }),
     ]);
 
-    const files = reviewFiles(payload);
+    // Looked up by path rather than by position: what this pins is the join,
+    // and `fileOrder` is free to lay the two out however the tree would.
+    const byPath = new Map(reviewFiles(payload).map((file) => [file.path, file]));
 
-    expect(files.map((f) => f.path)).toEqual(['src/b.ts', 'src/a.ts']);
-    expect(files[0]).toMatchObject({
+    expect(byPath.get('src/b.ts')).toMatchObject({
       additions: 12,
       deletions: 3,
       changeType: 'MODIFIED',
       viewedState: 'VIEWED',
     });
-    expect(files[1]?.changeType).toBe('ADDED');
+    expect(byPath.get('src/a.ts')?.changeType).toBe('ADDED');
   });
 
   it('counts the patch itself when GraphQL sent no row for the file', () => {
@@ -90,12 +109,17 @@ describe('reviewFiles', () => {
 
     const files = reviewFiles(payload);
 
-    expect(files.map((f) => f.path)).toEqual([
-      'package-lock.json',
-      'src/generated/api.ts',
-      'src/app.ts',
-    ]);
-    expect(files.map((f) => f.noise)).toEqual([true, true, false]);
+    // Kept, all three of them — the flag dims a row, it does not drop a file.
+    expect(new Set(files.map((f) => f.path))).toEqual(
+      new Set(['package-lock.json', 'src/generated/api.ts', 'src/app.ts']),
+    );
+    expect(
+      Object.fromEntries(files.map((file) => [file.path, file.noise])),
+    ).toEqual({
+      'package-lock.json': true,
+      'src/generated/api.ts': true,
+      'src/app.ts': false,
+    });
   });
 
   it('carries the fallback path’s patchOmitted flag through', () => {

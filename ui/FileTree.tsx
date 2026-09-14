@@ -31,8 +31,18 @@
  * review is the thing `lib/settings.ts` argues at length against. What it is
  * doing is said in words above the rows, so it cannot be left on by accident.
  *
+ * **The icons are Material Icon Theme's, and they arrive late.** A coloured
+ * dot stood here for a while and was the wrong answer: a 7px square of
+ * Linguist blue can say a file has a type but not which, so a reviewer had to
+ * already know the colour code to read it, and the hexes it was drawn from
+ * were the last patch of unthemed colour on the row. A drawing says it
+ * outright. The tables behind them are a dynamic import — `useFileIcons` makes
+ * that case — so the slot is reserved at mount and filled a frame later.
+ *
  * Structure, order, and what a folder's checkbox acts on are all in
- * `treeRows`. What is here is only how a row is drawn and which key does what.
+ * `treeRows`, which also decides the order the *diff column* draws in: one
+ * walk, so the rail and the column cannot disagree about where a file sits.
+ * What is here is only how a row is drawn and which key does what.
  */
 
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +52,7 @@ import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import type { FileComments } from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
 import { type TreeRow, checkState, directoryPaths, treeRows } from './treeRows';
+import { useFileIcons } from './useFileIcons';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
 const MINUS = '−';
@@ -55,42 +66,6 @@ const MINUS = '−';
  * the folder being closed.
  */
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
-
-/**
- * Linguist's own colours, for the dot that stands in for a file-type icon.
- *
- * A dozen values rather than a vendored icon set: the row already carries a
- * checkbox, a name, two counts and a conversation mark, and a second detailed
- * glyph on top of that is noise rather than information. Anything not listed
- * falls back to the muted foreground, which is the honest answer for a file
- * type we have nothing to say about.
- */
-const LANGUAGE: Record<string, string> = {
-  ts: '#3178c6',
-  tsx: '#3178c6',
-  js: '#f1e05a',
-  jsx: '#f1e05a',
-  json: '#cbcb41',
-  md: '#519aba',
-  css: '#563d7c',
-  scss: '#c6538c',
-  html: '#e34c26',
-  py: '#3572a5',
-  go: '#00add8',
-  rs: '#dea584',
-  rb: '#701516',
-  java: '#b07219',
-  sh: '#89e051',
-  yml: '#cb171e',
-  yaml: '#cb171e',
-  svg: '#ff9900',
-  png: '#a074c4',
-  jpg: '#a074c4',
-  gif: '#a074c4',
-};
-
-const languageColour = (name: string): string | undefined =>
-  LANGUAGE[name.slice(name.lastIndexOf('.') + 1).toLowerCase()];
 
 /**
  * Past this the number stops being a count and starts being a width.
@@ -233,6 +208,11 @@ export function FileTree({
   const elements = useRef(new Map<string, HTMLElement>());
 
   const [query, setQuery] = useState('');
+
+  // Loaded after the first paint; every row draws its slot empty until then.
+  // See `useFileIcons` for why a quarter of a megabyte of mapping is not a
+  // static import.
+  const icons = useFileIcons();
 
   const paths = useMemo(() => files.map((file) => file.path), [files]);
 
@@ -457,6 +437,7 @@ export function FileTree({
       <div className="filetree-rows" role="tree" aria-label="Changed files" onKeyDown={onKeyDown}>
       {rows.map((row) => {
         const file = byPath.get(row.path);
+        const icon = icons.urlFor(row.path, row.kind, row.expanded);
         const state = checkState(row, states);
         const talk = row.kind === 'file' ? comments?.get(row.path) : undefined;
         const mark = talk === undefined || talk.total === 0 ? null : commentMark(talk);
@@ -502,17 +483,32 @@ export function FileTree({
               }}
             />
 
-            {row.kind === 'directory' ? (
-              <span className="tree-chevron" aria-hidden="true">
-                {row.expanded ? '▾' : '▸'}
-              </span>
-            ) : (
-              <span
-                className="tree-dot"
-                aria-hidden="true"
-                style={{ background: languageColour(row.name) }}
-              />
-            )}
+            {/* On every row, including files, and empty on all of them.
+                Empty because the arrow is `.tree-chevron::before`, drawn rather
+                than typed — the triangle glyphs come out as specks in the fonts
+                this page falls back through, and a text child here was a second
+                arrow beside the drawn one. Which rows get an arrow is
+                `[aria-expanded]` in the stylesheet, so the span carries no
+                state of its own.
+
+                On files because it is also the column that makes the icons line
+                up. A root-level file beside a root-level folder is at the same
+                depth, and without the folder's twelve pixels its icon would sit
+                out to the left of every folder icon on the rail. */}
+            <span className="tree-chevron" aria-hidden="true" />
+
+            {/* The row holds the icon's width whether or not there is an icon
+                in it yet — `.tree-icon-slot` in the stylesheet — so the names
+                do not shift sideways when the tables finish loading. */}
+            <span className="tree-icon-slot" aria-hidden="true">
+              {icon !== null && (
+                /* `alt=""` *and* `aria-hidden`: the row says the file's name in
+                   words two spans along, and an icon that also announced
+                   itself would put "app.ts" in the accessible name twice. The
+                   same reasoning the chevron and the tick are hidden under. */
+                <img className="tree-icon" src={icon} alt="" aria-hidden="true" draggable={false} />
+              )}
+            </span>
 
             <span className="tree-name">{row.name}</span>
 
@@ -546,15 +542,19 @@ export function FileTree({
             )}
 
             {file !== undefined && (
-              <span className="tree-status" aria-hidden="true">
-                {STATUS[file.changeType].charAt(0).toUpperCase()}
-              </span>
-            )}
-
-            {file !== undefined && (
               <span className="tree-counts">
                 <span className="additions">{`+${file.additions}`}</span>
                 <span className="deletions">{`${MINUS}${file.deletions}`}</span>
+              </span>
+            )}
+
+            {/* Last, after the counts. What a reviewer scans this rail for is
+                how much moved; the operation is the qualifier on that, and a
+                single letter in front of two numbers was a speed bump on the
+                column they were actually reading down. */}
+            {file !== undefined && (
+              <span className="tree-status" aria-hidden="true">
+                {STATUS[file.changeType].charAt(0).toUpperCase()}
               </span>
             )}
           </div>

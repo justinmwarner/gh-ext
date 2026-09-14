@@ -7,17 +7,27 @@
  * Neither is sufficient: rendering needs the patch, the tree needs the counts,
  * and the card header needs the viewed state.
  *
- * The diff is the spine. It decides which files exist and in what order,
- * because that is the order the reviewer reads them in. GraphQL metadata is
- * joined on to it by path, and every field it supplies has a fallback derived
- * from the patch — the connection is capped and GraphQL nulls out what it could
- * not resolve, so "the row is missing" is a case, not a bug.
+ * The diff is the spine. It decides which files exist, and GraphQL metadata is
+ * joined on to it by path; every field it supplies has a fallback derived from
+ * the patch — the connection is capped and GraphQL nulls out what it could not
+ * resolve, so "the row is missing" is a case, not a bug.
+ *
+ * What the diff no longer decides is the **order**. That is `fileOrder`, which
+ * is the tree's own walk: directories first, then files, counting the way a
+ * person does. It used to be GitHub's order here and the tree's order over
+ * there, and the two disagree the moment a pull request touches a file at its
+ * root — `README.md` came first in the column and last in the tree, one review
+ * claiming two shapes. Sorting here rather than at either surface is what makes
+ * that unrepresentable: `useCompareDiff` rebuilds a narrowed diff through this
+ * same function, so the whole diff and a two-commit slice of it are laid out by
+ * one rule without either caller knowing there was a rule.
  */
 
 import type { FallbackDiffFile } from '@/lib/github/files-fallback';
 import type { FileViewedState, PatchStatus } from '@/lib/github/types';
 import type { PrPayload } from '@/lib/messages';
 import { DEFAULT_NOISE_PATTERNS, isNoise } from '@/lib/review/filters';
+import { fileOrder } from './treeRows';
 
 export interface ReviewFile {
   /** Path in the head commit. For a delete, the path that was removed. */
@@ -144,7 +154,21 @@ function inferChangeType(file: { isRename: boolean }): PatchStatus {
 export function reviewFiles(payload: PrPayload): ReviewFile[] {
   const metadata = metadataByPath(payload.pullRequest);
 
-  return payload.diff.files.map((file): ReviewFile => {
+  // Built before the map so the sort is a lookup rather than a comparator: a
+  // five-hundred-file pull request would otherwise re-split every path on
+  // every comparison. A file the walk somehow did not name sorts to the end
+  // rather than to the front, because the honest failure for an unplaceable
+  // file is "last", not "first thing the reviewer sees".
+  const rank = new Map(fileOrder(payload.diff.files.map((file) => file.path)).map(
+    (path, at) => [path, at],
+  ));
+  const placed = [...payload.diff.files].sort(
+    (a, b) =>
+      (rank.get(a.path) ?? Number.MAX_SAFE_INTEGER) -
+      (rank.get(b.path) ?? Number.MAX_SAFE_INTEGER),
+  );
+
+  return placed.map((file): ReviewFile => {
     const row = metadata.get(file.path);
     const counted = row ?? countPatchLines(file.patch);
 

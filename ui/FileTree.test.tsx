@@ -12,7 +12,7 @@
  * Space toggles it.
  */
 
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { FileTree } from './FileTree';
@@ -371,6 +371,79 @@ describe('what a row says about its file', () => {
     expect(
       container.querySelector('[data-path="package-lock.json"]')?.getAttribute('data-noise'),
     ).toBe('true');
+  });
+
+  it('puts the file operation after the counts, at the end of the row', () => {
+    // Reading order: what the file is called, then how much of it moved, then
+    // what happened to it. The letter used to sit between the name and the
+    // counts, which put a one-character abbreviation in front of the two
+    // numbers a reviewer is actually scanning down the column for.
+    const { container } = mount({ files: [file('src/app.ts')] });
+    const marks = [...container.querySelectorAll('[data-path="src/app.ts"] > span')]
+      .map((node) => node.className)
+      .filter((name) => name !== 'tree-check');
+
+    expect(marks.at(-1)).toBe('tree-status');
+    expect(marks.at(-2)).toBe('tree-counts');
+  });
+
+  it('draws each file the icon its type gets, instead of a coloured dot', async () => {
+    // The dot was a language colour and nothing more, and a colour on its own
+    // cannot say what it means — a reviewer looking at a 7px blue square has
+    // to already know that blue is TypeScript to get anything from it. The
+    // drawing says it.
+    const { container } = mount({ files: [file('src/app.ts'), file('docs/notes.md')] });
+    await waitFor(() => {
+      expect(container.querySelector('[data-path="src/app.ts"] .tree-icon')).not.toBeNull();
+    });
+
+    expect(
+      container.querySelector<HTMLImageElement>('[data-path="src/app.ts"] .tree-icon')?.src,
+    ).toMatch(/typescript\.svg$/);
+    expect(
+      container.querySelector<HTMLImageElement>('[data-path="docs/notes.md"] .tree-icon')?.src,
+    ).toMatch(/markdown\.svg$/);
+    expect(container.querySelector('.tree-dot')).toBeNull();
+  });
+
+  it('draws a folder as a folder, and opens it when it opens', async () => {
+    const { container } = mount();
+    const src = (): string | undefined =>
+      container.querySelector<HTMLImageElement>('[data-path="src/"] .tree-icon')?.src;
+
+    await waitFor(() => {
+      expect(src()).toMatch(/folder-src-open\.svg$/);
+    });
+
+    await userEvent.click(row('src'));
+    await waitFor(() => {
+      expect(src()).toMatch(/folder-src\.svg$/);
+    });
+  });
+
+  it('leaves the icon out of what a row is called', async () => {
+    // Decoration. The row already says the file's name in words, and an
+    // accessible name of "app.ts app.ts +12 −3" is the kind of thing that
+    // makes a screen reader slower to work with rather than more informative.
+    const { container } = mount({ files: [file('src/app.ts')] });
+    await waitFor(() => {
+      expect(container.querySelector('[data-path="src/app.ts"] .tree-icon')).not.toBeNull();
+    });
+
+    const icon = container.querySelector('[data-path="src/app.ts"] .tree-icon');
+    expect(icon?.getAttribute('alt')).toBe('');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('draws a folder one arrow, not two', () => {
+    // `.tree-chevron::before` is the arrow — drawn rather than typed, because
+    // the triangle glyphs render as specks in the fonts this page falls back
+    // through. A text child on the same span was a second one beside it.
+    const { container } = mount();
+    const chevron = container.querySelector('[data-path="src/"] .tree-chevron');
+
+    expect(chevron).not.toBeNull();
+    expect(chevron?.textContent).toBe('');
   });
 
   it('follows the change type', () => {

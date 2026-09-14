@@ -360,6 +360,74 @@ describe('the "since my last review" preset', () => {
   });
 });
 
+/**
+ * What is on screen between asking for a commit and being given it.
+ *
+ * The whole pull request used to be, and it was not a considered choice: the
+ * page reads `narrowed` as "the compare is *ready*", so everything derived
+ * from it fell back to the whole diff for as long as the request was in
+ * flight. Pressing a commit tab flashed the entire pull request and then
+ * replaced it, which reads as the control having done the wrong thing and then
+ * corrected itself.
+ *
+ * The failed case keeps that fallback, and keeps it deliberately — an empty
+ * column would read as "nothing changed", and `ScopeBar` puts the reason on
+ * screen beside it. Only the pending case changes.
+ *
+ * Immediately, with none of `LoadingState`'s quiet window. That delay exists
+ * because the payload usually arrives from a warm prefetch inside a frame, so
+ * a spinner drawn and torn down in that gap reads as a glitch. A compare is
+ * always a round trip and always displaces something already drawn, which is
+ * the case the delay was never about.
+ */
+describe('waiting for a narrowed diff', () => {
+  /** A compare that never answers, so the pending state can be looked at. */
+  const pending = () =>
+    requestMock.mockImplementation((message: { kind: string }) =>
+      message.kind === 'compare-diff'
+        ? new Promise(() => {})
+        : Promise.resolve({ ok: true, data: { data: {} } }),
+    );
+
+  it('shows a skeleton rather than flashing the whole pull request', async () => {
+    const user = userEvent.setup();
+    pending();
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    await user.click(await menuItem(user, /choose commits/i));
+    const dialog = screen.getByRole('dialog', { name: /commits/i });
+    await user.click(within(dialog).getByRole('button', { name: /select commit ccccccc/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status', { name: /loading the diff/i })).toBeDefined();
+    });
+    // The file it would have flashed back to.
+    expect(screen.queryByRole('treeitem', { name: /app\.ts/ })).toBeNull();
+  });
+
+  it('puts the pull request back when the comparison fails, with the reason', async () => {
+    // Not symmetry. An empty column on a failure would read as "nothing
+    // changed", which is the one thing it must never say by accident.
+    const user = userEvent.setup();
+    requestMock.mockImplementation((message: { kind: string }) =>
+      message.kind === 'compare-diff'
+        ? Promise.resolve({ ok: false, error: { message: 'no such commit' } })
+        : Promise.resolve({ ok: true, data: { data: {} } }),
+    );
+    render(<Shell retry={() => {}} payload={payloadWith()} />);
+
+    await user.click(await menuItem(user, /choose commits/i));
+    const dialog = screen.getByRole('dialog', { name: /commits/i });
+    await user.click(within(dialog).getByRole('button', { name: /select commit ccccccc/i }));
+
+    await waitFor(() => {
+      expect(scopeBar().textContent).toMatch(/no such commit/i);
+    });
+    expect(screen.getByRole('treeitem', { name: /app\.ts/ })).toBeDefined();
+    expect(screen.queryByRole('status', { name: /loading the diff/i })).toBeNull();
+  });
+});
+
 describe('picking commits', () => {
   const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
     await clickPicker(user);

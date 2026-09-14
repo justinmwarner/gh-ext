@@ -13,10 +13,20 @@
  * 1. **Only the far side acts.** A change that came from the tree scrolls the
  *    diff and does not re-select in the tree. A change that came from the
  *    scroll selects in the tree and does not re-scroll the diff.
- * 2. **An echo is identity.** Being told about the file we are already on
- *    returns the *same object*, so React bails out of the re-render entirely
- *    and no effect re-runs. This is what makes the first rule terminate rather
+ * 2. **An echo is identity.** A *scroll* reporting the file we are already on
+ *    returns the same object, so React bails out of the re-render entirely and
+ *    no effect re-runs. This is what makes the first rule terminate rather
  *    than merely alternate.
+ *
+ * The second rule used to apply to all three origins, and that was a bug
+ * rather than symmetry. Only a scroll produces echoes — it fires at frame rate
+ * and most frames are still on the same file. A press is never an echo: a
+ * reviewer clicking the row the scroll had selected is asking for that file's
+ * header to come to the top, and answering "you are already there" made the
+ * press do nothing. It was worst right after a commit tab, where the column
+ * rebuilds at its top while `current` still names the file the reviewer had
+ * been on — so the one row they would press to get back was the one row that
+ * could not take them.
  */
 
 /**
@@ -41,7 +51,9 @@ const moveTo = (
   state: CurrentFile,
   path: string,
   origin: FileOrigin,
-): CurrentFile => (state.path === path ? state : { path, origin });
+): CurrentFile =>
+  // Identity only for the echo, which only a scroll can be. See rule 2 above.
+  origin === 'scroll' && state.path === path ? state : { path, origin };
 
 /** The reviewer picked, or arrow-keyed onto, a file in the tree. */
 export function fromTree(state: CurrentFile, path: string): CurrentFile {

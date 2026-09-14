@@ -79,12 +79,14 @@ if (!('ResizeObserver' in globalThis)) {
 /**
  * The `browser` global, which jsdom has no reason to have.
  *
- * Two things need it. The review page listens for the token changing, so it
+ * Three things need it. The review page listens for the token changing, so it
  * can load the pull request the moment the reviewer unlocks instead of leaving
- * them on a screen that promised it would. And it asks the vault which kind of
+ * them on a screen that promised it would. It asks the vault which kind of
  * "no token" it is looking at, to tell a missing token from a locked one.
  * Both run on mount, so every component test that renders the page reaches for
- * this.
+ * this. And the file tree resolves its icons to extension URLs, which is why
+ * `runtime.getURL` is here — the tree draws them from `public/file-icons`, so
+ * a stub without it throws inside a render rather than returning a bad URL.
  *
  * `runtime.id` is what makes `@wxt-dev/browser` choose this object: it picks
  * `globalThis.browser` only when that looks like a real extension context, and
@@ -122,7 +124,14 @@ if (!('browser' in globalThis)) {
 
   Object.defineProperty(globalThis, 'browser', {
     value: {
-      runtime: { id: 'a-better-reviewer-test' },
+      runtime: {
+        id: 'a-better-reviewer-test',
+        // Shaped like the real thing — an absolute URL on the extension's own
+        // origin — so a test can assert what a link or an `<img>` points at
+        // rather than only that it points somewhere.
+        getURL: (path: string) =>
+          `chrome-extension://a-better-reviewer-test${path.startsWith('/') ? '' : '/'}${path}`,
+      },
       storage: {
         local: area(),
         session: area(),

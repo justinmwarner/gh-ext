@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { type TreeRow, checkState, directoryPaths, treeRows } from './treeRows';
+import { type TreeRow, checkState, directoryPaths, fileOrder, treeRows } from './treeRows';
 
 const OPEN: ReadonlySet<string> = new Set();
 
@@ -224,5 +224,49 @@ describe('directoryPaths', () => {
       'src/',
       'README.md',
     ]);
+  });
+});
+
+/**
+ * The one order both surfaces read in.
+ *
+ * The tree and the diff column used to disagree: the column drew files in the
+ * order GitHub's diff listed them, and the tree re-sorted into folders-first.
+ * A root-level `README.md` came first in one and last in the other, which is
+ * the same review claiming two different shapes.
+ */
+describe('fileOrder', () => {
+  it('reads out the same sequence the rows are drawn in', () => {
+    const paths = ['README.md', 'src/app.ts', 'docs/guide.md', 'src/beta.ts'];
+    const drawn = treeRows(paths, OPEN)
+      .filter((row) => row.kind === 'file')
+      .map((row) => row.path);
+
+    expect(fileOrder(paths)).toEqual(drawn);
+  });
+
+  it('puts a root-level file after the directories, where the tree puts it', () => {
+    expect(fileOrder(['README.md', 'src/app.ts'])).toEqual(['src/app.ts', 'README.md']);
+  });
+
+  it('counts the way a person does, like the rows', () => {
+    expect(fileOrder(['file10.ts', 'file9.ts', 'file1.ts'])).toEqual([
+      'file1.ts',
+      'file9.ts',
+      'file10.ts',
+    ]);
+  });
+
+  it('reports every file, including ones inside a directory a reviewer shut', () => {
+    // Folding is a property of the rows, not of the order. The column draws
+    // every file whatever the tree is currently showing.
+    expect(fileOrder(['src/deep/one.ts', 'src/two.ts'])).toEqual([
+      'src/deep/one.ts',
+      'src/two.ts',
+    ]);
+  });
+
+  it('has nothing to say about a pull request that changed nothing', () => {
+    expect(fileOrder([])).toEqual([]);
   });
 });

@@ -53,6 +53,9 @@ interface Node {
 
 const node = (name: string): Node => ({ name, dirs: new Map(), files: [] });
 
+/** No folds, shared so a repeated call does not allocate one per file list. */
+const NOTHING_FOLDED: ReadonlySet<string> = new Set();
+
 /**
  * Alphabetical, but counting the way a person does: `file9` before `file10`.
  * A plain codepoint sort puts every `1x` ahead of `2`, which reads as broken
@@ -61,10 +64,24 @@ const node = (name: string): Node => ({ name, dirs: new Map(), files: [] });
 const byName = (a: string, b: string): number =>
   a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 
-export function treeRows(
+/**
+ * One walk, both answers.
+ *
+ * The rows a tree draws and the sequence its files run in are the same fact
+ * seen twice, and they used to be worked out in two places — here, and not at
+ * all in the diff column, which simply drew the order GitHub's diff arrived
+ * in. That is the bug this shape exists to make impossible: a root-level
+ * `README.md` came first in the column and last in the tree, because
+ * folders-first is this walk's rule and GitHub's list has never heard of it.
+ *
+ * So the walk returns its `beneath` rather than discarding it. {@link treeRows}
+ * takes the rows, {@link fileOrder} takes the files, and neither can drift from
+ * the other without this function moving underneath both.
+ */
+function walkTree(
   paths: readonly string[],
   collapsed: ReadonlySet<string>,
-): TreeRow[] {
+): { rows: TreeRow[]; files: string[] } {
   const root = node('');
 
   for (const path of paths) {
@@ -124,8 +141,28 @@ export function treeRows(
     return beneath;
   };
 
-  walk(root, '', 0, false);
-  return rows;
+  const files = walk(root, '', 0, false);
+  return { rows, files };
+}
+
+/** The rows a tree draws, flat and already in draw order. */
+export function treeRows(
+  paths: readonly string[],
+  collapsed: ReadonlySet<string>,
+): TreeRow[] {
+  return walkTree(paths, collapsed).rows;
+}
+
+/**
+ * Every changed file, in the order the tree lays them out.
+ *
+ * What the diff column, `j`/`k` and the thread list all read, so that the
+ * checklist on the left and the reading order on the right are one sequence
+ * rather than two. Folding is not part of it: the column draws every file
+ * whatever the reviewer has shut, so this walks with nothing collapsed.
+ */
+export function fileOrder(paths: readonly string[]): string[] {
+  return walkTree(paths, NOTHING_FOLDED).files;
 }
 
 /**

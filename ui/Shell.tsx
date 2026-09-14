@@ -52,6 +52,7 @@ import { type ReviewFile, changeTotals, reviewFiles } from './reviewFiles';
 import { ReviewSessionProvider, useReviewSession } from './reviewSession';
 import { orderedThreads } from './reviewThreads';
 import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
+import { DiffSkeleton } from './DiffSkeleton';
 import { useCompareDiff } from './useCompareDiff';
 import { useHeadMoved } from './useHeadMoved';
 import { useKeymap } from './useKeymap';
@@ -206,6 +207,24 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    */
   const narrowed = resolved.kind === 'narrowed' && compare.status === 'ready';
   const files: readonly ReviewFile[] = narrowed ? compare.files : wholeDiff;
+
+  /**
+   * The reviewer asked for a narrowed diff and it has not arrived.
+   *
+   * Distinguished from a *failed* one, which keeps the fallback above: an
+   * empty column would read as "nothing changed", so a failure shows the whole
+   * pull request with the reason beside it in `ScopeBar`. A pending one showed
+   * the whole pull request too, and that was never a decision — it is what
+   * `narrowed` being false happens to do. Pressing a commit tab flashed every
+   * file and then replaced the list, which reads as the control misfiring.
+   *
+   * The column is unmounted for the wait rather than hidden behind the
+   * skeleton, and that is affordable here for a reason the comment on `.views`
+   * below does not cover: a compare replaces the file list wholesale, which
+   * changes `DiffColumn`'s generation and remounts the viewer anyway. There is
+   * no scroll position or expanded context left to protect.
+   */
+  const awaitingDiff = resolved.kind === 'narrowed' && compare.status === 'loading';
 
   /**
    * Which sides of what is on screen number their lines like the pull
@@ -485,6 +504,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               onShowAll={() => setScope(WHOLE_DIFF)}
             />
 
+            {awaitingDiff ? (
+              <DiffSkeleton />
+            ) : (
             <FilesView
               payload={payload}
               files={files}
@@ -515,6 +537,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               gitAttributes={gitAttributes}
               columnRef={column}
             />
+            )}
           </div>
 
           <div

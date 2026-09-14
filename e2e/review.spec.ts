@@ -38,6 +38,7 @@ import {
   THREADS,
   UNEVEN_FILE,
 } from './fixture';
+import { fileOrder } from '../ui/treeRows';
 import { expect, reviewUrl, test } from './extension';
 import type { BrowserContext, Page } from '@playwright/test';
 
@@ -45,13 +46,19 @@ import type { BrowserContext, Page } from '@playwright/test';
 const VIEW = '.diff-view';
 
 /**
- * Every file in the column, in the order `UNIFIED_DIFF` concatenates them.
+ * Every file in the column, in the order the column actually draws them.
  *
- * `FILES` alone is not the column. Six more follow it — the image, the table,
- * the archive, and the added, deleted and unevenly-modified files — and a walk
- * down the column reaches all of them.
+ * `FILES` alone is not the column. Six more follow it in `UNIFIED_DIFF` — the
+ * image, the table, the archive, and the added, deleted and unevenly-modified
+ * files — and a walk down the column reaches all of them.
+ *
+ * Derived rather than written out, and that is the point of it. The column
+ * used to draw GitHub's diff order while the tree re-sorted into folders-first,
+ * so a root-level file came first on one surface and last on the other; both
+ * read `fileOrder` now. A list spelled by hand here would be a fourth opinion
+ * about the order, and the one most likely to be the stale one.
  */
-const COLUMN_ORDER = [
+const COLUMN_ORDER = fileOrder([
   ...FILES,
   GENERATED_FILE,
   EXEMPTED_FILE,
@@ -62,7 +69,7 @@ const COLUMN_ORDER = [
   ADDED_FILE,
   DELETED_FILE,
   UNEVEN_FILE,
-] as const;
+]);
 
 /**
  * The measured half of a card, which is a separate element from its header.
@@ -73,6 +80,60 @@ const COLUMN_ORDER = [
  */
 const fileBody = (page: Page, path: string) =>
   page.locator(`[data-file-body="${path}"]`);
+
+/**
+ * One named file's rendered diff, rather than whichever happens to be first.
+ *
+ * `diffs-container` is Pierre's custom element and there is one per card, so
+ * `.first()` reads as "the top of the column" — which was `src/app.ts` while
+ * the column drew GitHub's diff order and is `assets/logo.png` now that it
+ * draws the tree's. That is an image, with no code lines in it at all, so a
+ * test reaching for the first addition line was not merely on the wrong file,
+ * it was on a card that has no such line. Naming the file is what the tests
+ * below meant in the first place.
+ */
+const diffFor = (page: Page, path: string) =>
+  page
+    .locator('diffs-container')
+    .filter({ has: page.locator(`[data-file-card="${path}"]`) });
+
+/**
+ * The nth file in the column, by position rather than by name.
+ *
+ * An accessor rather than a bare index because `fileOrder` returns a plain
+ * `string[]`: under `noUncheckedIndexedAccess` every read of it is
+ * `string | undefined`, and a test that silently compared against `undefined`
+ * would pass for the wrong reason. Negative indices count from the end.
+ */
+const columnAt = (index: number): string => {
+  const path = COLUMN_ORDER.at(index);
+  if (path === undefined) throw new Error(`the column has no file at ${index}`);
+  return path;
+};
+
+/** The part of a path a tree row actually shows. */
+const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+
+/** The first addition line in one file's diff, which is where a comment goes. */
+const additionLineIn = (page: Page, path: string) =>
+  diffFor(page, path)
+    .locator('[data-column-number][data-line-type="change-addition"]')
+    .first();
+
+/**
+ * Take the column to one file, the way a reviewer does, and wait for its card.
+ *
+ * Needed before {@link diffFor} on anything but the first few files. `CodeView`
+ * virtualizes the stack, so a card well down the column does not exist in the
+ * DOM at all until something scrolls to it — and `scrollIntoViewIfNeeded` on a
+ * locator that matches nothing waits for it forever rather than scrolling.
+ * Pressing the tree row is the product's own way of asking, which makes this
+ * the same path a reviewer takes.
+ */
+async function goToFile(page: Page, path: string): Promise<void> {
+  await page.locator(`[data-path="${path}"]`).click();
+  await expect(page.locator(`[data-file-card="${path}"]`)).toBeVisible();
+}
 
 /** Every view is mounted at once, so anything text-based has to be scoped. */
 const filesView = (page: Page) => page.locator('#review-view-files');
@@ -383,8 +444,12 @@ test('renders the pull request and its diff', async ({ context, extensionId, api
 
   // Real code, syntax highlighted, inside Pierre's shadow root. Playwright's
   // selectors pierce it, which is the only reason this is assertable at all.
-  const firstDiff = page.locator('diffs-container').first();
-  await expect(firstDiff.locator('[data-column-number]').first()).toBeVisible();
+  // Named rather than `.first()`: the top of the column is an image now, and
+  // "real code, highlighted" is a claim about a file that has some.
+  await goToFile(page, 'src/app.ts');
+  await expect(
+    diffFor(page, 'src/app.ts').locator('[data-column-number]').first(),
+  ).toBeVisible();
   await expect(page.getByText('new src/app.ts')).toBeVisible();
 
   // An anchored thread is drawn in the diff; the ones that cannot be are listed
@@ -521,16 +586,23 @@ test('a file can be ticked off from the tree, and the card agrees', async ({
   await expect(box('src/app.ts')).toHaveAttribute('data-check', 'checked');
   expect(api.operations).toContain('MarkViewed');
 
+  // Ticking a file off did not also navigate to it. Every click inside the row
+  // is a click on the row, so this only holds if the capture handler stopped
+  // it. Asserted before the card is looked at, because looking at the card
+  // means going there.
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', '');
+
   // The same state, not a second one: this is GitHub's viewed flag, so the
   // checkbox on the file's own card has to have moved with it.
+  //
+  // The column has to be taken there first. `src/app.ts` sits well down the
+  // list now that both surfaces read `fileOrder` — the tree's order, folders
+  // before files — so its card is virtualized out until something asks for it.
+  // Pressing the row is how a reviewer would ask.
+  await row('src/app.ts').click();
   await expect(
     filesView(page).getByRole('checkbox', { name: /src\/app\.ts/ }),
   ).toBeChecked();
-
-  // And ticking a file off did not also navigate to it. Every click inside the
-  // row is a click on the row, so this only holds if the capture handler
-  // stopped it.
-  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', '');
 });
 
 test('a folder ticks off every file beneath it', async ({ context, extensionId, api }) => {
@@ -1037,8 +1109,15 @@ test('scrolling the diff column walks the tree selection forward, in file order'
   );
   const seen: string[] = [];
 
+  // A hundred pixels a step rather than a hundred and fifty. The column's
+  // first card is the image, which measures 144px — so a larger step lands
+  // past it on its very first move and the walk never observes the file it
+  // started on. Not a property of the product: at rest the image *is* the
+  // topmost card, measured at `top: 8`. It is a property of sampling a
+  // continuous scroll, and the step has to be shorter than the shortest card
+  // for the sample to see every one of them.
   const height = await page.locator(VIEW).evaluate((node) => node.scrollHeight);
-  for (let top = 0; top <= height; top += 150) {
+  for (let top = 0; top <= height; top += 100) {
     await scrollTo(page, top);
     const current = await currentFile(page);
     if (current !== null && current !== '' && current !== seen.at(-1)) seen.push(current);
@@ -1056,7 +1135,7 @@ test('scrolling the diff column walks the tree selection forward, in file order'
   }
 
   // It starts at the top of the list and reaches the bottom of it.
-  expect(seen[0]).toBe(FILES[0]);
+  expect(seen[0]).toBe(columnAt(0));
   expect(order.get(seen.at(-1) as string)).toBeGreaterThan(FILES.length - 4);
 
   // And the file it names is genuinely the topmost one on screen, measured
@@ -1125,6 +1204,36 @@ test('clicking a file in the tree scrolls the column to it', async ({
     .toBeLessThan(40);
 });
 
+test('the tree follows a hand scroll again after a jump has landed', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // The release half of the guard in `DiffColumn`. While the column is
+  // travelling to a file it was sent to, it reports nothing — otherwise the
+  // cards it passes over arrive back as moves with origin `scroll` and cancel
+  // the journey a few files short. That silence has to end when the journey
+  // does, or the tree would sit still for the rest of the session.
+  //
+  // Asked here rather than in jsdom because it is a question about measured
+  // positions: jsdom reports every card at zero, so the column is on the same
+  // file before and after and a released guard looks exactly like a repeat.
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // A long jump, which is the case that exposed the bug: `src/app.ts` is near
+  // the end of the column, so the scroll passes over a dozen cards.
+  await goToFile(page, 'src/app.ts');
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', 'src/app.ts');
+
+  // Then by hand, back towards the top. The tree has to come with it.
+  await scrollTo(page, 0);
+  await expect
+    .poll(() => currentFile(page))
+    .not.toBe('src/app.ts');
+});
+
 test('a comment can be typed and posted', async ({ context, extensionId, api }) => {
   const page = await context.newPage();
   await openReview(page, extensionId);
@@ -1132,12 +1241,8 @@ test('a comment can be typed and posted', async ({ context, extensionId, api }) 
   // The gutter "+" appears on hover and lives in the shadow root, so the
   // composer is opened through the keyboard path instead: select a line, then
   // press `c`. Both halves are the real ones.
-  const gutter = page
-    .locator('diffs-container')
-    .first()
-    .locator('[data-column-number][data-line-type="change-addition"]')
-    .first();
-  await gutter.click();
+  await goToFile(page, 'src/app.ts');
+  await additionLineIn(page, 'src/app.ts').click();
 
   await page.locator('body').press('c');
 
@@ -1201,12 +1306,8 @@ test('a comment just posted can be resolved without reloading', async ({
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const gutter = page
-    .locator('diffs-container')
-    .first()
-    .locator('[data-column-number][data-line-type="change-addition"]')
-    .first();
-  await gutter.click();
+  await goToFile(page, 'src/app.ts');
+  await additionLineIn(page, 'src/app.ts').click();
   await page.locator('body').press('c');
 
   const box = page.getByRole('textbox', { name: /comment on src\/app\.ts/i });
@@ -1260,12 +1361,8 @@ test('joins a review the reviewer already had open', async ({
   // Known before anything is typed: the page asked, and says what it found.
   await expect(page.getByText(/not posted yet/i).first()).toBeVisible();
 
-  const gutter = page
-    .locator('diffs-container')
-    .first()
-    .locator('[data-column-number][data-line-type="change-addition"]')
-    .first();
-  await gutter.click();
+  await goToFile(page, 'src/app.ts');
+  await additionLineIn(page, 'src/app.ts').click();
   await page.locator('body').press('c');
 
   const box = page.getByRole('textbox', { name: /comment on src\/app\.ts/i });
@@ -1295,13 +1392,15 @@ test('the keyboard map works against real key events', async ({
 
   const body = page.locator('body');
 
-  // `j` / `k` move through the file list.
+  // `j` / `k` move through the file list, in the order the column draws it —
+  // which is `fileOrder`'s and not `UNIFIED_DIFF`'s, so the first file is the
+  // image rather than `src/app.ts`.
   await body.press('j');
-  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', FILES[0]);
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', columnAt(0));
   await body.press('j');
-  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', FILES[1]);
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', columnAt(1));
   await body.press('k');
-  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', FILES[0]);
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', columnAt(0));
 
   // And the tree follows. Asserting only on `data-current-file` is how the
   // tree came to sit still through `j` and `k`: the column moved, the shell
@@ -1310,11 +1409,11 @@ test('the keyboard map works against real key events', async ({
   // label right-to-left and renders it as two overlapping runs.
   const selectedRow = page.locator('[role="treeitem"][aria-selected="true"]');
   await expect(selectedRow).toHaveCount(1);
-  await expect(selectedRow).toContainText('app');
+  await expect(selectedRow).toContainText(basename(columnAt(0)));
 
   await body.press('j');
-  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', FILES[1]);
-  await expect(selectedRow).toContainText('beta');
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', columnAt(1));
+  await expect(selectedRow).toContainText(basename(columnAt(1)));
 
   // `?` is a shifted key on this layout, which is exactly the case the map
   // resolves from `event.key` rather than from `shiftKey`.
@@ -1371,14 +1470,21 @@ test('nothing unmodified fires while a comment is being typed', async ({
   // every one of them when the highlighter is ready — measured with a
   // `MutationObserver` at 44 nodes out and 44 back in, about 200ms after the
   // first card appears — so anything resolved before that is detached.
+  // The thread this types into is on `src/app.ts`, which sits well down the
+  // column now that both surfaces read `fileOrder` — so the card has to be
+  // asked for before it exists to have a reply box at all.
+  await goToFile(page, 'src/app.ts');
   const reply = page.locator('[data-reply-for]').first();
   await reply.click();
   await reply.fill('');
   await reply.pressSequentially('jjk');
 
-  // The keystrokes went into the box, not into the file list.
+  // The keystrokes went into the box, not into the file list. Unchanged from
+  // the file the box belongs to, rather than empty: getting to a reply box now
+  // means going to its card, so "nothing moved" is "still `src/app.ts`" — `j`
+  // three times would have walked three files on.
   await expect(reply).toHaveValue('jjk');
-  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', '');
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', 'src/app.ts');
 });
 
 test('expanding unchanged context anchors a comment the diff could not show', async ({
@@ -1392,6 +1498,11 @@ test('expanding unchanged context anchors a comment the diff could not show', as
   const page = await context.newPage();
   await openReview(page, extensionId);
 
+  // Asked for before it is looked for: `src/beta.ts` is near the end of the
+  // column under `fileOrder`, so its card is virtualized out until something
+  // scrolls there, and the section is drawn by `renderCustomHeader` on a card
+  // that exists.
+  await goToFile(page, 'src/beta.ts');
   const listed = page.locator('[data-unanchored="src/beta.ts"]');
   await expect(listed).toHaveCount(1);
 
@@ -1467,15 +1578,18 @@ test('dark mode renders', async ({ context, extensionId, api }) => {
   expect(seams.tree).toBe('rgba(0, 0, 0, 0)');
 
   // The diff itself follows, inside Pierre's shadow root and its own theme.
-  const diffBackground = await page
-    .locator('diffs-container')
-    .first()
-    .evaluate((node) => getComputedStyle(node).backgroundColor);
+  // A named card rather than the first: the top of the column is the image
+  // now, and "the diff resolves to the page's background" is a claim about a
+  // card that draws numbered rows.
+  await goToFile(page, 'src/app.ts');
+  const diffBackground = await diffFor(page, 'src/app.ts').evaluate(
+    (node) => getComputedStyle(node).backgroundColor,
+  );
   expect(diffBackground).not.toBe('rgba(0, 0, 0, 0)');
 
   // And the page is still legible: the diff is drawn, not blanked.
   await expect(
-    page.locator('diffs-container').first().locator('[data-column-number]').first(),
+    diffFor(page, 'src/app.ts').locator('[data-column-number]').first(),
   ).toBeVisible();
 });
 
@@ -1494,10 +1608,9 @@ test('a comment expanded into view survives narrowing the diff', async ({
   const page = await context.newPage();
   await openReview(page, extensionId);
 
+  await goToFile(page, 'src/beta.ts');
   const listed = page.locator('[data-unanchored="src/beta.ts"]');
-  const card = page
-    .locator('diffs-container')
-    .filter({ has: page.locator('[data-file-card="src/beta.ts"]') });
+  const card = diffFor(page, 'src/beta.ts');
 
   // The comment starts out listed as something the diff cannot show. Asserted
   // rather than assumed: it is the precondition the rest of this test changes.
@@ -1535,6 +1648,9 @@ test('a comment expanded into view survives narrowing the diff', async ({
   // the page reaches on a cold load: listed, not drawn.
   await chooseScope(page, /since my last review/i);
   await scopeChecked(page, /since my last review/i, 'false');
+  // Asked for again, because a scope change replaces the file list and rebuilds
+  // the column from its top — and `src/beta.ts` is not at the top.
+  await goToFile(page, 'src/beta.ts');
   // Drawn this time rather than listed, and that is right: the blobs are warm
   // from the expansion above, so the column's standing request for the line is
   // granted immediately. Either surface is correct — being on neither is not.
@@ -1605,7 +1721,8 @@ test('split view is a setting, and reaches a review that is already open', async
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  const diff = page.locator('diffs-container').first().locator('[data-diff-type]').first();
+  await goToFile(page, 'src/app.ts');
+  const diff = diffFor(page, 'src/app.ts').locator('[data-diff-type]').first();
   await expect(diff).toHaveAttribute('data-diff-type', 'single');
 
   // Ticked while this review is open, and it has to land here without a
@@ -1616,7 +1733,7 @@ test('split view is a setting, and reaches a review that is already open', async
   await expect(diff).toHaveAttribute('data-diff-type', 'split');
   // Still real, highlighted, numbered code — not an empty two-column frame.
   await expect(
-    page.locator('diffs-container').first().locator('[data-column-number]').first(),
+    diffFor(page, 'src/app.ts').locator('[data-column-number]').first(),
   ).toBeVisible();
   // And the thread that was anchored in unified is still anchored in split.
   await expect(
@@ -2012,7 +2129,10 @@ test('scoping the diff to one commit never draws a comment on the wrong line', a
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  // Anchored in the diff to begin with.
+  // Anchored in the diff to begin with. On `src/app.ts`, which the column has
+  // to be taken to first — it is well down the list now that the tree's order
+  // is the column's.
+  await goToFile(page, 'src/app.ts');
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
@@ -2085,9 +2205,11 @@ test('scoping the diff to one commit never draws a comment on the wrong line', a
   ).toBe(true);
   await expect(page.locator('[data-file-card="src/beta.ts"]')).toHaveCount(1);
 
-  // Back to everything, and the comment is drawn again.
+  // Back to everything, and the comment is drawn again. The column comes back
+  // at its top, so the file carrying the comment is asked for again first.
   await chooseScope(page, /show all commits/i);
   await expect(page.locator('.scope-bar')).toHaveAttribute('data-scope', 'whole');
+  await goToFile(page, 'src/app.ts');
   await expect(
     page.getByLabel('Diff').getByText('This allocates on every call.'),
   ).toBeVisible();
@@ -2333,11 +2455,17 @@ test('the last card can still be read when the column is full of rich ones', asy
           card.getBoundingClientRect().top - view.getBoundingClientRect().top,
         );
       },
-      // The archive, which sits where the table used to: three cards from the
-      // end of the column. It is the probe rather than the table because it is
-      // now the rich card in that position, and the position is what this
-      // measures — a rich card near the bottom being reachable at all.
-      [VIEW, ARCHIVE_FILE] as const,
+      // The last card in the column, whichever it is. This used to name the
+      // archive because the archive was three from the end and rich, and the
+      // pairing of "rich" with "near the bottom" was the thing being measured.
+      // Both surfaces read `fileOrder` now, so every rich card in this fixture
+      // — the image, the table, the archive — sorts to the top of the column
+      // and none is near the bottom any more. What is still worth pinning is
+      // the half that has not moved and is what `lib/review/columnTail.ts`
+      // exists for: the tail gives the column enough scroll range that its
+      // final card can reach the top rather than being stranded below the
+      // fold. So the probe is the final card, named by the order itself.
+      [VIEW, columnAt(-1)] as const,
     );
 
   const scrollFraction = (fraction: number) =>
@@ -2777,9 +2905,13 @@ test('the syntax theme is the reviewer\'s, and choosing one lets it colour the d
   const page = await context.newPage();
   await openReview(page, extensionId);
 
+  // Taken to a card with code in it first. The column's first `diffs-container`
+  // is the image now, whose shadow root holds no highlighted tokens at all.
+  await goToFile(page, 'src/app.ts');
+
   const tokenColours = () =>
-    page.evaluate(() => {
-      const root = document.querySelector('diffs-container')?.shadowRoot;
+    diffFor(page, 'src/app.ts').evaluate((container) => {
+      const root = container.shadowRoot;
       const spans = [...(root?.querySelectorAll('[style*="--diffs-token"]') ?? [])];
       return {
         // Deduplicated: what matters is the palette, not how many spans wear it.
@@ -2939,3 +3071,4 @@ test('names a repository the token cannot see, and offers the way to fix it', as
   const options = await opened;
   await expect(options).toHaveURL(new RegExp(`chrome-extension://${extensionId}/options.html`));
 });
+

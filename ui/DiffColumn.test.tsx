@@ -31,7 +31,7 @@ import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
 import { fileAnchor } from '@/lib/review/selection';
 import { MODE_MEMORY_KEY } from '@/lib/settings';
-import { CODE_VIEW_SAFE_PROPS, DiffColumn } from './DiffColumn';
+import { CODE_VIEW_SAFE_PROPS, DiffColumn, REACH_FRAMES } from './DiffColumn';
 import { request } from './background';
 import { fileDiffFor, fileDiffSignature } from './diffItems';
 import { NO_FILE } from './currentFile';
@@ -583,6 +583,43 @@ describe('DiffColumn', () => {
     });
 
     expect(onScrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report the files it passes over on its way to one it was sent to', async () => {
+    // The bug this pins, which a long jump is the only way to reach: a scroll
+    // the column *asked for* fires `scroll` on the way, `handleScroll` reports
+    // whichever card is momentarily at the top, that arrives back as a move
+    // with origin `scroll` — and origin `scroll` means "do not scroll", so the
+    // journey is cancelled a few files short of where it was going. It showed
+    // up as `n` landing on the file before the one holding the first thread.
+    //
+    // Reported once it gets there, not never. What must not happen is the
+    // column narrating the middle of its own journey.
+    const { onScrollTo, container } = mount(
+      [file({ path: 'a.ts' }), file({ path: 'b.ts' }), file({ path: 'c.ts' })],
+      { current: { path: 'a.ts', origin: 'command' } },
+    );
+    const scroller = container.querySelector('.diff-view');
+    if (scroller === null) throw new Error('no scroll region rendered');
+
+    // While the reach is still running — it retries across frames, and these
+    // are the events the browser fires underneath it.
+    act(() => {
+      fireEvent.scroll(scroller);
+      fireEvent.scroll(scroller);
+    });
+
+    expect(onScrollTo).not.toHaveBeenCalled();
+
+    // That the guard comes back off afterwards is not asserted here, and the
+    // reason is the same one this whole file keeps running into: jsdom lays
+    // nothing out, so the column is on the same card before and after the
+    // journey and a released guard is indistinguishable from a deduplicated
+    // report. `e2e/review.spec.ts` asks it where it can be answered — jump to
+    // a file, scroll by hand, and watch the tree follow.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
   });
 
   it('says nothing on its own when the scroll is what moved', () => {
@@ -2073,6 +2110,100 @@ describe('remembering how markdown is compared', () => {
  * `@pierre/diffs/react` import the same module, so one prototype covers every
  * viewer this file mounts, including the one a remount replaces.
  */
+/**
+ * Reaching a file the tree asked for, when the column has not measured it yet.
+ *
+ * The reported bug: clicking a collapsed file in the tree landed on one of its
+ * neighbours. `docs/reference/pierre-diffs-api.md` records why — `itemMetrics`
+ * are "height estimates used before measurement", and a collapsed item renders
+ * as a header alone, which is nothing like the estimate for a diff. A column
+ * with collapsed cards above the target therefore resolves `scrollTo` against
+ * offsets that are wrong by the accumulated difference, and one unretried ask
+ * lands wherever that error puts it.
+ *
+ * The card's own controls already had this problem and already solved it: ask
+ * again each frame until the column reports the target at its top, and give up
+ * after {@link REACH_FRAMES} rather than fighting a reviewer who has started
+ * scrolling. The tree was the one caller still asking once. It is the same
+ * settle loop now, which is why these assertions are about *how many times*
+ * the column asked — the only part of the question jsdom can answer, for the
+ * reasons the `describe` below sets out at length.
+ */
+describe('DiffColumn, reaching the file the tree picked', () => {
+  // Typed through the prototype rather than as a bare `vi.spyOn`, so the
+  // filter below reads `target.type` off the real `CodeViewScrollTarget`
+  // union instead of off `any`.
+  const spyOnScrollTo = () => vi.spyOn(CodeViewCore.prototype, 'scrollTo');
+  let scrolls: ReturnType<typeof spyOnScrollTo>;
+
+  beforeEach(() => {
+    scrolls = spyOnScrollTo();
+  });
+  afterEach(() => {
+    scrolls.mockRestore();
+  });
+
+  const askedFor = (path: string): number =>
+    scrolls.mock.calls.filter(
+      ([target]) => target.type === 'item' && target.align === 'start' && target.id === path,
+    ).length;
+
+  /**
+   * Let the retry run itself out, and report what it spent.
+   *
+   * The loop is driven by `requestAnimationFrame`, so the count right after
+   * the first render is one — the attempt made before paint — and everything
+   * this describes happens over the frames after it. Waiting until the number
+   * stops moving is what makes "kept asking" and "gave up" two assertions
+   * about one observed run rather than two guesses about a clock.
+   */
+  const untilSettled = async (path: string): Promise<number> => {
+    let last = -1;
+    for (let round = 0; round < 40 && askedFor(path) !== last; round += 1) {
+      last = askedFor(path);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    }
+    return last;
+  };
+
+  const FILES = [
+    file({ path: 'src/app.ts' }),
+    file({ path: 'src/beta.ts' }),
+    file({ path: 'src/gamma.ts' }),
+  ];
+
+  it('keeps asking for a file it has not arrived at yet', async () => {
+    // jsdom measures every rect as zero, so `topmostFile` settles on the last
+    // card registered and this target never reports as reached — which is
+    // exactly the shape of the real failure, and makes the retry countable.
+    mount(FILES, { current: { path: 'src/app.ts', origin: 'tree' } });
+    await untilDrawn('src/app.ts');
+
+    expect(await untilSettled('src/app.ts')).toBeGreaterThan(1);
+  });
+
+  it('gives up rather than fighting a reviewer who scrolls away', async () => {
+    mount(FILES, { current: { path: 'src/app.ts', origin: 'tree' } });
+    await untilDrawn('src/app.ts');
+
+    // A target that never reports as reached is the worst case, so this is the
+    // budget being spent in full and then stopping — not a loop with no end.
+    expect(await untilSettled('src/app.ts')).toBe(REACH_FRAMES);
+  });
+
+  it('asks nothing of a move the column itself made', async () => {
+    // The other half of the feedback loop `currentFile.ts` exists to break: a
+    // file that reached the top because the reviewer scrolled must not be
+    // scrolled back to.
+    mount(FILES, { current: { path: 'src/app.ts', origin: 'scroll' } });
+    await untilDrawn('src/app.ts');
+
+    expect(await untilSettled('src/app.ts')).toBe(0);
+  });
+});
+
 describe('DiffColumn, returning to the card that was pressed', () => {
   const spyOnScrollTo = () => vi.spyOn(CodeViewCore.prototype, 'scrollTo');
   let scrolls: ReturnType<typeof spyOnScrollTo>;

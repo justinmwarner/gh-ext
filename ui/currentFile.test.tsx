@@ -53,11 +53,39 @@ describe('currentFile', () => {
     expect(echoed).toBe(picked);
   });
 
-  it('returns the identical state when the tree echoes back the diff’s scroll', () => {
+  it('acts when the tree is pressed on the file the scroll had landed on', () => {
+    // Not an echo. The tree reporting a file back is one thing; a reviewer
+    // *pressing* the row the scroll happened to select is another, and it is a
+    // request — the header is partway up the column and they want it at the
+    // top. Returning the identical state made that press do nothing at all,
+    // which showed up hardest after a commit tab rebuilt the column: the file
+    // was still `current`, so clicking its row could not bring it back.
+    //
+    // Only the scroll side keeps the identity bail-out, because only the
+    // scroll side produces echoes. A press is never an echo.
     const scrolled = fromScroll(NO_FILE, 'src/a.ts');
-    const echoed = fromTree(scrolled, 'src/a.ts');
+    const pressed = fromTree(scrolled, 'src/a.ts');
 
-    expect(echoed).toBe(scrolled);
+    expect(pressed).not.toBe(scrolled);
+    expect(pressed).toEqual({ path: 'src/a.ts', origin: 'tree' });
+    expect(shouldScrollDiff(pressed)).toBe(true);
+  });
+
+  it('acts when a shortcut names the file the reviewer is already on', () => {
+    // `j` onto the last file, then a jump to a thread in it. Same argument.
+    const scrolled = fromScroll(NO_FILE, 'src/a.ts');
+    const asked = fromCommand(scrolled, 'src/a.ts');
+
+    expect(asked).not.toBe(scrolled);
+    expect(shouldScrollDiff(asked)).toBe(true);
+  });
+
+  it('still returns the identical state when a scroll re-reports where it is', () => {
+    // The half that has to keep bailing out: scroll fires at frame rate, and
+    // most frames are still on the file the last one reported.
+    const scrolled = fromScroll(NO_FILE, 'src/a.ts');
+
+    expect(fromScroll(scrolled, 'src/a.ts')).toBe(scrolled);
   });
 
   it('settles after one round trip in either direction', () => {
@@ -73,17 +101,26 @@ describe('currentFile', () => {
     state = fromScroll(state, 'src/b.ts');
     expect(shouldSelectInTree(state)).toBe(true);
 
+    // The loop is closed by the *scroll* side's echo above, not by this one.
+    // A press here is the reviewer asking again, so it acts — and acting is
+    // safe, because nothing calls `fromTree` except an event handler. The
+    // second report from a scroll is the fixed point; a press is a new start.
     state = fromTree(state, 'src/b.ts');
-    expect(shouldSelectInTree(state)).toBe(true);
-    expect(shouldScrollDiff(state)).toBe(false);
+    expect(shouldScrollDiff(state)).toBe(true);
+    expect(shouldSelectInTree(state)).toBe(false);
+
+    state = fromScroll(state, 'src/b.ts');
+    expect(shouldScrollDiff(state)).toBe(true); // unchanged: the effect will not re-run
   });
 
-  it('still moves when the same file is picked again from the other side', () => {
-    // Re-picking the file you are already on is a no-op, deliberately: there is
-    // nothing to scroll to and nothing to select that is not already selected.
+  it('acts on a second press of the row the reviewer is already on', () => {
+    // There is something to scroll to: the reviewer has read half the file and
+    // wants its header back at the top. This used to return the same object,
+    // which made the second press — and every press after it — do nothing.
     const state = fromTree(NO_FILE, 'src/a.ts');
 
-    expect(fromTree(state, 'src/a.ts')).toBe(state);
+    expect(fromTree(state, 'src/a.ts')).not.toBe(state);
+    expect(shouldScrollDiff(fromTree(state, 'src/a.ts'))).toBe(true);
   });
 });
 
@@ -193,10 +230,13 @@ describe('a move neither surface made', () => {
     expect(shouldSelectInTree(fromScrolling)).toBe(true);
   });
 
-  it('is a no-op when the file has not actually changed', () => {
-    // The identity check is what stops the two surfaces echoing each other
-    // forever; a third origin must not be the one that breaks it.
+  it('acts again when asked again for the file it is already on', () => {
+    // `n` twice onto two threads in one file, or Mod+K to the file already
+    // showing. Both are requests to be taken there, and both were swallowed
+    // while every repeat returned the identical state. The loop is still
+    // closed, because only a scroll can echo — see the reducer.
     const at = fromCommand(NO_FILE, 'src/app.ts');
-    expect(fromCommand(at, 'src/app.ts')).toBe(at);
+    expect(fromCommand(at, 'src/app.ts')).not.toBe(at);
+    expect(shouldScrollDiff(fromCommand(at, 'src/app.ts'))).toBe(true);
   });
 });
