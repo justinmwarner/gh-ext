@@ -19,12 +19,20 @@ import { LockedState } from './LockedState';
 import { NoRouteState } from './NoRouteState';
 import { SetupState } from './SetupState';
 import { Shell } from './Shell';
+import { usePageTheme } from './pageTheme';
 import { useHashRoute } from './useHashRoute';
 import { usePrPayload } from './usePrPayload';
 import { unlockVault, useVaultState } from './useVaultState';
 
 export function App() {
   const route = useHashRoute();
+  // Above the switch, and that is the point of it being here. Every route on
+  // this page wears the reviewer's theme — the dashboard, the four failure
+  // states and the loading state included. It used to be applied by `Shell`,
+  // which mounts on exactly one of those, so leaving a dark options page for
+  // the pull request list put the window back into the operating system's
+  // light. `ui/pageTheme.ts` carries the rest of the argument.
+  usePageTheme();
 
   if (route.kind === 'none') return <NoRouteState />;
   if (route.kind === 'dashboard') return <DashboardState />;

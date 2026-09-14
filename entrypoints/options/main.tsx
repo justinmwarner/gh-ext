@@ -57,10 +57,15 @@ import { DiffPreview } from '@/ui/DiffPreview';
 import { platformString } from '@/ui/platform';
 import { ThemePicker } from '@/ui/ThemePicker';
 import { browser } from 'wxt/browser';
-import { applyChromeTheme } from '@/ui/chromeTheme';
+import { bootPageTheme, wearPageTheme } from '@/ui/pageTheme';
 // Before the stylesheet, not after: everything in it refers to these by name.
 import '@/ui/tokens.css';
 import './style.css';
+
+// Before React renders, for the reason the review page's entry gives: this
+// page is reached by a button on a dark review page, where a white frame is
+// very visible indeed.
+bootPageTheme();
 
 /**
  * A refused token check, in the line under the button.
@@ -319,10 +324,18 @@ function usePreferences(): Preferences {
    * The second is that it makes the picker its own preview at full size. The
    * swatch beside each name says what a theme is; the page turning under the
    * cursor says what it is like to sit in.
+   *
+   * `wearPageTheme` rather than `usePageTheme`, which the review page uses and
+   * which reads storage for itself. That would be a round trip between the
+   * click and the page turning, on the one screen where the turn *is* the
+   * feedback. This page already holds the value; it should not ask for it back.
    */
   useEffect(() => {
+    // Not on the opening `null`, which means "not read yet" rather than "no
+    // theme": acting on it would strip what `bootPageTheme` has already put on
+    // and reintroduce the flash it removed.
     if (settings === null) return;
-    applyChromeTheme(document.documentElement, settings.diffTheme);
+    wearPageTheme(settings.diffTheme);
   }, [settings?.diffTheme]);
 
   const report = useCallback((section: SectionId, result: Result, fades: boolean) => {

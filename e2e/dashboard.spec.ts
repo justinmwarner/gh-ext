@@ -36,6 +36,33 @@ async function watch(context: BrowserContext, ...repos: string[]): Promise<void>
   }, repos);
 }
 
+/**
+ * Choose a theme, the way the options page would have.
+ *
+ * Merged rather than written flat, unlike `watch` above: every test that wants
+ * a theme also wants repositories opted in, and a second flat write would take
+ * the first one's back out.
+ */
+async function choose(context: BrowserContext, themeId: string): Promise<void> {
+  const worker = context.serviceWorkers()[0];
+  if (worker === undefined) throw new Error('the extension worker never started');
+  await worker.evaluate(async (diffTheme: string) => {
+    const api = (globalThis as unknown as {
+      chrome: {
+        storage: {
+          local: {
+            get(key: string): Promise<Record<string, unknown>>;
+            set(items: Record<string, unknown>): Promise<void>;
+          };
+        };
+      };
+    }).chrome;
+    const stored = await api.storage.local.get('settings');
+    const settings = (stored.settings ?? {}) as Record<string, unknown>;
+    await api.storage.local.set({ settings: { ...settings, diffTheme } });
+  }, themeId);
+}
+
 test.describe('the dashboard', () => {
   test('lists every bucket the fixture can reach', async ({ page, context, extensionId, api }) => {
     void api;
@@ -535,5 +562,91 @@ test.describe('the page rail', () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
     await expect(nav.getByRole('link', { name: 'Pull requests' })).toBeInViewport();
+  });
+});
+
+/**
+ * The chosen theme, on the two routes that are not a loaded pull request.
+ *
+ * Both claims here are only checkable in a real browser. The first is that the
+ * dashboard wears the theme at all — it used to be applied by `Shell`, which
+ * this route never mounts, so a reviewer leaving a dark options page for their
+ * pull request list landed on a page following the operating system instead.
+ *
+ * The second is *when*. `storage.local` is asynchronous, so a theme applied
+ * from a React effect arrives a frame after the paint, and that frame is the
+ * flicker. `ui/pageTheme.ts` mirrors the id into `localStorage` and reads it
+ * back synchronously at module load; what proves it is that the attribute is
+ * already there at `DOMContentLoaded`, before React has rendered anything at
+ * all, let alone run an effect.
+ */
+test.describe('the chosen theme', () => {
+  const THEME = 'github-dark';
+
+  test('dresses the dashboard, which Shell never mounts on', async ({
+    page,
+    context,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await watch(context, 'acme/widgets');
+    await choose(context, THEME);
+    await page.goto(dashboardUrl(extensionId));
+    await expect(page.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
+
+    await expect(page.locator('html')).toHaveAttribute('data-syntax-theme', THEME);
+    expect(await page.evaluate(() => document.documentElement.style.colorScheme)).toBe(
+      'dark',
+    );
+  });
+
+  test('is already on before the document has finished parsing', async ({
+    page,
+    context,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await watch(context, 'acme/widgets');
+    await choose(context, THEME);
+
+    // The first visit is what fills the mirror; it cannot help itself.
+    await page.goto(dashboardUrl(extensionId));
+    await expect(page.locator('html')).toHaveAttribute('data-syntax-theme', THEME);
+
+    // The second is the one under test. Recorded from inside the page rather
+    // than polled from outside it, because by the time an assertion could run
+    // the frame in question is long gone.
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        (window as unknown as { themeAtParse: string | null }).themeAtParse =
+          document.documentElement.getAttribute('data-syntax-theme');
+      });
+    });
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
+
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { themeAtParse: string | null }).themeAtParse,
+      ),
+    ).toBe(THEME);
+  });
+
+  test('leaves the page in Primer when no theme has been chosen', async ({
+    page,
+    context,
+    extensionId,
+    api,
+  }) => {
+    void api;
+    await watch(context, 'acme/widgets');
+    await page.goto(dashboardUrl(extensionId));
+    await expect(page.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
+
+    // The default has to be the *absence* of the mechanism rather than
+    // something equivalent to it, or `ui/tokens.css` is no longer the default.
+    await expect(page.locator('html')).not.toHaveAttribute('data-syntax-theme', /.*/);
   });
 });

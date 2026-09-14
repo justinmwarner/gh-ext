@@ -154,12 +154,12 @@ describe('App', () => {
   });
 });
 
-describe('App, the dashboard route', () => {
-  /** The worker's reply to whichever request the page decides to make. */
-  const replyWith = (data: unknown) => {
-    requestMock.mockResolvedValue({ ok: true, data });
-  };
+/** The worker's reply to whichever request the page decides to make. */
+const replyWith = (data: unknown) => {
+  requestMock.mockResolvedValue({ ok: true, data });
+};
 
+describe('App, the dashboard route', () => {
   const emptyDashboard = () =>
     replyWith({
       viewerLogin: 'me',
@@ -231,5 +231,61 @@ describe('App, the dashboard route', () => {
     render(<App />);
 
     expect(screen.getByText(/no pull request here/i)).toBeTruthy();
+  });
+});
+
+/**
+ * The theme belongs to the page, not to one route on it.
+ *
+ * It used to be applied by `Shell`, which mounts on exactly one of the six
+ * things this file renders. So a reviewer who left a dark options page for
+ * their pull request list arrived on a page wearing nothing, which is to say
+ * wearing whatever the operating system thought — and on a machine set to
+ * light, that is a white window with no warning.
+ */
+describe('App, wearing the chosen theme', () => {
+  const root = () => document.documentElement;
+
+  const choose = async (diffTheme: string) => {
+    await vaultStorage().set({ settings: { diffTheme } });
+  };
+
+  afterEach(() => {
+    root().removeAttribute('data-syntax-theme');
+    root().removeAttribute('style');
+  });
+
+  it('dresses the dashboard, which is the route that used to arrive undressed', async () => {
+    await choose('github-dark');
+    replyWith({ repos: [], total: 0 });
+    window.location.hash = '#/prs';
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(root().getAttribute('data-syntax-theme')).toBe('github-dark');
+    });
+    expect(root().style.colorScheme).toBe('dark');
+  });
+
+  it('dresses a route that names no pull request at all', async () => {
+    await choose('github-dark');
+    window.location.hash = '#/nonsense';
+
+    render(<App />);
+
+    await vi.waitFor(() => {
+      expect(root().getAttribute('data-syntax-theme')).toBe('github-dark');
+    });
+  });
+
+  it('leaves the page in Primer for a reviewer who has chosen no theme', async () => {
+    replyWith({ repos: [], total: 0 });
+    window.location.hash = '#/prs';
+
+    render(<App />);
+    await screen.findByRole('heading', { name: /pick the repositories/i });
+
+    expect(root().hasAttribute('data-syntax-theme')).toBe(false);
   });
 });

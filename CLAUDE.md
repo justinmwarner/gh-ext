@@ -35,6 +35,32 @@ ours" is the wrong instinct here.
   - Contrast ratios quoted in DESIGN.md are claims about the default only. A
     chosen theme is drawn as its author wrote it — that is deliberate and
     PRODUCT.md explains why.
+- **On the two pages, put a theme on through `ui/pageTheme.ts` and nowhere
+  else.** `applyChromeTheme` is the mechanism, but that file is what owns
+  `<html>`: it also sets `data-syntax-theme` and mirrors the chosen id into
+  `localStorage`, which is the only synchronous source a page has and therefore
+  the only thing standing between a reviewer and a frame of the wrong palette
+  on every load. Applying a theme around it leaves the mirror stale and the
+  next load boots the previous choice. `App` calls `usePageTheme` once for every
+  route; a new route needs nothing. The injected card is not part of this — it
+  is handed an id at mount and calls `applyChromeTheme` directly.
+- **One order, and `treeRows` owns it.** The tree and the diff column both read
+  `fileOrder` — directories first, then files, counting the way a person does.
+  `reviewFiles` sorts by it, so the whole diff and a narrowed one are laid out
+  by the same rule without either caller knowing there is one. Do not re-sort
+  at a surface: they disagreed once, and a root-level `README.md` came first in
+  the column and last in the tree.
+
+- **The file icons are generated, like the palettes.** `material-icon-theme` is
+  a devDependency and nothing from it ships; `npm run file-icons` writes the
+  drawings to `public/file-icons/` and the mapping to `lib/icons/material.ts`.
+  Regenerate, do not edit — `lib/icons/material.test.ts` fails when either has
+  fallen behind the installed package, and it checks both directions, because a
+  table naming a drawing that is not there is a broken `<img>` nobody sees
+  until they open that kind of file. The mapping is a dynamic import on
+  purpose: it is a quarter of a megabyte, and `ui/useFileIcons.ts` says why it
+  must not be on the first paint.
+
 - **`lib/` is pure.** No DOM, no `chrome.*`, no network. Two documented
   adapters are excepted: `token-provider.ts` and `settings-store.ts`. This
   boundary is why most of the logic tests in milliseconds under Node.
