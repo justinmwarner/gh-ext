@@ -25,7 +25,8 @@ import {
 import { createRoot } from 'react-dom/client';
 import { passphraseProblem } from '@/lib/crypto/vault';
 import { resolveMod } from '@/lib/keymap';
-import { logWarn } from '@/lib/log';
+import { diagnosticsReport } from '@/lib/diagnostics';
+import { logWarn, recentWarnings } from '@/lib/log';
 import { ChromeTokenProvider, type VaultState } from '@/lib/github/token-provider';
 import {
   type MessageKind,
@@ -716,22 +717,124 @@ function Keyboard({ settings, update, result }: SectionProps) {
   );
 }
 
+/**
+ * The two routes out, and they are deliberately different routes.
+ *
+ * A bug belongs in public next to the code, where it can be linked to a commit
+ * and where the next person to hit it can find it already answered. Everything
+ * else — a privacy question, anything naming a private repository, anything
+ * somebody would rather not publish — belongs in a mailbox. Offering only the
+ * issue tracker would quietly ask people to publish things they should not.
+ */
+const ISSUES_URL = 'https://github.com/justinmwarner/gh-ext/issues/new/choose';
+const CONTACT_EMAIL = 'reviewer@juwar.io';
+
 function Diagnostics({
   settings,
   update,
   result,
   rateLimit,
-}: SectionProps & { rateLimit: RateLimitSnapshot | null }) {
+  vault,
+}: SectionProps & { rateLimit: RateLimitSnapshot | null; vault: VaultState | null }) {
+  const [report, setReport] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState('');
+
+  /**
+   * Assembled on request rather than kept live.
+   *
+   * It has to cross to the worker for its warnings, and a report that quietly
+   * refreshed itself under the reviewer would not be the text they read before
+   * they copied it.
+   */
+  const build = useCallback(async () => {
+    if (vault === null) return;
+    const response = await request(message('get-warnings', {}));
+    setReport(
+      diagnosticsReport({
+        version: browser.runtime.getManifest().version,
+        userAgent: navigator.userAgent,
+        vault,
+        settings,
+        warnings: [
+          // The worker's first: it makes every GitHub request, so it holds the
+          // warnings a bug report is usually about.
+          { name: 'background worker', warnings: response.ok ? response.data : [] },
+          { name: 'options page', warnings: recentWarnings() },
+        ],
+      }),
+    );
+    setCopyState('');
+  }, [settings, vault]);
+
+  const copy = useCallback(async () => {
+    if (report === null) return;
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopyState('Copied. Paste it into the issue.');
+    } catch (error) {
+      // Refused for want of focus or permission. Saying so beats a button that
+      // appears to have worked, and the text is on screen to select by hand.
+      logWarn('could not write the diagnostics report to the clipboard', error);
+      setCopyState('The clipboard refused. Select the text above and copy it.');
+    }
+  }, [report]);
+
   return (
     <section className="settings">
       <h2>Diagnostics</h2>
 
+      <div className="setting">
+        <p className="field-label">Report a problem</p>
+        <p className="hint">
+          Bugs and feature requests go to{' '}
+          <a href={ISSUES_URL} target="_blank" rel="noreferrer">
+            GitHub issues
+          </a>
+          . Anything you would rather not publish — a privacy question, or
+          anything naming a private repository — to{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+        </p>
+      </div>
+
       <Check
         label="Write diagnostics to the browser console"
-        hint="Turn this on before reporting a bug, then turn it back off."
+        hint="For watching a fault as it happens. The report below does not need it."
         checked={settings.debugLogging}
         onChange={(on) => update({ debugLogging: on })}
       />
+
+      <div className="setting">
+        <p className="field-label">Diagnostics report</p>
+        <p className="hint">
+          Which build this is, how your token is held — never the token itself —
+          the settings that change how a diff is drawn, and the warnings recorded
+          since the browser started. Nothing is sent anywhere: it goes on your
+          clipboard, for you to read and then paste into an issue.
+        </p>
+
+        <div className="actions">
+          <button type="button" className="button" onClick={() => void build()} disabled={vault === null}>
+            {report === null ? 'Show diagnostics' : 'Refresh'}
+          </button>
+          {report !== null && (
+            <button type="button" className="button" onClick={() => void copy()}>
+              Copy
+            </button>
+          )}
+        </div>
+
+        {report !== null && (
+          // `aria-label` rather than a `<label htmlFor>`: the heading above is
+          // shared with the hint and the buttons, and a label pointing at a
+          // control that only exists once the report has been built would be
+          // dangling for as long as the section is collapsed.
+          <textarea readOnly rows={14} value={report} aria-label="Diagnostics report" />
+        )}
+
+        <p className="hint" aria-live="polite">
+          {copyState}
+        </p>
+      </div>
 
       <div className="setting">
         <p className="field-label">GitHub rate limit</p>
@@ -1311,6 +1414,7 @@ function App() {
             update={update}
             result={resultFor('diagnostics')}
             rateLimit={rateLimit}
+            vault={vault}
           />
         )}
       </main>

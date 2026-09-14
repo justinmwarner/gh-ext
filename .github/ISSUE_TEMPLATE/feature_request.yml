@@ -1,0 +1,44 @@
+name: Feature request
+description: Something the extension should do and does not.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Worth knowing before you write: this extension is deliberately not a
+        second GitHub. It covers the handful of actions a reviewer performs
+        constantly and hands everything else back through Open in GitHub, and
+        saying no to a feature is the normal answer rather than a discourtesy.
+        `PRODUCT.md` in this repository sets out why.
+
+
+        That makes the second field the important one. A request that names the
+        review it would have made faster is one that can be judged; a request
+        for parity with a GitHub screen usually is not.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What should it do
+    validations:
+      required: true
+
+  - type: textarea
+    id: when
+    attributes:
+      label: When did you last want it
+      description: >
+        The actual review, and what you did instead. How often this comes up
+        matters more than how large the feature is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: >
+        Going back to github.com for it is a perfectly good answer, and knowing
+        that is how often the escape hatch gets used is useful in itself.
+    validations:
+      required: false

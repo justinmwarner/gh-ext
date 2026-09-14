@@ -40,7 +40,10 @@ escape hatch.
 
 ### From the Chrome Web Store
 
-<!-- Replace with the listing URL once the item is published. -->
+<!-- Replace with the listing URL once the item is published, and keep the
+     campaign parameters on it: the store listing's analytics property cannot
+     tell an arrival from this file apart from a direct one without them. The
+     other links to the listing in this repository carry their own source. -->
 _Pending first publication — see [store/SUBMITTING.md](store/SUBMITTING.md)._
 
 Works in Chrome, Edge, Brave, Arc and Vivaldi: Edge and the other Chromium
@@ -216,6 +219,27 @@ obvious implementation, among them:
 If you change a GraphQL document, re-execute it against the live schema and
 update the reference. Section 7 of `docs/reference/github-review-api.md` shows
 how to validate a mutation without performing one.
+
+---
+
+## Support
+
+Bugs and feature requests go to
+[GitHub issues](https://github.com/justinmwarner/gh-ext/issues/new/choose).
+Check **Known limits** below first — several of the things that look like bugs
+are decisions, and the entry usually says why.
+
+A good report needs the diagnostics: on the extension's options page, under
+**Diagnostics**, press *Show diagnostics*, read it, then press *Copy*. It
+carries the build, the browser, how your token is held — never the token itself
+— the settings that change how a diff is drawn, and the warnings recorded since
+the browser started. Nothing is sent anywhere by the extension; you paste it
+yourself, which is why it is shown to you first.
+
+Anything you would rather not publish — a privacy question, a security report,
+or a fault you can only describe by naming a private repository — goes to
+<reviewer@juwar.io> instead. That is the support address on the store listing
+and in [the privacy policy](store/PRIVACY.md).
 
 ---
 

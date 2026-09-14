@@ -1,6 +1,6 @@
 # Privacy Policy — A Better Reviewer
 
-**Last updated: 8 September 2026**
+**Last updated: 14 September 2026**
 **Published by: PoodlePop LLC**
 
 A Better Reviewer is a browser extension that shows a faster review interface
@@ -11,7 +11,10 @@ data.
 
 The extension has no server. Nothing you do in it is sent anywhere except to
 GitHub, using a token you supply yourself. PoodlePop LLC cannot see your
-repositories, your reviews, your token, or the fact that you installed it.
+repositories, your reviews, your token, or that you in particular installed it.
+The one thing it does receive is a count: Google reports how many people
+installed from the store listing, the way it does for every item in the store.
+That is set out in full below.
 
 ## What is stored, and where
 
@@ -71,7 +74,24 @@ These requests carry your GitHub token, because that is what authenticates them
 to GitHub. They go to GitHub and nowhere else.
 
 The extension contacts no other server. There is no analytics, no telemetry, no
-crash reporting, no advertising, and no third-party service of any kind.
+crash reporting, no advertising, and no third-party service of any kind inside
+the extension.
+
+### Statistics about the store listing page
+
+Separately from the extension, Google provides PoodlePop LLC with aggregate
+statistics about the Chrome Web Store listing page: how many people viewed it,
+roughly where in the world they were, where they arrived from, and how many went
+on to install. This is Google measuring a page Google serves, and it happens
+whether or not you ever install anything.
+
+It is written down here because a policy that says "no analytics" without
+mentioning it would be answering a narrower question than the one you asked.
+
+It says nothing about you and nothing about your use of the extension, and it
+cannot: the extension transmits no data, the listing page is not the extension,
+and there is no identifier shared between the two. Nothing in the section above
+changes once you have installed.
 
 ## What is not collected
 
@@ -142,8 +162,11 @@ publicly on the extension's Chrome Web Store listing.
 
 ## Contact
 
-<!-- TODO: replace with the business contact address used on the store listing,
-     so the two match. -->
-Questions about this policy: open an issue at
-<https://github.com/justinmwarner/gh-ext/issues>, or contact PoodlePop LLC at
-the address shown on the extension's Chrome Web Store listing.
+Questions about this policy, and anything else you would rather not put in
+public: <reviewer@juwar.io>. This is the same address shown as the support
+contact on the extension's Chrome Web Store listing.
+
+Bugs and feature requests are better off in public, next to the code, where the
+next person to hit the same thing can find it already answered:
+<https://github.com/justinmwarner/gh-ext/issues>. Please do not put a token, a
+passphrase or a private repository name in one.

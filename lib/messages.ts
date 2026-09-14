@@ -22,6 +22,7 @@ import type { Diagnosis } from './github/diagnosis';
 import type { DeniedField } from './github/graphql-errors';
 import type { FallbackDiffFile } from './github/files-fallback';
 import type { PrCommit, ReviewThread } from './github/types';
+import type { Warning } from './log';
 import type { OpenReason } from './review/openTarget';
 
 export type { OpenReason };
@@ -316,6 +317,21 @@ export interface ProtocolMap {
   };
 
   /**
+   * Options page → worker: the warnings the worker has retained this session.
+   *
+   * `lib/log.ts` keeps its buffer in module state, and module state is per
+   * context: the options page has its own copy and can only ever see what it
+   * logged itself. The warnings worth putting in a bug report are almost all
+   * the worker's — every GitHub request goes through it — so the diagnostics
+   * report has to ask for them across the boundary rather than read a buffer
+   * that was never going to hold them.
+   */
+  'get-warnings': {
+    request: Record<string, never>;
+    response: readonly Warning[];
+  };
+
+  /**
    * Dashboard → worker: every pull request this account is involved in.
    *
    * Four aliased searches in one document. Here rather than on the page for
@@ -528,6 +544,7 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   'get-blob-bytes': true,
   'validate-token': true,
   'get-rate-limit': true,
+  'get-warnings': true,
   'get-dashboard': true,
   'discover-repos': true,
   'search-prs': true,

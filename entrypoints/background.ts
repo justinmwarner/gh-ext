@@ -16,7 +16,7 @@
  */
 
 import { browser } from 'wxt/browser';
-import { logWarn } from '@/lib/log';
+import { logWarn, recentWarnings } from '@/lib/log';
 import { followLoggingSetting } from '@/lib/settings-store';
 import { defineBackground } from 'wxt/utils/define-background';
 import {
@@ -810,6 +810,8 @@ export default defineBackground({
             return ok<'validate-token'>(await validateToken());
           case 'get-rate-limit':
             return ok<'get-rate-limit'>(rateLimit());
+          case 'get-warnings':
+            return ok<'get-warnings'>(recentWarnings());
           case 'get-dashboard':
             return ok<'get-dashboard'>(await getDashboard(message.repos));
           case 'search-prs':

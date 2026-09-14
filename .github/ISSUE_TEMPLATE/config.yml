@@ -1,0 +1,15 @@
+# An issue is public, and some of what people need to send is not. The contact
+# address is offered beside the templates rather than after them, so nobody
+# reaches for the issue tracker to ask a privacy question or to describe a
+# fault they can only describe by naming a private repository.
+blank_issues_enabled: true
+contact_links:
+  - name: Anything you would rather not publish
+    url: mailto:reviewer@juwar.io
+    about: >
+      A privacy question, a security report, or a fault you can only describe by
+      naming a private repository. This is the contact address on the Chrome Web
+      Store listing and in the privacy policy.
+  - name: How the token is stored, and what leaves your machine
+    url: https://github.com/justinmwarner/gh-ext/blob/main/store/PRIVACY.md
+    about: The privacy policy, which the source in this repository can be checked against.

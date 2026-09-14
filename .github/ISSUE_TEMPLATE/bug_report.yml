@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in the extension behaved wrongly.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: >
+        This extension collects nothing and sends nothing to its developer, so
+        what you write here is the only account of the fault anyone will get.
+        The diagnostics field at the bottom is the fastest way to make it
+        reproducible.
+
+
+        Please do not paste a GitHub token. The options page redacts anything
+        token-shaped out of the diagnostics report, but it cannot redact the
+        rest of this form.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, rather than what you concluded from it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reach it
+      description: >
+        Where you started and what you did. A public pull request that shows the
+        fault is worth more than any description of one; if it only happens on a
+        private repository, say what was unusual about the diff.
+      placeholder: |
+        1. Open a pull request on github.com
+        2. Press Review
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - The review page
+        - The card on the pull request page
+        - The options page
+        - The pull request list
+        - Somewhere else, or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >
+        From the extension's options page, under Diagnostics: press Show
+        diagnostics, read what it says, then press Copy and paste it here. It
+        carries the build, the browser, how your token is held — never the token
+        — the settings that change how a diff is drawn, and the warnings
+        recorded since the browser started. Nothing is sent anywhere by the
+        extension; you are pasting it yourself, so read it first.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before you post
+      options:
+        - label: I have read the diagnostics above and I am willing for them to be public.
+          required: false
+        - label: There is no token, passphrase or private repository name in this report.
+          required: true

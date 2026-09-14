@@ -510,7 +510,13 @@ test.describe('the picker, on the options page', () => {
   test('gives the private tag a pill there too', async ({ page, extensionId, api }) => {
     void api;
     await page.goto(optionsUrl(extensionId));
-    const tag = page.getByText('Private');
+    // By class rather than by its word, unlike the dashboard's copy of this
+    // test above. `getByText` matches a case-insensitive substring across the
+    // whole page, and the Diagnostics section's hint on this page mentions a
+    // private repository. `.repos-tag` is rendered for private repositories
+    // and nothing else, so it is the pill itself rather than a word that
+    // happens to appear in it.
+    const tag = page.locator('.repos-tag').first();
     await expect(tag).toBeVisible();
 
     const box = await tag.boundingBox();

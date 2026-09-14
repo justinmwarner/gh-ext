@@ -93,11 +93,17 @@ To be plain about the limit of that: encryption protects the token against anyth
 
 PRIVACY
 
-No analytics. No telemetry. No third-party servers. The developer receives no data of any kind. The extension makes network requests to github.com and api.github.com and to nowhere else.
+No analytics. No telemetry. No third-party servers. The extension makes network requests to github.com and api.github.com and to nowhere else, and the developer receives no data of any kind from it. Google reports aggregate statistics about this listing page, as it does for every item in the store; that is Google measuring its own page and says nothing about you or about your use of the extension. The privacy policy spells this out.
 
 OPEN SOURCE
 
 The full source is at https://github.com/justinmwarner/gh-ext — every claim above can be checked against it.
+
+SUPPORT
+
+Bugs and feature requests: https://github.com/justinmwarner/gh-ext/issues. The options page has a Diagnostics section that assembles everything a report needs — build, browser, and what went wrong — and puts it on your clipboard for you to paste. It never contains your token, and nothing is sent anywhere by the extension.
+
+Anything you would rather not put in public, including privacy questions: reviewer@juwar.io
 
 LIMITS WORTH KNOWING BEFORE YOU INSTALL
 
@@ -184,6 +190,14 @@ Certifications, all three of which apply:
   item's single purpose
 - I do not use or transfer user data to determine creditworthiness or for
   lending purposes
+
+### Support email
+
+`reviewer@juwar.io`
+
+The same address the privacy policy gives, and the same one the options page and
+the issue templates offer beside the tracker. Three places name it; if it ever
+changes, all three change together.
 
 ### Privacy policy URL
 
