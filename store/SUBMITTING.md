@@ -147,8 +147,9 @@ it, and `--no-video` skips the slow half.
 
 Run `npm run zip:store` on its own if the package is all you need.
 
-This produces `.output/store/a-better-reviewer-<version>-chrome.zip` (~3.8 MB
-since Mermaid joined the bundle; it was ~2.3 MB before).
+This produces `.output/store/a-better-reviewer-<version>-chrome.zip`. It has
+grown twice: ~2.3 MB originally, ~3.8 MB once Mermaid joined the bundle, and
+~4.6 MB now that a file-type icon ships for every row of the tree.
 The store build has its own output directory so it can never be mistaken for
 the unpacked build that `test:e2e` loads.
 
