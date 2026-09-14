@@ -1940,6 +1940,41 @@ export type CodeViewScrollTarget =
 `scrollTo({ type: 'line', id: fileId, lineNumber, side: 'additions', align: 'center' })` is
 exactly what you need for "jump to review thread".
 
+### A scroll target resolves against the layout *model*, not the layout
+
+Verified against 1.4.1, in a browser, and this is the one that breaks the obvious
+implementation. `resolveScrollTargetTop` reads `item.top` — the virtualizer's own running
+offset — and `computeApproximateSize` builds that from `metrics.diffHeaderHeight`, one
+global number, for every item. **The header is never measured.** So if your card headers are
+not exactly that number, every item offset below the first one is wrong by the accumulated
+difference, and the error is a *model* rather than an estimate: it does not improve once the
+column has been laid out. Measured here, a file whose two predecessors carried 70px headers
+against the 44px metric landed 84px down the scrollport — and stayed there, to the pixel,
+when the same scroll was asked for four more times against a settled layout.
+
+`itemMetrics` cannot rescue it. It is one set of metrics for the whole viewer (there is no
+per-item `metrics` input on `CodeViewItem`), so it can be right about one kind of card or
+another, not both.
+
+Two things make it correctable:
+
+- **`offset` shifts the destination by `-offset`** on an `item` target
+  (`resolveAlignedScrollPosition` returns `targetTop - stickyOffset - offset`). Measure where
+  the card actually landed, fold the difference into `offset`, and ask again: the viewer
+  re-resolves `item.top` every frame, so the correction rides a layout that is still settling.
+- **Note that `item` targets are resolved with `stickyOffset` of zero**, while `line` and
+  `range` targets pass `getStickyHeaderOffset()`. An `item` scroll puts the item's own slot
+  at the top, gap included, so the header settles a little way down rather than flush.
+
+And one that makes the naive correction fail: **`scrollTo` leaves a pending target behind**,
+which `CodeView` re-resolves on every frame until the scroll position equals it. Correcting
+the scrollport directly — `scrollBy` of the measured residual — is dragged back to the
+viewer's own answer before the next frame. The correction has to go back through `scrollTo`
+so there is one pending target rather than two things pulling.
+
+`ui/DiffColumn.tsx`'s `reach` is the implementation, and `ui/currentFile.ts` holds the two
+measured constants it aims at.
+
 ## G.3 Item ownership for very large PRs
 
 From the docs: **controlled** (`items`) when React state naturally owns a small list;
@@ -1966,7 +2001,7 @@ immutability or deep equality checks, which can quickly become expensive."*
 | `lineDiffType: 'none'` | Disables intra-line diffing entirely. |
 | `useTokenTransformer` / token callbacks | **Increase DOM size significantly.** The docs warn repeatedly: *"Worker pools can move highlighting work off the main thread, but they do not reduce the extra DOM size created by token metadata."* Leave `false` unless you need `onToken*`. |
 | `pointerEventsOnScroll` | `CodeView` disables pointer events while scrolling by default for smoothness. Set `true` only if you need interactions during scroll. |
-| `itemMetrics` / `metrics` | Height estimates used before measurement. Tune if you customize row heights; validate with `__devOnlyValidateItemHeights` (dev builds only) or `Virtualizer` `config.resizeDebugging`. |
+| `itemMetrics` / `metrics` | Height estimates used before measurement — **except `diffHeaderHeight`, which is never measured at all**; see the scroll-target note in G.2. Tune if you customize row heights; validate with `__devOnlyValidateItemHeights` (dev builds only) or `Virtualizer` `config.resizeDebugging`. |
 | `collapsed: true` on items | Header-only rendering for files the user has not opened — cheap way to handle a 1000-file PR. |
 | `disableVirtualizationBuffers` | Turns off the spacer buffers. |
 

@@ -1204,6 +1204,80 @@ test('clicking a file in the tree scrolls the column to it', async ({
     .toBeLessThan(40);
 });
 
+/**
+ * Where one card's header ends up, once the journey to it has stopped moving.
+ *
+ * Polled rather than slept on. The column asks, measures and corrects over a
+ * handful of frames, and the honest question is where it left the card — not
+ * where it was partway there. Two equal readings in a row is the end of it.
+ */
+async function reachFromTree(page: Page, path: string): Promise<number | null> {
+  await page.locator(`[data-path="${path}"]`).click();
+
+  let previous: number | null = null;
+  for (let round = 0; round < 24; round += 1) {
+    await page.waitForTimeout(50);
+    const top = (await cardTops(page)).find((card) => card.path === path)?.top ?? null;
+    if (top !== null && previous !== null && Math.abs(top - previous) < 1) return top;
+    previous = top;
+  }
+  return previous;
+}
+
+/**
+ * Every file, not one — because what breaks this is what is *above* the file.
+ *
+ * The reported bug was about a generated file, and being generated had nothing
+ * to do with it. `CodeView` models every card header at one global 44px metric
+ * and never measures it (`lib/review/columnTail.ts` has the numbers), so its
+ * item offsets are wrong by the accumulated shortfall of the headers above the
+ * target — 70px on a card showing a comparison, whose mode switcher is a
+ * second row. The generated files in this column happen to sit under two of
+ * those, and landed 84px down the scrollport with the previous card at the top.
+ *
+ * That error is a model, not a measurement, so it does not improve with time:
+ * before this test the column asked the viewer again each frame and was given
+ * the same wrong offset every time, then gave up. Pressed four times in a row
+ * on a settled layout, the card stayed exactly 84px down.
+ *
+ * Both directions, because approaching from below is a different set of
+ * estimates than approaching from above, and one pass would have missed the
+ * card that overshot by ten pixels and left its header off the top.
+ *
+ * Every miss is collected rather than asserted on the spot: "these five files
+ * cannot be reached" is a description of the bug, and "the second one failed"
+ * is a description of the test.
+ */
+test('every file in the column can be reached from the tree', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const missed: string[] = [];
+  const walk = async (order: readonly string[]) => {
+    for (const path of order) {
+      const top = await reachFromTree(page, path);
+      // The upper bound is the column's own tolerance, imported rather than
+      // restated: past it, `topmostFile` names a different file and the tree
+      // deselects the row that was just pressed. The lower bound is the
+      // header's own top edge — a card scrolled above it is one whose name and
+      // viewed box the reviewer cannot see.
+      if (top === null || top > REACHED || top < 0) {
+        missed.push(`${path} at ${top === null ? 'no card' : Math.round(top)}`);
+      }
+    }
+  };
+
+  await walk(COLUMN_ORDER);
+  await walk([...COLUMN_ORDER].reverse());
+
+  expect(missed).toEqual([]);
+});
+
 test('the tree follows a hand scroll again after a jump has landed', async ({
   context,
   extensionId,

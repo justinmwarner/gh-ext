@@ -76,7 +76,13 @@ import { FileCard } from './FileCard';
 import { PostingCard } from './PostingCard';
 import { ThreadCard } from './ThreadCard';
 import { type ComposerTarget, composerFor } from './composerAnchor';
-import { type CardTop, type CurrentFile, shouldScrollDiff, topmostFile } from './currentFile';
+import {
+  AT_REST,
+  type CardTop,
+  type CurrentFile,
+  shouldScrollDiff,
+  topmostFile,
+} from './currentFile';
 import { type BlobRefs, createDiffFilesLoader } from './blobLoader';
 import {
   codeViewItems,
@@ -376,23 +382,55 @@ const anchorSignature = (thread: {
   `${thread.id}#${thread.line ?? 'x'}#${thread.diffSide}#${thread.subjectType}#${thread.isOutdated}`;
 
 /**
- * How many frames a scroll this column was asked for keeps trying for.
+ * How many frames a jump from the Overview looks for its thread.
  *
- * Two of them ask, and both are asking for something that does not exist yet
- * at the moment of the press. A jump from the Overview has to reach a
- * *thread*: the file has to be scrolled to, virtualized in and rendered before
- * that element is in the DOM, and none of that is synchronous. A press on a
- * card's own control has to reach a card inside a viewer that the same press
- * has just torn down and rebuilt, and a freshly mounted `CodeView` resolves an
- * item scroll against its estimated heights until it has measured the real
- * ones.
+ * It is asking for something that does not exist yet at the moment of the
+ * press: the file has to be scrolled to, virtualized in and rendered before
+ * that element is in the DOM, and none of that is synchronous.
  *
- * A handful of frames covers both. Giving up quietly after that is the point
+ * A handful of frames covers it. Giving up quietly after that is the point
  * rather than a concession: a retry with no deadline is a loop that fights a
- * reviewer who has started scrolling on their own. For the jump, the file
- * scroll has already happened by then and that is most of the answer.
+ * reviewer who has started scrolling on their own, and by then the file scroll
+ * has already happened, which is most of the answer.
  */
 export const REACH_FRAMES = 8;
+
+/**
+ * How long {@link DiffColumn}'s `reach` will keep working on one journey.
+ *
+ * Twice the budget above, and for a reason that only applies here: most of
+ * these frames are spent *watching* rather than scrolling. `reach` corrects the
+ * viewer by measurement, and a measurement is only worth anything once the ask
+ * that provoked it has been answered — so a round trip is an ask, a wait, a
+ * correction and another wait, and the waits are the long part. Measured on the
+ * browser fixture, a single `scrollTo` took five frames to show up.
+ *
+ * Under a third of a second, then, and deliberately not much more. It is a
+ * deadline rather than a target — an arrival that holds is what ends almost
+ * every journey — but it is also how long the column can spend pulling itself
+ * back towards a file, and a reviewer who has started scrolling or reached for
+ * a control on the card is entitled to have it stop. It was a full half second
+ * for a while, and two browser tests said so: a press on a card's own chip
+ * landed on an element the column had moved out from under it.
+ */
+export const REACH_WINDOW = 16;
+
+/**
+ * How many settled frames in the right place end a journey.
+ *
+ * More than one, because a card can be in the right place and about to be
+ * pushed out of it. The archive card in the browser fixture loads its listing
+ * from a lazily imported chunk and grows when it arrives, which moves every
+ * card under it; a loop that stopped at the first frame that looked right
+ * stopped before that and left the file past the tolerance with the card above
+ * it at the top. Rendered Markdown and images arrive late for the same reason.
+ *
+ * Small, though. Every one of these frames is one where the column says nothing
+ * about where the reviewer is — `reaching` is still held — so this is bounded
+ * by how long the tree can be left out of step rather than by how long a card
+ * might take to settle.
+ */
+export const REACH_HELD = 3;
 
 /**
  * A press on a card's own control, and the card it was made on.
@@ -1532,31 +1570,70 @@ export function DiffColumn({
   }, [onScrollTo, cardTops]);
 
   /**
-   * Bring a card to the top, and keep asking until it is actually there.
+   * Bring a card to the top: ask the viewer where it is, then measure and
+   * finish the journey ourselves.
    *
-   * One ask is not enough, and the reason is measurement. `itemMetrics` are
-   * height *estimates* used until an item has been laid out, and a collapsed
-   * item is a header alone — nothing like the estimate for a diff. So a column
-   * with collapsed cards between here and the target resolves the offset
-   * against the accumulated error, scrolls to it, measures what that brought
-   * into view, and settles somewhere other than where it was sent. Clicking a
-   * collapsed file in the tree landed on a neighbour, which is the bug this is
-   * the fix for. A freshly remounted viewer has the same problem for the same
-   * reason, which is why the card controls below already worked this way.
+   * **Asking twice does not help, and that is the whole shape of this.** The
+   * viewer's item offsets are not estimates that improve once it has laid the
+   * column out — they are a model that is permanently wrong about us.
+   * `computeApproximateSize` sizes every card header from one 44px metric and
+   * never measures one (`lib/review/columnTail.ts` has the numbers and the
+   * library facts), and ours are 38px folded or open, and 70px on a card whose
+   * comparison brings a mode switcher as a second row. So its idea of where an
+   * item begins is short by the accumulated shortfall of every header above it.
+   * Measured on the browser fixture: the two generated files sat 84px down the
+   * scrollport with the card above them at the top, and stayed exactly there
+   * when the row was pressed four more times against a settled layout.
    *
-   * Asked before scrolling rather than after, and the order is load-bearing.
-   * `CodeView.suspendScrollInteractions` puts `pointer-events: none` on the
-   * sticky container for 120ms after *any* scroll it is asked for, and that
-   * container holds the card headers. A card already at the top has nothing to
-   * scroll to, so a call made anyway buys nothing and spends those 120ms
-   * making the header's own controls dead to a press.
+   * That was this loop before: ask, be given the same offset, ask again, give
+   * up. It was written believing the error was measurement — which is what the
+   * library's own documentation suggests, and is true of the *first* frame
+   * only. The column reported the reviewer on one file while showing them
+   * another, which is a bug the reported one is a single instance of: being
+   * generated had nothing to do with it, and every file under a comparison had
+   * it.
    *
-   * "Arrived" is `topmostFile(cardTops())` — deliberately the same question
+   * **So the correction is measured, and it is handed back through `offset`.**
+   * A frame reads where the card really is, and folds the difference into the
+   * `offset` of the next ask — which the viewer resolves as `item.top -
+   * offset`, so a residual it cannot see becomes one it cannot get wrong. The
+   * viewer is still asked for the first move, because bringing a card that is
+   * not drawn into the DOM is the one thing only it can do, and its guess is
+   * close enough for that.
+   *
+   * **A reading taken while the column is still moving is not the error.** It
+   * is the error plus however far the journey had left to run, and folding it
+   * in overshoots by that much — which is not a small mistake: measured, it
+   * put a card at the *bottom* of the scrollport, and the frame after that
+   * threw it back. So a residual is believed only when the card has stood in
+   * the same place for two frames, and the frames in between are spent
+   * watching rather than scrolling. {@link REACH_WINDOW} is sized for that
+   * wait.
+   *
+   * Correcting the scrollport directly was tried first and does not work, for
+   * a reason worth writing down. `scrollTo` leaves a *pending* target behind,
+   * which `CodeView` re-resolves against its own model on every frame until
+   * the scroll position equals it — so a `scrollBy` of the measured residual
+   * was dragged back before the next frame, and a card whose neighbour above
+   * was still loading finished exactly where it started. Going back through
+   * the viewer means one pending target rather than two things pulling, and
+   * because the residual is a property of the header model rather than of this
+   * particular scroll, a constant offset composes correctly with the viewer's
+   * own re-resolution while a card above is still growing.
+   *
+   * "Arrived" stays `topmostFile(cardTops())` — deliberately the same question
    * `handleScroll` answers, so that arriving means here what it means when the
-   * column reports where the reviewer is. And it gives up after
-   * {@link REACH_FRAMES} rather than looping without a deadline, because a
-   * retry with no end is a loop that fights a reviewer who has started
-   * scrolling on their own.
+   * column reports where the reviewer is. Asked before scrolling rather than
+   * after, and the order is load-bearing:
+   * `CodeView.suspendScrollInteractions` puts `pointer-events: none` on the
+   * sticky container for 120ms after *any* scroll, and that container holds the
+   * card headers. A card already at the top has nothing to move towards, so a
+   * scroll made anyway buys nothing and spends those 120ms making the header's
+   * own controls dead to a press.
+   *
+   * It still gives up after {@link REACH_WINDOW} rather than looping without a
+   * deadline, because a retry with no end is a loop that fights a reviewer who
+   * has started scrolling on their own.
    */
   /**
    * Take the guard for one journey, and give back a way to release it.
@@ -1587,11 +1664,67 @@ export function DiffColumn({
       let attempts = 0;
       const done = hold();
 
+      // How far the viewer's idea of this item's top is from where the card
+      // actually lands. Accumulated rather than assigned: each reading is the
+      // residual left over *after* the last ask was answered.
+      let offset = 0;
+      let asks = 0;
+      // Where the card was when the last ask went out, so that "has the column
+      // answered it yet" is a question with an answer. Null while the card is
+      // not drawn, which is its own kind of answer.
+      let sent: number | null = null;
+      // Where it was on the previous frame, so a settled reading can be told
+      // apart from one taken mid-journey.
+      let before: number | null = null;
+      // Consecutive frames the card has been where it belongs and stayed
+      // there. What ends the loop.
+      let held = 0;
+
+      const ask = (at: number | null) => {
+        asks += 1;
+        sent = at;
+        held = 0;
+        viewer.current?.scrollTo({ type: 'item', id: path, align: 'start', offset });
+      };
+
       const settle = () => {
-        if (topmostFile(cardTops()) === path) return done();
-        viewer.current?.scrollTo({ type: 'item', id: path, align: 'start' });
+        const tops = cardTops();
+        const card = tops.find((entry) => entry.path === path)?.top ?? null;
+        const stood = card !== null && before !== null && Math.abs(card - before) < 1;
+        const answered = card === null || sent === null || Math.abs(card - sent) >= 1;
+        before = card;
+
+        if (topmostFile(tops) === path) {
+          held += 1;
+          if (held >= REACH_HELD) return done();
+        } else if (asks === 0) {
+          // The viewer's own answer first, whether or not the card is drawn.
+          // A residual read before it has been given is the distance still to
+          // travel rather than the error in it — and folding *that* in sent
+          // the column a screenful past a file two rows away.
+          ask(card);
+        } else if (card === null) {
+          // Not drawn. The viewer is the only thing that can bring it in, and
+          // its offset — wrong as it is about where the card ends up — is
+          // close enough to do that.
+          ask(null);
+        } else if (stood && answered) {
+          // Subtracted, because the viewer resolves `start` as `item.top -
+          // offset`: a card left too far down the scrollport has to be met
+          // with a larger destination, which is a smaller offset.
+          offset -= card - AT_REST;
+          ask(card);
+        } else {
+          // Still moving, or the last ask has not landed. Wait. A reading now
+          // is either the journey rather than the error, or an error already
+          // answered — and folding either in counts it twice. A scroll asked
+          // for anyway would also spend another 120ms of the sticky
+          // container's pointer events for nothing.
+          held = 0;
+        }
+
         attempts += 1;
-        if (attempts >= REACH_FRAMES) return done();
+        if (attempts >= REACH_WINDOW) return done();
         frame = requestAnimationFrame(settle);
       };
 

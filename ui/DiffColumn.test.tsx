@@ -31,10 +31,10 @@ import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
 import { fileAnchor } from '@/lib/review/selection';
 import { MODE_MEMORY_KEY } from '@/lib/settings';
-import { CODE_VIEW_SAFE_PROPS, DiffColumn, REACH_FRAMES } from './DiffColumn';
+import { CODE_VIEW_SAFE_PROPS, DiffColumn, REACH_WINDOW } from './DiffColumn';
 import { request } from './background';
 import { fileDiffFor, fileDiffSignature } from './diffItems';
-import { NO_FILE } from './currentFile';
+import { AT_REST, NO_FILE } from './currentFile';
 import { memoryStore } from './memoryStore.fixture';
 import {
   annotationIsVisible,
@@ -2111,23 +2111,26 @@ describe('remembering how markdown is compared', () => {
  * viewer this file mounts, including the one a remount replaces.
  */
 /**
- * Reaching a file the tree asked for, when the column has not measured it yet.
+ * Reaching a file the tree asked for, when the viewer is wrong about where it is.
  *
- * The reported bug: clicking a collapsed file in the tree landed on one of its
- * neighbours. `docs/reference/pierre-diffs-api.md` records why — `itemMetrics`
- * are "height estimates used before measurement", and a collapsed item renders
- * as a header alone, which is nothing like the estimate for a diff. A column
- * with collapsed cards above the target therefore resolves `scrollTo` against
- * offsets that are wrong by the accumulated difference, and one unretried ask
- * lands wherever that error puts it.
+ * The reported bug: clicking a generated file in the tree landed on one of its
+ * neighbours. Being generated had nothing to do with it — `CodeView` sizes
+ * every card header from one 44px metric and never measures one, and ours are
+ * 38px and 70px, so its item offsets are short by the accumulated shortfall of
+ * every header above the target. Every file under a card showing a comparison
+ * had it.
  *
- * The card's own controls already had this problem and already solved it: ask
- * again each frame until the column reports the target at its top, and give up
- * after {@link REACH_FRAMES} rather than fighting a reviewer who has started
- * scrolling. The tree was the one caller still asking once. It is the same
- * settle loop now, which is why these assertions are about *how many times*
- * the column asked — the only part of the question jsdom can answer, for the
- * reasons the `describe` below sets out at length.
+ * That is a model rather than an estimate, so asking again does not improve it:
+ * measured in a browser, a generated file sat 84px down the scrollport and
+ * stayed exactly there when the row was pressed four more times. So the column
+ * asks once, measures where the card actually landed, and folds the difference
+ * into the next ask's `offset`.
+ *
+ * jsdom reports every rect as zero and so can answer none of "where did it end
+ * up". What it can answer is the *shape* of the conversation — how many asks,
+ * in what order, carrying what offset — which is where the two mistakes this
+ * loop is built around would show: correcting before the viewer has answered,
+ * and correcting again before the correction has landed.
  */
 describe('DiffColumn, reaching the file the tree picked', () => {
   // Typed through the prototype rather than as a bare `vi.spyOn`, so the
@@ -2174,23 +2177,56 @@ describe('DiffColumn, reaching the file the tree picked', () => {
     file({ path: 'src/gamma.ts' }),
   ];
 
-  it('keeps asking for a file it has not arrived at yet', async () => {
-    // jsdom measures every rect as zero, so `topmostFile` settles on the last
-    // card registered and this target never reports as reached — which is
-    // exactly the shape of the real failure, and makes the retry countable.
+  it('asks the viewer where the file is, carrying nothing of its own', async () => {
+    mount(FILES, { current: { path: 'src/app.ts', origin: 'tree' } });
+    await untilDrawn('src/app.ts');
+    await untilSettled('src/app.ts');
+
+    const offsets = scrolls.mock.calls.flatMap(([target]) =>
+      target.type === 'item' && target.align === 'start' && target.id === 'src/app.ts'
+        ? [target.offset ?? 0]
+        : [],
+    );
+
+    // The order is what this pins, and it is the mistake that makes the fix
+    // worse than the bug. A residual read before the viewer has answered is
+    // the distance still to travel rather than the error in it, and folding
+    // *that* in sent the column a screenful past a file two rows away — far
+    // enough that the card was virtualized back out and there was nothing left
+    // to correct against. So the first ask carries nothing of ours.
+    expect(offsets[0]).toBe(0);
+  });
+
+  it('waits for the column to answer rather than asking again', async () => {
     mount(FILES, { current: { path: 'src/app.ts', origin: 'tree' } });
     await untilDrawn('src/app.ts');
 
-    expect(await untilSettled('src/app.ts')).toBeGreaterThan(1);
+    // The other half of the same mistake: correcting again before the last
+    // correction has landed folds the same error in twice, and five frames of
+    // that is how far past the file the column went.
+    //
+    // jsdom is a document where nothing ever moves, which makes it exactly the
+    // case this rule is about. Two things can change here and no more: the
+    // first ask goes out, and the card turns up in the DOM — so two asks is
+    // the ceiling, against the twenty-nine a loop that asked every frame would
+    // spend. Whether it is one or two is a race with the first render and not
+    // worth pinning. What the asks would be once something really moved is a
+    // question for a browser, and `e2e/review.spec.ts` walks every file in the
+    // column asking it.
+    expect(await untilSettled('src/app.ts')).toBeLessThanOrEqual(2);
   });
 
   it('gives up rather than fighting a reviewer who scrolls away', async () => {
     mount(FILES, { current: { path: 'src/app.ts', origin: 'tree' } });
     await untilDrawn('src/app.ts');
 
-    // A target that never reports as reached is the worst case, so this is the
-    // budget being spent in full and then stopping — not a loop with no end.
-    expect(await untilSettled('src/app.ts')).toBe(REACH_FRAMES);
+    // A target that never reports as reached is the worst case, and this is
+    // that case stopping rather than running on. Bounded by {@link
+    // REACH_WINDOW} rather than equal to it, because most of a journey's
+    // frames are spent watching rather than scrolling.
+    const spent = await untilSettled('src/app.ts');
+    expect(spent).toBeGreaterThan(0);
+    expect(spent).toBeLessThanOrEqual(REACH_WINDOW);
   });
 
   it('asks nothing of a move the column itself made', async () => {
@@ -2353,11 +2389,13 @@ describe('DiffColumn, returning to the card that was pressed', () => {
   });
 
   it('gives up rather than scrolling for as long as the page is open', async () => {
-    // The retry is there because a remounted viewer has not measured its items
-    // on the first frame. A retry with no deadline is an animation-frame loop
-    // that would out-argue a reviewer who had started scrolling themselves, so
-    // it stops after REACH_FRAMES whether or not the card ever arrived — and
-    // in jsdom, where every card measures as sitting at the top, it does not.
+    // The retry is there because the viewer's item offsets are a model of card
+    // headers rather than a measurement of them, and a remounted viewer has
+    // not measured its items at all yet. A retry with no deadline is an
+    // animation-frame loop that would out-argue a reviewer who had started
+    // scrolling themselves, so it stops after {@link REACH_WINDOW} frames
+    // whether or not the card ever arrived — and in jsdom, where every card
+    // measures as sitting at the top and nothing ever moves, it does not.
     mount(
       [
         file({ path: 'src/app.ts' }),
@@ -2371,13 +2409,13 @@ describe('DiffColumn, returning to the card that was pressed', () => {
       fireEvent.click(
         within(card('lib/util.ts')).getByRole('button', { name: /whitespace hidden/i }),
       );
-      // Comfortably longer than eight frames.
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Comfortably longer than the window.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     });
 
     const settled = asked().length;
     expect(settled).toBeGreaterThan(0);
-    expect(settled).toBeLessThanOrEqual(8);
+    expect(settled).toBeLessThanOrEqual(REACH_WINDOW);
 
     // And having stopped, it stays stopped.
     await act(async () => {

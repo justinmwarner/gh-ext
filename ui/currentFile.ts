@@ -90,6 +90,29 @@ export interface CardTop {
 }
 
 /**
+ * Where a card's header comes to rest when the column has been scrolled to it.
+ *
+ * `CodeView` aligns an item's *slot* to the top of the scrollport, and the slot
+ * begins at the gap above the card — so the header itself settles a little way
+ * down rather than flush against it. Measured at 26px, and the same on every
+ * kind of card: folded or open, a text diff or a comparison.
+ *
+ * What it is for is the correction in `DiffColumn`'s `reach`. The viewer's item
+ * offsets are a model rather than a measurement — it sizes every header from
+ * one 44px metric and never measures one, and ours are 38px and 70px — so
+ * asking it a second time returns the same wrong answer. The column measures
+ * where the card actually landed and hands the difference back as the next
+ * ask's `offset`, and this is the mark it measures against: the same place the
+ * viewer puts a card when its model happens to be right, so one gesture has
+ * one outcome whether or not the correction was needed.
+ *
+ * Coupled to `--diffs-gap-block` in the stylesheet exactly as {@link REACHED}
+ * is, and bounded by it — a card left further down than `REACHED` is one the
+ * column would report the *previous* file for.
+ */
+export const AT_REST = 26;
+
+/**
  * How far below the top of the scrollport a header may sit and still be the
  * file the reviewer is on.
  *
