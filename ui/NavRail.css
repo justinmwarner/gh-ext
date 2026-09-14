@@ -17,10 +17,14 @@
 
 .navrail {
   flex: 0 0 auto;
-  /* Matches the review rail's strip so the two read as one component seen on
-     two pages rather than as two controls that happen to rhyme. */
-  width: 72px;
-  padding: 8px 0;
+  /* 71px of content, which is the review rail's strip, so the two read as one
+     component seen on two pages rather than as two controls that happen to
+     rhyme. The 6px on the left is that rail's padding: the current page is
+     drawn as a tab now, and a tab whose rounded corners sit against the edge
+     of the window reads as something that failed to finish drawing. The extra
+     pixel is the border. */
+  width: 78px;
+  padding: 8px 0 8px 6px;
   border-right: 1px solid var(--border-default);
   background: var(--canvas-inset);
   /* Both pages this sits on scroll a long way — the options page is some two
@@ -42,7 +46,12 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  /* `stretch`, so an item can reach the rail's right-hand edge. It has to: the
+     current page is drawn as a tab running into the content beside it, and a
+     tab centred in the rail with air either side of it is not attached to
+     anything. The `width: 100%` below could not do this on its own — the
+     items' own `li` was shrink-wrapped, so 100% was 100% of nothing. */
+  align-items: stretch;
   gap: 2px;
 }
 
@@ -54,16 +63,23 @@
   align-items: center;
   gap: 3px;
   width: 100%;
-  padding: 8px 4px 7px;
+  /* A pixel off three sides, given back to the transparent border below, so
+     arriving on a page does not move its icon. */
+  padding: 7px 4px 6px 3px;
   font: inherit;
   font-size: 11px;
   line-height: 14px;
   text-align: center;
   color: var(--fg-muted);
   text-decoration: none;
-  border: 0;
+  /* Transparent rather than absent, and open on the right: that is the side
+     the content is on, and the side a tab must not have a line down. */
+  border: 1px solid transparent;
+  border-right: 0;
   border-radius: 6px;
   background: none;
+  /* For the current page's extension over the rail's border, below. */
+  position: relative;
 }
 
 /* Only the two that go somewhere. The current page is not a control, and
@@ -83,12 +99,47 @@ button.navrail-item:hover {
   text-decoration: none;
 }
 
-/* The mark that says where you are. Weight and foreground, not a fill: this is
-   a statement about the page, not a selected control. The review rail's active
-   tab uses the same pairing. */
+/* The mark that says where you are, which is now a tab rather than a weight.
+ *
+ * This reverses what used to be written here — that the mark was a statement
+ * about the page and not a selected control, so it should be foreground and
+ * weight rather than a fill. The rail is the thing that *chose* the page, and
+ * once the review rail beside it draws its active view as a tab running into
+ * the diff, a bold word here is the odd one out. Both rails say it the same
+ * way now, which is the whole reason this stylesheet exists.
+ *
+ * Rounded on the left, square and borderless on the right, wearing the colour
+ * of the content rather than a fill of its own. `entrypoints/review/style.css`
+ * carries the long version under `.view-tab-active`. */
 .navrail-item[aria-current='page'] {
   color: var(--fg-default);
   font-weight: 600;
+  background: var(--canvas-default);
+  border-color: var(--border-default);
+  border-radius: 6px 0 0 6px;
+}
+
+/* The rail's own 1px border, covered, so nothing is drawn between the tab and
+   the page it opened. One pixel rather than the review rail's seven: the 6px
+   of padding this rail has is all on the left, so there is nothing between the
+   tab's right edge and the border but the border.
+
+   Absolutely positioned, so it is out of flow and cannot change the rail's
+   width. `left: 100%` is this element's padding box edge, which is also its
+   border box edge — there is no right border — and the -1px top and bottom put
+   its own hairlines level with the tab's. */
+.navrail-item[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 100%;
+  width: 1px;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: var(--canvas-default);
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
 }
 
 @media (prefers-reduced-motion: reduce) {

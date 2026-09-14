@@ -502,10 +502,36 @@ The rules the amendment carries:
 
 The review page itself has a 52px top bar (`--topbar-height`,
 a layout constant the sticky rail below it has to know and CSS cannot ask for) and
-a resizable file tree. Tabs are text plus a count, separated by weight and by the
-Accent Foreground underline on the active one. Rows in the tree hover to Neutral
+a resizable file tree. Rows in the tree hover to Neutral
 Hover with a 20px hit target around a 13px box: the box is what the reviewer sees,
 the target is what they hit.
+
+**The active tab is drawn as a tab, and that is a second amendment.** This line
+used to read "separated by weight and by the Accent Foreground underline on the
+active one". What the rail actually grew was a 2px Accent Foreground bar off the
+tab's left edge — a coloured side stripe above 1px, by exactly the technique the
+Don'ts forbid, and never listed among that rule's two exceptions. It is gone
+rather than narrowed. The active tab now wears Canvas Default, which is the
+colour of the view it opens, rounds only on the side away from that view, and
+runs over the rail's own border so that nothing is drawn between the tab and
+what it opened. The shape is the mark; a second mark for one state is the
+doubling the stripe rule was written about.
+
+Three surfaces say it the same way, which is the point of writing it down. The
+commit strip above the diff is this shape turned a quarter turn — open along the
+bottom, where it meets the diff — and a selected range of commits closes up into
+one tab with an inset hairline at each seam, because scoping to three commits
+opens one diff and three lit chips said it had opened three. The standalone rail
+on the options page and the dashboard is the vertical one again, and shares the
+`.view-tab` class rather than restating it.
+
+A tree row reads left to right in the order a reviewer needs it: tick, fold,
+icon, name, conversations, `+`/`−` counts, and the change type last. The letter
+used to sit in front of the counts and was moved behind them, because what the
+rail is scanned for is how much moved — the operation is the qualifier on that,
+not the headline. The icons are Material Icon Theme's, and they are the one
+place in the product drawing colours this system did not choose; the Don'ts
+below records why that is allowed and what it is not a precedent for.
 
 ### The injected card (signature component)
 
@@ -567,7 +593,7 @@ is suppressed under `@media (prefers-reduced-motion: reduce)`.
 - **Don't** load a web font. The system stack is the choice, not the fallback.
 - **Don't** use a coloured side stripe above 1px, by any technique. The options page warning panel and the review page's `.notice` both carried a 4px `border-left-width` and both now use their whole 1px border. One remains: the scope bar's lost/failed state draws `box-shadow: inset 4px 0 0`, which avoids the 4px layout shift a real border would cause when something goes wrong mid-row. It is a known exception, not a precedent. Use a full 1px border, a background tint, or a leading icon.
 - **Don't** add a fifth amber. There are four named roles in section 2 and one has already been retired into another; pick one of the four, or give the new one a role name and a reason.
-- **Don't** write a literal colour outside `ui/tokens.css`, at all. This is no longer a matter of avoiding duplicates — a literal cannot follow the reviewer's theme, so it is a patch of Primer left on a themed page. See The Named Colour Rule, which is enforced by a test.
+- **Don't** write a literal colour outside `ui/tokens.css`, at all. This is no longer a matter of avoiding duplicates — a literal cannot follow the reviewer's theme, so it is a patch of Primer left on a themed page. See The Named Colour Rule, which is enforced by a test. The file-type icons in `public/file-icons/` are the one body of colour this does not reach, and they are an exception with a reason rather than an oversight: they are somebody's logos. A TypeScript mark is a specific blue the way GitHub's own Linguist dots are, and recolouring one to match Solarized would make it a worse icon rather than a better-themed one — the recognition *is* the information. What this licenses is a vendored icon set drawn as its authors drew it. It does not license a hex in a stylesheet, in a `.tsx`, or in the card; the twenty-one Linguist colours that used to sit in `ui/FileTree.tsx` were removed in the same change that added these, and they were the reason the rule needed saying twice.
 - **Don't** build the visual language of a tool that is being sold: no gradient hero, no metric tiles, no purple-to-blue accent, no illustrated empty states, no product tour. PRODUCT.md names "a SaaS-looking developer tool" as an anti-reference.
 - **Don't** write chatty or cute copy. No emoji in interface text, no exclamation marks, no "Oops! Something went wrong." Say what failed and what to do.
 - **Don't** nest cards, and don't reach for a card grid where a list of rows would do. This interface is rows.

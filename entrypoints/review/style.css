@@ -533,6 +533,51 @@ button.scope-showing:hover {
   background: var(--page-bg);
 }
 
+/* A range is one tab, not several.
+ *
+ * Scoping to commits 9, 10 and 11 opens one diff, and three separate tab
+ * shapes said it had opened three. So the run closes up: only its two ends
+ * round their outer corners and carry a side border, and the numbers between
+ * them are divided by a hairline instead. `CommitTabs` marks the ends, because
+ * it is the only thing that knows where the span starts and stops.
+ *
+ * "All" is always a run of one, so it takes both marks and keeps the shape a
+ * lone tab has always had. */
+.commit-tab[aria-pressed='true']:not(.commit-tab-run-start) {
+  /* Over the strip's 2px gap and onto the previous tab's 1px right border, so
+     the two edges land on one line rather than leaving a 3px trench down the
+     middle of what is supposed to be a single tab. */
+  margin-left: -3px;
+  border-top-left-radius: 0;
+  border-left-color: transparent;
+}
+
+.commit-tab[aria-pressed='true']:not(.commit-tab-run-end) {
+  border-top-right-radius: 0;
+  border-right-color: transparent;
+}
+
+/* The seam between two numbers in the same run.
+ *
+ * A pseudo-element rather than the left border it is standing in for, because
+ * it has to stop short of the bottom edge. That edge is where the tab meets
+ * the diff, and the whole point of a strip that is open along the bottom is
+ * that nothing crosses it — a hairline running the full height would cut the
+ * group at the one place it is meant to be continuous with what it opened.
+ *
+ * `left: -1px` puts it on the shared border line itself, which the rule above
+ * has made transparent on both sides. */
+.commit-tab[aria-pressed='true']:not(.commit-tab-run-start)::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  bottom: 5px;
+  left: -1px;
+  width: 1px;
+  pointer-events: none;
+  background: var(--border-muted);
+}
+
 /* The whole group sits at the right-hand end, against "All", rather than the
    numbers starting at the left and "All" alone being pushed over. On the first
    child rather than `justify-content: flex-end` on the strip, which in a
@@ -823,40 +868,79 @@ button.scope-showing:hover {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 8px 8px 7px;
+  /* A pixel off the top, the bottom and the left, given back to the transparent
+     border below. The two together are the padding this used to have, so
+     selecting a view colours that border in without moving the icon. */
+  padding: 7px 8px 6px 7px;
   font: inherit;
   font-size: 11px;
   line-height: 14px;
   color: var(--fg-muted);
-  border: 0;
+  /* Transparent rather than absent, and open on the right for the same reason
+     the commit tabs are open along the bottom: the side the tab meets its
+     content on is the side that must not have a line down it. */
+  border: 1px solid transparent;
+  border-right: 0;
   border-radius: 6px;
   background: none;
   cursor: pointer;
-  /* For the active marker below, which is a pseudo-element rather than a
-     border precisely so selecting a view does not move the icon. */
+  /* For the active tab's right-hand extension, which is a pseudo-element
+     rather than a negative margin: the rail is `width: max-content`, so a
+     margin that changed with the state would resize the whole rail — and the
+     content beside it — every time a view was chosen. */
   position: relative;
 }
 
-.view-tab:hover {
+/* Not whatever is already current. It is wearing the page's own colour, and a
+   hover fill would paint over the thing that says so. Two exclusions because
+   two rails use this class and they mark themselves differently: the review
+   rail's views by `.view-tab-active`, and the standalone rail's pages by
+   `aria-current`, which on this page reaches the dashboard's own entry. */
+.view-tab:not(.view-tab-active):not([aria-current='page']):hover {
   color: var(--fg-default);
   background: var(--neutral-hover);
 }
 
+/* A tab, in the sense the commit strip means it, a quarter turn round.
+ *
+ * The rail sits to the left of what it opens, so the shape rounds on the left,
+ * goes square and borderless on the right, and takes the colour of the view
+ * rather than a fill of its own — the same argument the commit strip makes for
+ * wearing `--page-bg`: being the colour of what it opens says "this leads
+ * there" about the right thing, where a saturated marker only says "this one".
+ *
+ * The 2px accent bar that used to sit off the left edge is gone with it. The
+ * shape is the mark now, and two marks for one state is the doubling DESIGN.md
+ * asks us not to leave lying around. */
 .view-tab-active {
   color: var(--fg-default);
-  background: var(--neutral-hover);
   font-weight: 600;
+  background: var(--canvas-default);
+  border-color: var(--border-default);
+  border-radius: 6px 0 0 6px;
 }
 
-.view-tab-active::before {
+/* The last 7px, which the tab cannot reach on its own: the rail's 6px of
+ * padding and then its 1px border. Absolutely positioned so it is out of flow
+ * and contributes nothing to the rail's `max-content` width — a negative margin
+ * here would resize the rail, and the content beside it, on every view change.
+ *
+ * `left: 100%` is the padding box's right edge, which on this element is also
+ * the border box's — there is no right border. The inset of -1px top and bottom
+ * lifts it level with the outer edge of the tab's own hairlines, and its own
+ * two carry them across. */
+.view-tab-active::after {
   content: '';
   position: absolute;
-  left: -6px;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent-fg);
+  top: -1px;
+  bottom: -1px;
+  left: 100%;
+  width: 7px;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: var(--canvas-default);
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .view-icon {

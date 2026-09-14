@@ -76,6 +76,22 @@ export function CommitTabs({ commits, scope, onScope }: CommitTabsProps) {
       ? scope.kind === 'whole'
       : span !== null && slot >= span.first && slot <= span.last;
 
+  /**
+   * Where a selected tab sits in the run of selected tabs around it.
+   *
+   * The strip draws a range as one tab rather than as three, so it has to know
+   * which of the numbers are the run's ends: those two round their outer
+   * corners and carry the group's border, and everything between them closes
+   * the gap and shows a hairline instead. `span` already holds the answer — it
+   * is the same pair `selected` tests against — so this is only a name for
+   * reading it, and the stylesheet does the rest.
+   *
+   * Asked only of a tab that is selected. "All" is always a run of one, which
+   * is why both of these say yes to it and it keeps the shape a lone tab has.
+   */
+  const runStart = (slot: Slot): boolean => span === null || slot === span.first;
+  const runEnd = (slot: Slot): boolean => span === null || slot === span.last;
+
   const choose = (slot: Slot, extend: boolean): void => {
     if (slot === null) {
       onScope(WHOLE_DIFF);
@@ -162,6 +178,12 @@ export function CommitTabs({ commits, scope, onScope }: CommitTabsProps) {
             ? 'All'
             : `Commit ${entry.index + 1}, ${entry.commit.abbreviatedOid}`;
 
+        const pressed = selected(slot);
+        const classes = ['commit-tab'];
+        if (entry.kind === 'all') classes.push('commit-tab-all');
+        if (pressed && runStart(slot)) classes.push('commit-tab-run-start');
+        if (pressed && runEnd(slot)) classes.push('commit-tab-run-end');
+
         return (
           <button
             key={key(slot)}
@@ -170,7 +192,7 @@ export function CommitTabs({ commits, scope, onScope }: CommitTabsProps) {
               else elements.current.set(key(slot), node);
             }}
             type="button"
-            className={entry.kind === 'all' ? 'commit-tab commit-tab-all' : 'commit-tab'}
+            className={classes.join(' ')}
             // A digit is not a name. The strip is scannable *because* the
             // button says one character; everything else it has to say goes
             // here and on the title.
@@ -180,7 +202,7 @@ export function CommitTabs({ commits, scope, onScope }: CommitTabsProps) {
                 ? 'The whole pull request'
                 : describe(entry.commit, entry.index)
             }
-            aria-pressed={selected(slot)}
+            aria-pressed={pressed}
             tabIndex={slot === tabbable ? 0 : -1}
             onFocus={() => setFocusSlot(slot)}
             onBlur={() => setFocusSlot(null)}

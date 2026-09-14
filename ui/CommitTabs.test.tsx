@@ -132,6 +132,52 @@ describe('what is selected', () => {
   });
 });
 
+/**
+ * A range is drawn as one tab rather than as several, and the stylesheet needs
+ * to be told where that one tab starts and stops. These marks are the only
+ * thing that knows: the ends round their outer corners and carry the border,
+ * and everything between them closes the gap and shows a hairline.
+ */
+describe('a selected range, as one tab', () => {
+  const run = (element: Element): string =>
+    [
+      element.classList.contains('commit-tab-run-start') ? 'start' : '',
+      element.classList.contains('commit-tab-run-end') ? 'end' : '',
+    ]
+      .filter(Boolean)
+      .join('+');
+
+  it('marks only the two ends of the run', () => {
+    mount({ kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[2]!.oid });
+
+    expect(run(tab('Commit 1, 1111111'))).toBe('start');
+    expect(run(tab('Commit 2, 2222222'))).toBe('');
+    expect(run(tab('Commit 3, 3333333'))).toBe('end');
+  });
+
+  it('makes a single commit both ends, so it keeps a lone tab’s shape', () => {
+    mount({ kind: 'commits', from: COMMITS[1]!.oid, to: COMMITS[1]!.oid });
+
+    expect(run(tab('Commit 2, 2222222'))).toBe('start+end');
+  });
+
+  it('marks nothing on a tab that is not selected', () => {
+    mount({ kind: 'commits', from: COMMITS[1]!.oid, to: COMMITS[1]!.oid });
+
+    // Commit 1 sits immediately before the run. Without the pressed guard it
+    // would come out as its start, and the stylesheet would round a corner on
+    // a tab that is not part of anything.
+    expect(run(tab('Commit 1, 1111111'))).toBe('');
+    expect(run(tab('All'))).toBe('');
+  });
+
+  it('leaves All a run of one whenever it is what is pressed', () => {
+    mount();
+
+    expect(run(tab('All'))).toBe('start+end');
+  });
+});
+
 describe('choosing', () => {
   it('scopes to one commit when its number is clicked', async () => {
     const { onScope } = mount();
