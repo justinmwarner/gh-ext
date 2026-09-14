@@ -18,7 +18,7 @@ A Better Reviewer
 *(132 characters max — this is the line shown in search results)*
 
 ```
-A faster review interface for GitHub pull requests. Comments, replies, resolves, approvals, and full keyboard navigation.
+A faster review interface for GitHub pull requests, and a list of the ones actually waiting on you. Keyboard throughout.
 ```
 
 ## Category
@@ -38,9 +38,14 @@ Reviewing a pull request on GitHub means a lot of scrolling, a lot of clicking, 
 
 Open a pull request and a small card appears with "Start a Better Review". Click it and the whole review opens in a fast, purpose-built page. Don't want the card? Collapse it to a pill and it stays out of your way.
 
+FIRST, WHICH ONES ARE ACTUALLY YOURS
+
+There is also a list of the pull requests across the repositories you choose, sorted by what each one needs rather than by when it was touched: waiting on you, blocked on you, ready to merge, waiting on others, quiet, and drafts. Whose turn it is comes from what GitHub already said — a review request, a push since your last look, an unresolved conversation, an approval nobody has acted on — rather than from a rule you have to configure. Search it by title, including closed ones, and open any of them straight into the review page.
+
 WHAT IT DOES
 
 • Comments, with reply and resolve — and editing or deleting your own
+• Comments on a line, on a range of lines, or on the file as a whole
 • The full pending-review flow — queue comments, then submit them together
 • Approve and request changes
 • Status checks, including GitHub Actions runs and older commit statuses
@@ -49,6 +54,7 @@ WHAT IT DOES
 • Drafts that survive a failed post, so nothing you typed is lost
 • Multi-line comments and suggestion authoring
 • Noise filtering and diff search
+• A file tree you can filter as well as jump through, with an icon per file type
 • Expand unchanged context around a hunk
 • Scope the diff to one commit, a range of commits, or "changes since my last review"
 • A notice when new commits land on the branch while you are reading
@@ -60,11 +66,12 @@ MORE THAN LINE DIFFS
 
 Some files are not read as lines, so they are not shown as lines. Each of these sits behind a switch on the file's own card, with the plain diff always one press away.
 
-• Markdown rendered, with the changes marked inside the prose rather than beside it — and Mermaid diagrams drawn
+• Markdown rendered, with the changes marked inside the prose rather than beside it, Mermaid diagrams drawn, and a comment you can leave on the paragraph in front of you rather than on the line it came from
 • Images side by side, as an onion skin, under a swipe, or by difference
 • Jupyter notebooks by cell, or by their outputs
 • CSV and TSV as a table, with the changed rows on their own
 • JSON, JSONC, YAML and TOML compared by structure, so a reformat or a reordered key stops reading as a change
+• Zip archives read as a listing, so a rebuilt archive says which entries really changed rather than that the file differs
 
 READABLE, INCLUDING WHEN THE DEFAULT IS NOT
 
@@ -198,7 +205,13 @@ In `store/screenshots/`, all 1280×800, regenerated with `npm run screenshots`:
 | `05-rendered-markdown.png` | A Markdown file as a rendered diff, with a Mermaid diagram drawn |
 
 Upload at least one; the store allows up to five. `01` should be first, since it
-is the one shown largest.
+is the one shown largest — it is reached through the tree rather than taken
+where the page opens, so that it lands on a code diff with a comment in it
+rather than on whatever `fileOrder` happens to put at the top of the column.
+
+**The pull request dashboard is described above but not shown here.** Five is
+the store's ceiling and these five were kept; if one of them is ever dropped,
+that is the screenshot worth adding in its place.
 
 **Note:** these are captured against the test harness, so the diff content is
 fixture data rather than a real repository. The interface is exactly what ships.

@@ -59,9 +59,17 @@ extensionTest('the tour', async ({ context, extensionId, api }) => {
 
   // Writing a comment, through the keyboard path the product is built around:
   // choose a line, press `c`.
+  //
+  // The card is named rather than taken as the first one on the page, and that
+  // is not fussiness. There is one `diffs-container` per card, so `.first()`
+  // means "the top of the column" — which was `src/app.ts` while the column
+  // drew GitHub's diff order and is whatever `fileOrder` puts first now that
+  // the column and the tree share one. `e2e/review.spec.ts` has the same note
+  // over the same helper; this file was the one that did not get it, and the
+  // recording failed on a composer that had opened for a different file.
   const gutter = page
     .locator('diffs-container')
-    .first()
+    .filter({ has: page.locator('[data-file-card="src/app.ts"]') })
     .locator('[data-column-number][data-line-type="change-addition"]')
     .first();
   await gutter.click();

@@ -11,9 +11,13 @@
  * Run with `npm run screenshots`.
  */
 
+import type { Page } from '@playwright/test';
 import { test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { MARKDOWN_FILE } from './fixture';
+
+/** The one file with a comment anchored inside a rendered hunk. */
+const THREADED_FILE = 'src/app.ts';
 import { PR, expect, reviewUrl, test as extensionTest } from './extension';
 
 const OUT = 'store/screenshots';
@@ -24,15 +28,40 @@ mkdirSync(OUT, { recursive: true });
 
 test.use({ viewport: VIEWPORT });
 
+/**
+ * The lead screenshot, which is the one the store draws largest.
+ *
+ * Reached through the tree rather than taken where the page opens, and that is
+ * the whole of what this function does differently from a `goto`. The column
+ * and the tree share one order now, so the top of the column is
+ * `assets/logo.png` — an image comparison above a CSV grid, which is a fine
+ * thing to show third and a confusing thing to show first. `src/app.ts` is a
+ * code diff with a comment anchored in it, which is the loop the extension
+ * exists for and the one the listing copy promises.
+ *
+ * Shared by the light and dark shots so the pair is the same view twice, which
+ * is the only reading of "the same in dark mode" worth uploading.
+ */
+async function reviewOnAThread(page: Page): Promise<void> {
+  await expect(page.locator('.shell')).toBeVisible();
+  await expect(page.locator('[data-file-card]').first()).toBeVisible();
+
+  await page.locator(`[data-path="${THREADED_FILE}"]`).click();
+  await expect(page.locator(`[data-file-card="${THREADED_FILE}"]`)).toBeVisible();
+  // The thread itself, rather than the card that holds it: it is an annotation
+  // Pierre lays out inside the diff, so the card can be on screen a beat before
+  // the comment in it is.
+  await expect(page.locator('[data-thread="PRRT_anchored"]')).toBeVisible();
+  // The highlighter finishes a beat after the card mounts, and a
+  // half-highlighted diff is exactly the thing a listing should not show.
+  await page.waitForTimeout(1500);
+}
+
 extensionTest('01 the review page', async ({ context, extensionId, api }) => {
   const page = await context.newPage();
   await page.setViewportSize(VIEWPORT);
   await page.goto(reviewUrl(extensionId));
-  await expect(page.locator('.shell')).toBeVisible();
-  await expect(page.locator('[data-file-card]').first()).toBeVisible();
-  // The highlighter finishes a beat after the first card mounts, and a
-  // half-highlighted diff is exactly the thing a listing should not show.
-  await page.waitForTimeout(1500);
+  await reviewOnAThread(page);
 
   await page.screenshot({ path: `${OUT}/01-review.png` });
   void api;
@@ -43,9 +72,7 @@ extensionTest('02 the review page in dark mode', async ({ context, extensionId, 
   await page.setViewportSize(VIEWPORT);
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto(reviewUrl(extensionId));
-  await expect(page.locator('.shell')).toBeVisible();
-  await expect(page.locator('[data-file-card]').first()).toBeVisible();
-  await page.waitForTimeout(1500);
+  await reviewOnAThread(page);
 
   await page.screenshot({ path: `${OUT}/02-review-dark.png` });
   void api;
