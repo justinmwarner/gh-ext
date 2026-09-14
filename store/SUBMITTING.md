@@ -134,8 +134,18 @@ From a clean tree:
 ```bash
 npm ci
 npm test && npm run test:e2e     # don't ship a red build
-npm run zip:store
+npm run store:assets
 ```
+
+`store:assets` is every artifact in one command, in the order they depend on
+each other: it builds, takes the screenshots and promo tiles against that
+build, records the walkthrough in a second pass, packages the store zip, and
+then reads the manifest back and tells you which of the two
+`https://github.com/*` justifications below is the truthful one. It refuses to
+run against a dirty tree for the reason in the box above — `--dirty` overrides
+it, and `--no-video` skips the slow half.
+
+Run `npm run zip:store` on its own if the package is all you need.
 
 This produces `.output/store/a-better-reviewer-<version>-chrome.zip` (~3.8 MB
 since Mermaid joined the bundle; it was ~2.3 MB before).
@@ -183,12 +193,14 @@ From [LISTING.md](LISTING.md):
 - **Screenshots** — upload from `store/screenshots/`, `01-review.png` first
 - **Promotional tiles** — from `store/promo/`. The small tile (440×280) is
   required for the store to feature the listing at all; the marquee (1400×560)
-  is only used if it picks the listing for a marquee. Regenerate with
-  `npm run promo`.
-- **Video** — the field takes a **YouTube URL**, not a file. `npm run tour`
-  records `store/video/tour-1280x800.webm` against the real extension; upload
-  that to YouTube and paste the link. The file is gitignored because it is a
-  megabyte that changes wholesale on every run.
+  is only used if it picks the listing for a marquee.
+- **Video** — the field takes a **YouTube URL**, not a file.
+  `store/video/tour-1280x800.webm` is recorded against the real extension;
+  upload that to YouTube and paste the link. The file is gitignored because it
+  is a megabyte that changes wholesale on every run.
+
+`npm run store:assets` regenerates all three, and step 3 describes it.
+Individually they are `npm run screenshots`, `npm run promo` and `npm run tour`.
 - **Privacy** tab — single purpose, a justification per permission, the privacy
   policy URL from step 1, and the data-usage declarations
 
@@ -225,10 +237,12 @@ at issue; fix it, bump the version, and resubmit through the same item.
 
 ```bash
 npm version patch        # manifest version is derived from package.json
-npm run zip:store
+npm run store:assets     # package, screenshots, tiles and video, all at once
 ```
 
-Upload to the **same item** → Submit for review. The version must be higher
+Upload to the **same item** → Submit for review. `store:assets` ends by listing
+what actually changed under `store/`, which is usually a smaller set than
+everything — there is no need to re-upload a screenshot that did not move. The version must be higher
 than the published one. Existing users update automatically within a few hours
 of approval.
 

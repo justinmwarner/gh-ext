@@ -23,6 +23,7 @@
     "icons": "node scripts/make-icons.mjs",
     "palettes": "node scripts/make-palettes.mjs",
     "file-icons": "node scripts/make-file-icons.mjs",
+    "store:assets": "node scripts/store-assets.mjs",
     "screenshots": "wxt build && playwright test --config playwright.screenshots.config.ts",
     "shots:card": "wxt build && playwright test --config playwright.screenshots.config.ts card.shot",
     "shots:dashboard": "wxt build && playwright test --config playwright.screenshots.config.ts dashboard.shot",
