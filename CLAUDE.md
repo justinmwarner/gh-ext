@@ -61,23 +61,6 @@ ours" is the wrong instinct here.
   purpose: it is a quarter of a megabyte, and `ui/useFileIcons.ts` says why it
   must not be on the first paint.
 
-- **One order, and `treeRows` owns it.** The tree and the diff column both read
-  `fileOrder` — directories first, then files, counting the way a person does.
-  `reviewFiles` sorts by it, so the whole diff and a narrowed one are laid out
-  by the same rule without either caller knowing there is one. Do not re-sort
-  at a surface: they disagreed once, and a root-level `README.md` came first in
-  the column and last in the tree.
-
-- **The file icons are generated, like the palettes.** `material-icon-theme` is
-  a devDependency and nothing from it ships; `npm run file-icons` writes the
-  drawings to `public/file-icons/` and the mapping to `lib/icons/material.ts`.
-  Regenerate, do not edit — `lib/icons/material.test.ts` fails when either has
-  fallen behind the installed package, and it checks both directions, because a
-  table naming a drawing that is not there is a broken `<img>` nobody sees
-  until they open that kind of file. The mapping is a dynamic import on
-  purpose: it is a quarter of a megabyte, and `ui/useFileIcons.ts` says why it
-  must not be on the first paint.
-
 - **`lib/` is pure.** No DOM, no `chrome.*`, no network. Two documented
   adapters are excepted: `token-provider.ts` and `settings-store.ts`. This
   boundary is why most of the logic tests in milliseconds under Node.
