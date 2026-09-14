@@ -752,6 +752,7 @@ function Diagnostics({
     setReport(
       diagnosticsReport({
         version: browser.runtime.getManifest().version,
+        extensionId: browser.runtime.id,
         userAgent: navigator.userAgent,
         vault,
         settings,
@@ -1381,6 +1382,9 @@ function App() {
       <NavRail current="options" />
       <main>
         <h1>A Better Reviewer</h1>
+        <p className="build">
+          Version {browser.runtime.getManifest().version} · {browser.runtime.id}
+        </p>
 
         {tokenFirst && tokenSection}
 

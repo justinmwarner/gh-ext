@@ -192,6 +192,23 @@ its ending removed. The template fields are prefilled; the report goes on the
 clipboard and the reviewer pastes it into the body, where they can see all of
 it.
 
+### 5.5 Which install this is, on the page and in the report
+
+Added after the first build was tested, because testing it produced the exact
+failure it prevents: the changes were loaded, the extension was reloaded, and
+nothing appeared to have changed.
+
+The cause is that the store's copy and a locally loaded one are separate
+installs with separate ids, running side by side, and both say version 1.0.3.
+A version number alone cannot tell them apart, so reloading one and reading the
+other looks identical to a build that did not take.
+
+So the options page shows `Version <version> · <runtime.id>` under its title,
+and the report carries the id as well. The id is the discriminating fact; the
+version is what a reviewer is actually asked for. The bug report form asks for
+the version in its own field on top of the report, so that a version can be
+searched across issues without opening each one.
+
 ## 6. What is being changed
 
 | File | Change |
@@ -208,7 +225,8 @@ it.
 | `entrypoints/background.ts` | Answers it |
 | `lib/diagnostics.ts` | New — assembles and scrubs the report |
 | `lib/diagnostics.test.ts` | New — redaction, shape, empty cases |
-| `entrypoints/options/main.tsx` | Two links and a diagnostics control |
+| `entrypoints/options/main.tsx` | Two links, a diagnostics control, the build line |
+| `entrypoints/options/style.css` | `.build`, and the title's margin moved onto it |
 | `e2e/dashboard.spec.ts` | One locator narrowed — see below |
 
 The e2e change is not incidental. `getByText('Private')` matches a

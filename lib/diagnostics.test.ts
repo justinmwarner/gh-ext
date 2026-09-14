@@ -13,6 +13,7 @@ import { DEFAULT_SETTINGS, type Settings } from './settings';
 
 const input = (over: Partial<DiagnosticsInput> = {}): DiagnosticsInput => ({
   version: '1.0.2',
+  extensionId: 'kpjeagilmchpoganlnllmhloplapcnoj',
   userAgent: 'Mozilla/5.0 (Windows NT 10.0) Chrome/140.0.0.0',
   vault: 'unlocked',
   settings: DEFAULT_SETTINGS,
@@ -25,6 +26,14 @@ const settings = (over: Partial<Settings>): Settings => ({ ...DEFAULT_SETTINGS, 
 describe('diagnosticsReport', () => {
   test('names the version, because the first question is always which build', () => {
     expect(diagnosticsReport(input())).toContain('A Better Reviewer 1.0.2');
+  });
+
+  test('names the install, since the store copy and a local one differ', () => {
+    // The version cannot separate them: both can be 1.0.3 at once, which is
+    // exactly the case where somebody reloads and sees no change.
+    expect(diagnosticsReport(input())).toContain(
+      'Extension id: kpjeagilmchpoganlnllmhloplapcnoj',
+    );
   });
 
   test('carries the user agent whole', () => {

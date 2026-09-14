@@ -100,6 +100,15 @@ export interface WarningSource {
 export interface DiagnosticsInput {
   /** From the manifest. */
   readonly version: string;
+  /**
+   * `runtime.id`, which says which *install* this is.
+   *
+   * The store's copy and a locally loaded one get different ids and can be
+   * running side by side at different versions, so "I reloaded and nothing
+   * changed" is usually two installs rather than a broken build. The version
+   * alone cannot separate them.
+   */
+  readonly extensionId: string;
   /** `navigator.userAgent`, whole: the browser build is the point of it. */
   readonly userAgent: string;
   /** How the token is held, if it is held. Never the token. */
@@ -137,6 +146,7 @@ function describeWarning(warning: Warning): string {
 export function diagnosticsReport(input: DiagnosticsInput): string {
   const lines: string[] = [
     `A Better Reviewer ${input.version}`,
+    `Extension id: ${input.extensionId}`,
     `User agent: ${input.userAgent}`,
     `Token: ${describeVault(input.vault)}`,
     '',
