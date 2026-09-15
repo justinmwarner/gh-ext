@@ -93,6 +93,9 @@ import {
   hunkStops,
   showsTextDiff,
 } from './diffItems';
+import { HunkNavContext, createHunkCursorStore } from './hunkCursor';
+import { readCursor, rowTop } from './hunkPosition';
+import { MoreBelow } from './MoreBelow';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession } from './reviewSession';
 import {
@@ -1176,49 +1179,174 @@ export function DiffColumn({
    * next hunk from here" rather than "the next hunk from wherever I last was".
    */
   // Over the drawn list: `J` has to land on hunks that are on screen, and a
-  // hunk the recompute took away is not one of them.
-  const stops = useMemo(() => hunkStops(drawnFiles), [drawnFiles]);
+  // hunk the recompute took away is not one of them. Collapsed cards are
+  // excluded for the stronger version of the same reason — a collapsed item
+  // renders no rows at all, so a stop inside one is a destination `scrollTo`
+  // cannot reach, and `J` stepped into it and landed on nothing.
+  const stops = useMemo(() => hunkStops(drawnFiles, collapsed), [drawnFiles, collapsed]);
   const hunkCursor = useRef(-1);
   const currentPath = useRef(current.path);
   currentPath.current = current.path;
 
+  /**
+   * The cursor, made subscribable for the three surfaces that draw it.
+   *
+   * The ref above stays: it is what `goToHunk` steps, and it must go on being
+   * writable without a render. This is the same number published, and the
+   * store is deliberately not React state — `ui/hunkCursor.ts` has the
+   * argument, and it is the same one `handleScroll` already makes about
+   * reporting the current file.
+   */
+  const cursorStore = useRef(createHunkCursorStore()).current;
+
+  /**
+   * A jump to a section is in flight, and how to stop it.
+   *
+   * The same idea as `reaching` one layer down, and for the same reason: while
+   * a jump is travelling, the scroll it causes must not be read back as "where
+   * the reviewer is". Without it the two writers of the cursor fight — a jump
+   * sets the target, the scroll it triggered reports the section still under
+   * the fold, and `J` pressed twice oscillated between two sections instead of
+   * walking down the file.
+   */
+  const landing = useRef(0);
+  const landingFrame = useRef(0);
+
   useEffect(() => {
     // A new file list invalidates every index into the old one.
     hunkCursor.current = -1;
-  }, [stops]);
+    cursorStore.set({ stops, index: -1 });
+  }, [stops, cursorStore]);
 
-  useImperativeHandle(
-    ref,
-    (): DiffColumnHandle => ({
-      goToHunk(direction) {
-        if (stops.length === 0) return;
+  /**
+   * Go to one section by absolute index, and say so.
+   *
+   * Split out from `goToHunk` rather than folded into it: stepping decides
+   * *which* section, and this is what puts the reviewer on it. Two spellings
+   * of "put the reviewer on stop N" would be two chances for the cursor the
+   * surfaces read to disagree with the scroll they are describing.
+   */
+  const landOn = useCallback(
+    (next: number) => {
+      const stop = stops[next];
+      if (stop === undefined) return;
 
-        const path = currentPath.current;
-        const cursor = hunkCursor.current;
-        const anchored =
-          cursor >= 0 && (path === null || stops[cursor]?.path === path);
+      hunkCursor.current = next;
+      // Published before the scroll rather than after it: the scroll is
+      // asynchronous and fires `handleScroll` all the way along, and the
+      // surfaces should name the destination for that whole journey rather
+      // than narrate the cards it passes over.
+      cursorStore.set({ index: next, path: stop.path });
 
-        let next: number;
-        if (anchored) {
-          next = Math.min(Math.max(cursor + direction, 0), stops.length - 1);
-        } else {
-          // Land on the current file's first hunk rather than stepping from a
-          // position that has nothing to do with where the reviewer is.
-          const first = stops.findIndex((stop) => stop.path === path);
-          next = first === -1 ? (direction > 0 ? 0 : stops.length - 1) : first;
-        }
+      cancelAnimationFrame(landingFrame.current);
+      landing.current += 1;
 
-        hunkCursor.current = next;
-        const stop = stops[next];
-        if (stop === undefined) return;
+      /**
+       * Ask, measure, correct — the shape `reachTo` uses for whole cards.
+       *
+       * One ask is not enough, and the failure is not a rounding error.
+       * `scrollTo` resolves a line through the same item offsets that are
+       * wrong about our card headers, and measured in Chrome against the
+       * production build it frequently **does not move the column at all**:
+       * pressing `J` advanced the cursor, left the page where it was, and the
+       * next press advanced it again. So the residual is measured off the row
+       * itself and folded back through `offset`, which the viewer resolves as
+       * `item.top - offset` — subtracted, because a row left too far down the
+       * scrollport has to be met with a smaller offset.
+       *
+       * Gives up after {@link REACH_FRAMES} rather than fighting a reviewer
+       * who has started scrolling, and stops early once the row is within a
+       * pixel of where it was asked to be.
+       */
+      let offset = 0;
+      let attempts = 0;
+
+      const desired = () => {
+        const container = scroller.current;
+        if (container === null) return null;
+        const header = headers.current.get(stop.path);
+        const inset = header?.offsetHeight ?? 0;
+        return container.getBoundingClientRect().top + inset;
+      };
+
+      const ask = () => {
         viewer.current?.scrollTo({
           type: 'line',
           id: stop.path,
           lineNumber: stop.line,
           side: stop.side,
           align: 'start',
+          offset,
         });
-      },
+      };
+
+      const settle = () => {
+        const want = desired();
+        const got = rowTop(headers.current, stop.path, stop.line);
+
+        // Not drawn yet, or nothing to measure against. The viewer's own
+        // answer is the only thing that can bring the row in.
+        if (want === null || got === null) {
+          attempts += 1;
+          if (attempts < REACH_FRAMES) {
+            landingFrame.current = requestAnimationFrame(settle);
+          } else {
+            landing.current = Math.max(landing.current - 1, 0);
+          }
+          return;
+        }
+
+        const residual = got - want;
+        if (Math.abs(residual) < 1 || attempts >= REACH_FRAMES) {
+          landing.current = Math.max(landing.current - 1, 0);
+          return;
+        }
+
+        offset -= residual;
+        ask();
+        attempts += 1;
+        landingFrame.current = requestAnimationFrame(settle);
+      };
+
+      ask();
+      landingFrame.current = requestAnimationFrame(settle);
+    },
+    [stops, cursorStore],
+  );
+
+  const goToHunk = useCallback(
+    (direction: 1 | -1) => {
+      if (stops.length === 0) return;
+
+      const path = currentPath.current;
+      const cursor = hunkCursor.current;
+      const anchored = cursor >= 0 && (path === null || stops[cursor]?.path === path);
+
+      let next: number;
+      if (anchored) {
+        next = Math.min(Math.max(cursor + direction, 0), stops.length - 1);
+      } else {
+        // Land on the current file's first hunk rather than stepping from a
+        // position that has nothing to do with where the reviewer is.
+        const first = stops.findIndex((stop) => stop.path === path);
+        next = first === -1 ? (direction > 0 ? 0 : stops.length - 1) : first;
+      }
+
+      landOn(next);
+    },
+    [stops, landOn],
+  );
+
+  /** What the rail and the two header buttons are handed. Stable per stop list. */
+  const nav = useMemo(
+    () => ({ store: cursorStore, step: goToHunk }),
+    [cursorStore, goToHunk],
+  );
+
+  useImperativeHandle(
+    ref,
+    (): DiffColumnHandle => ({
+      goToHunk,
 
       goToLine(path, side, line) {
         viewer.current?.scrollTo({
@@ -1244,7 +1372,7 @@ export function DiffColumn({
         openComposer.current(selection.id, selection.range);
       },
     }),
-    [stops],
+    [goToHunk],
   );
 
   /**
@@ -1558,8 +1686,110 @@ export function DiffColumn({
    * loops that a render would restart.
    */
   const reaching = useRef(0);
+
+  /**
+   * The stop list, reachable from a callback that must not be rebuilt when it
+   * changes.
+   *
+   * `handleScroll` is handed to `CodeView` as a prop; a new identity for it on
+   * every new file list is a re-render of the viewer for no reason at all.
+   */
+  const stopsRef = useRef(stops);
+  stopsRef.current = stops;
+
+  /**
+   * Re-read where the reviewer is, at most once a frame.
+   *
+   * Throttled because `scroll` fires at frame rate and two hit-tests per event
+   * would be two hit-tests per frame at best and several at worst. The store
+   * absorbs the repeats after that — most frames land inside the section the
+   * previous frame was already in, and `set` is a no-op when nothing moved.
+   */
+  const cursorFrame = useRef(0);
+  const readCursorSoon = useCallback(() => {
+    if (cursorFrame.current !== 0) return;
+    cursorFrame.current = requestAnimationFrame(() => {
+      cursorFrame.current = 0;
+      const container = scroller.current;
+      if (container === null) return;
+
+      const topmost = topmostFile(cardTops());
+      // The card header is pinned over the top of the scrollport, so a probe
+      // at the bare top edge hit-tests the header rather than the first row
+      // under it. Measured rather than assumed: a card carrying a mode
+      // switcher is nearly twice the height of one that is not.
+      const inset =
+        topmost === null ? 0 : (headers.current.get(topmost)?.offsetHeight ?? 0);
+      const reading = readCursor(
+        container,
+        stopsRef.current,
+        topmost,
+        inset,
+        headers.current,
+      );
+
+      // A jump is travelling. Its destination is already published, and the
+      // cards it is scrolling past are not news — reading them back here is
+      // what made `J` oscillate between two sections instead of walking down
+      // the file. `below` is left alone too: it describes a fold that is still
+      // moving.
+      if (landing.current > 0) return;
+
+      cursorStore.set(reading);
+      // The keyboard steps from here as well, and it has to be the same
+      // "here". Without this, `J` after a hand scroll stepped from wherever it
+      // was last pressed — so a reviewer who had scrolled to the second
+      // section of a file and pressed `J` went *backwards* to the first, while
+      // the counter above them said they were on the second. Deriving the
+      // cursor from the scroll is the whole point of it; leaving the keyboard
+      // on a private copy would be two cursors disagreeing in public.
+      if (reading.index >= 0) hunkCursor.current = reading.index;
+    });
+  }, [cardTops, cursorStore]);
+
+  useEffect(
+    () => () => {
+      if (cursorFrame.current !== 0) cancelAnimationFrame(cursorFrame.current);
+    },
+    [],
+  );
+
+  /**
+   * Read the position once on arrival, rather than waiting to be scrolled.
+   *
+   * A review that has been opened and not yet touched is the most common state
+   * this page is in, and it is the state where "12 changes in this file, and
+   * you are on the first" is worth the most. Its own effect rather than a line
+   * in the one that resets the cursor, because that effect runs far above this
+   * declaration and calling forward into it is a temporal dead zone.
+   */
+  useEffect(() => {
+    readCursorSoon();
+  }, [stops, readCursorSoon]);
+
   const handleScroll = useCallback(() => {
+    // Inside the `reaching` guard, and that is a correction rather than a
+    // detail. It was outside it at first, on the reasoning that the guard is
+    // about *reporting* the cards a jump scrolls past while the cursor is only
+    // a position to draw. That reasoning is wrong twice over.
+    //
+    // It breaks the journey. `reachTo` is a measure-and-correct loop whose own
+    // comment is explicit that a reading taken mid-flight is either the journey
+    // or an error already answered, and folding either in counts it twice.
+    // Reading the cursor on the same frames adds synchronous layout to that
+    // loop, and measured against the production build it is enough to stop a
+    // long jump ever landing — so `reaching` never returns to zero and the tree
+    // stops following the diff for the rest of the session. That is exactly the
+    // failure `the tree follows a hand scroll again after a jump has landed`
+    // exists to catch, and it caught it.
+    //
+    // And it buys nothing. `landOn` publishes the destination the moment it is
+    // asked for, so the counter already names where the reviewer is going for
+    // the whole length of the scroll. What the guard suppresses is only the
+    // re-reading of cards being passed over, which is noise in both directions.
     if (reaching.current > 0) return;
+    readCursorSoon();
+
     const path = topmostFile(cardTops());
     // Scroll fires at frame rate and most frames are still on the same file.
     // The reducer would absorb the repeats, but only after React had rendered
@@ -1567,7 +1797,7 @@ export function DiffColumn({
     if (path === null || path === reported.current) return;
     reported.current = path;
     onScrollTo(path);
-  }, [onScrollTo, cardTops]);
+  }, [onScrollTo, cardTops, readCursorSoon]);
 
   /**
    * Bring a card to the top: ask the viewer where it is, then measure and
@@ -1905,6 +2135,11 @@ export function DiffColumn({
   }, [jumpId, jumpToken, hold]);
 
   return (
+    // The provider wraps the whole column rather than the body alone: the card
+    // headers reach the page through Pierre's slot machinery, which mounts
+    // them under this element, and the counter on each of them subscribes to
+    // the same store the rail and the pill read.
+    <HunkNavContext.Provider value={nav}>
     <main
       className="column"
       aria-label="Diff"
@@ -1937,6 +2172,14 @@ export function DiffColumn({
       {files.length === 0 ? (
         <p className="placeholder">No changed files.</p>
       ) : (
+        /*
+          A fragment, so `.diff-view` stays a direct flex child of `.column` —
+          which is the layout that shipped before this feature and the one
+          `CodeView` measures its virtualization against. The pill is a sibling
+          rather than a child of the scrollport, positioned against `.column`,
+          so it rides over the diff without being part of what scrolls.
+        */
+        <>
         <CodeView<AnnotationMetadata>
           // Remounted when the file list is replaced wholesale — a refreshed
           // payload, or the switch to "changes since my last review". Through
@@ -1959,7 +2202,10 @@ export function DiffColumn({
           renderAnnotation={renderAnnotation}
           renderCustomHeader={renderHeader}
         />
+          <MoreBelow />
+        </>
       )}
     </main>
+    </HunkNavContext.Provider>
   );
 }

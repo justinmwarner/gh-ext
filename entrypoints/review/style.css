@@ -1400,7 +1400,12 @@ button.scope-showing:hover {
   outline-offset: 0;
 }
 
+/* `position: relative` is what the "more changes below" pill is positioned
+   against. Everything else here is unchanged and load-bearing: both Pierre
+   surfaces virtualize against a scrollport they measure, so `min-height: 0`
+   has to hold all the way down. */
 .column {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -1419,6 +1424,88 @@ button.scope-showing:hover {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* ------------------------------------------------- where the changes are */
+
+/* The pill. Positioned against `.column` rather than against the scrollport,
+   so it rides over the diff without being part of what scrolls — and so it
+   cannot be scrolled away from the moment it is describing.
+
+   Inert except for the button itself, so it never swallows a click meant for a
+   line beneath it. The right inset clears the scrollbar, which would otherwise
+   pull the centring a few pixels off the code it sits over. */
+.more-below {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.more-below-pill {
+  pointer-events: auto;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg-default);
+  background: var(--canvas-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px light-dark(rgb(140 149 159 / 20%), rgb(1 4 9 / 60%));
+}
+
+.more-below-pill:hover {
+  border-color: var(--fg-muted);
+}
+
+/* The counter on a card's head row.
+
+   Fixed height like everything else up there — `CodeView` sizes an item from
+   one global header metric and never measures this element, so anything that
+   grows the row is scroll range the viewer does not know it owes. */
+.hunk-steps {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.hunk-steps-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.hunk-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--fg-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hunk-step:hover:not(:disabled) {
+  color: var(--fg-default);
+  border-color: var(--border-default);
+}
+
+.hunk-step:disabled {
+  color: var(--fg-subtle);
+  cursor: default;
 }
 
 /* -------------------------------------------------------------- diff cards */

@@ -2424,3 +2424,51 @@ describe('DiffColumn, returning to the card that was pressed', () => {
     expect(asked().length).toBe(settled);
   });
 });
+
+describe('finding the changed sections', () => {
+  /** What one file's header says about its sections, or null when it says nothing. */
+  const counter = (path: string): string | null =>
+    document.querySelector(`[data-hunk-steps="${path}"]`)?.textContent ?? null;
+
+  it('counts the sections on the header of a file that has several', async () => {
+    mount([file({ path: 'a.ts', patch: gappedPatch('a.ts') })]);
+
+    await waitFor(() => expect(counter('a.ts')).toMatch(/2 changes|Change \d+ of 2/));
+  });
+
+  it('says nothing on the header of a file with a single section', async () => {
+    mount([file({ path: 'a.ts' })]);
+
+    await waitFor(() => expect(card('a.ts')).toBeTruthy());
+    expect(counter('a.ts')).toBeNull();
+  });
+
+  // Counting per file rather than across the review is `positionInFile`, and
+  // is tested there, in `lib`, against real numbers. It is deliberately not
+  // asserted here: jsdom performs no layout, so which cards `CodeView`
+  // virtualizes in is not something this environment decides honestly, and a
+  // test that depends on the second card being mounted passes or fails for
+  // reasons that have nothing to do with counting. `e2e/review.spec.ts` asks
+  // the same question of a real browser.
+
+  it('forgets the sections of a card the reviewer has collapsed', async () => {
+    // A collapsed item renders no rows at all, so a section inside one is
+    // somewhere `scrollTo` cannot reach — `J` stepped into exactly that and
+    // landed on nothing. The counter going quiet is that filter, visible.
+    mount([
+      file({ path: 'a.ts', patch: gappedPatch('a.ts') }),
+      file({ path: 'b.ts', patch: gappedPatch('b.ts') }),
+    ]);
+    await waitFor(() => expect(counter('a.ts')).not.toBeNull());
+
+    await act(async () => {
+      fireEvent.click(
+        within(card('a.ts')).getByRole('button', { name: /collapse a\.ts/i }),
+      );
+    });
+
+    await waitFor(() => expect(counter('a.ts')).toBeNull());
+    // And only that card. The other file is untouched.
+    expect(counter('b.ts')).not.toBeNull();
+  });
+});

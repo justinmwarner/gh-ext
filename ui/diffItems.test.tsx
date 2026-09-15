@@ -330,6 +330,28 @@ describe('hunkStops', () => {
     ]);
   });
 
+  it('offers no stop inside a card the reviewer has collapsed', () => {
+    // A collapsed item renders at its header region with no rows at all, so a
+    // stop inside one is a destination `scrollTo` cannot reach — `J` lands on
+    // nothing. Marking a file viewed collapses it, so this is the ordinary
+    // state of most of a review by the end of one.
+    const stops = hunkStops(
+      [file({ path: 'a.ts', patch: twoHunks }), file({ path: 'b.ts', patch: twoHunks })],
+      new Set(['a.ts']),
+    );
+
+    expect(stops).toEqual([
+      { path: 'b.ts', side: 'additions', line: 1 },
+      { path: 'b.ts', side: 'additions', line: 20 },
+    ]);
+  });
+
+  it('offers every stop when nothing is collapsed', () => {
+    expect(
+      hunkStops([file({ path: 'a.ts', patch: twoHunks })], new Set()),
+    ).toHaveLength(2);
+  });
+
   it('lands on the deletion side for a hunk that only removes lines', () => {
     // There is no addition line to scroll to. Naming one would scroll to a row
     // that is not there.

@@ -30,6 +30,7 @@
 import { parsePatchFiles } from '@pierre/diffs';
 import type { CodeViewItem, DiffLineAnnotation, FileDiffMetadata } from '@pierre/diffs';
 import { MODE_SLOTS, RAW, changeSides, modeIndex } from '@/lib/compare/modes';
+import type { HunkStop } from '@/lib/review/hunkNav';
 import type { ReviewFile } from './reviewFiles';
 import type { AnnotationMetadata, BodyMetadata } from './reviewThreads';
 
@@ -247,28 +248,39 @@ export function diffGeneration(files: readonly ReviewFile[]): number {
   return nextListRevision;
 }
 
-/** One hunk's first line, on the side the hunk actually shows. */
-export interface HunkStop {
-  path: string;
-  side: 'additions' | 'deletions';
-  line: number;
-}
-
 /**
  * The top of every hunk in the column, in reading order.
  *
- * What `J` and `K` move between. Read off the parsed hunk headers rather than
- * measured, so it is known before anything is on screen, and flattened across
- * files so hunk navigation runs off the end of one file into the next — which
- * is how a reviewer reads a pull request.
+ * What `J` and `K` move between, and what the counter, the pill and the rail
+ * are all drawn from — see `lib/review/hunkNav.ts`, which owns the type and
+ * every question anyone asks of this list. Read off the parsed hunk headers
+ * rather than measured, so it is known before anything is on screen, and
+ * flattened across files so hunk navigation runs off the end of one file into
+ * the next — which is how a reviewer reads a pull request.
  *
  * A pure addition hunk has no deletion lines to land on and vice versa, so the
  * side is chosen per hunk rather than fixed.
+ *
+ * **Collapsed cards contribute nothing, and that is a fix rather than a
+ * refinement.** A collapsed item is sized at its header region and renders no
+ * rows at all, so a stop inside one is a destination `scrollTo({type: 'line'})`
+ * cannot reach: `J` stepped into it and landed on nothing. Marking a file
+ * viewed collapses it, so by the end of a review that was most of the column.
+ * It also has to be true for the surfaces reading this list — a counter must
+ * count what the reviewer can actually get to, and a rail must not offer a
+ * tick that goes nowhere.
+ *
+ * Defaulted rather than required so the callers that genuinely want every hunk
+ * — and the tests that predate the argument — read the same as they did.
  */
-export function hunkStops(files: readonly ReviewFile[]): HunkStop[] {
+export function hunkStops(
+  files: readonly ReviewFile[],
+  collapsed: ReadonlySet<string> = new Set(),
+): HunkStop[] {
   const stops: HunkStop[] = [];
 
   for (const file of files) {
+    if (collapsed.has(file.path)) continue;
     for (const hunk of fileDiffFor(file).hunks) {
       if (hunk.additionCount > 0) {
         stops.push({ path: file.path, side: 'additions', line: hunk.additionStart });

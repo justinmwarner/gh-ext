@@ -29,6 +29,7 @@ import {
   whitespaceNotice,
 } from '@/lib/review/whitespace';
 import type { HeldBack } from './DiffColumn';
+import { HunkSteps } from './HunkSteps';
 import { ModeSwitcher } from './ModeSwitcher';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession, viewedKey } from './reviewSession';
@@ -237,6 +238,17 @@ export function FileCard({
           <span className="additions">{`+${file.additions}`}</span>
           <span className="deletions">{`${MINUS}${file.deletions}`}</span>
         </span>
+
+        {/* Beside the counts, because it is the same kind of fact about the
+            file and belongs on the row a reviewer reads to decide whether to
+            open it. It draws nothing at all on a file with fewer than two
+            changed sections, which is most cards in most pull requests — and
+            nothing on any card is a second row, because this header's height
+            is a hard constraint rather than a preference. `CodeView` sizes an
+            item from one global header metric and never measures this element,
+            so a card that renders taller than the metric is scroll range the
+            viewer does not know it owes. */}
+        <HunkSteps path={file.path} />
 
         {/* On the head row, beside the counts, because that is the row a
             reviewer reads to decide whether to look at this file at all — and

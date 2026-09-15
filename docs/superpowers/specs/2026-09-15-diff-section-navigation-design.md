@@ -1,7 +1,7 @@
 # Diff Section Navigation — Design
 
 **Date:** 2026-09-15
-**Status:** Designed, not implemented
+**Status:** Implemented
 **Register:** product
 
 ## Goal
@@ -11,10 +11,16 @@ A reviewer on a long file should be able to see that more changes exist below,
 see roughly where they are, and step to them with a control rather than a
 shortcut they have to already know about.
 
-Three surfaces, one derived number underneath all three: a counter with arrows
-in each file's sticky header, a pill at the foot of the scrollport when the
-current file still has changes below the fold, and a rail of ticks beside the
-diff mapping every section in the review.
+Two surfaces, one derived number underneath both: a counter with arrows in each
+file's sticky header, and a pill at the foot of the scrollport when the current
+file still has changes below the fold.
+
+**A third was built and removed.** A rail of ticks beside the diff, mapping
+every section in the review, shipped in the first implementation and was taken
+out on the reviewer's own verdict: not useful. The reasoning that argued for it
+is kept below, because it was a reasonable argument and the next person to
+propose a minimap should be able to read why this one did not survive contact
+with a real review.
 
 ---
 
@@ -35,7 +41,7 @@ not re-render the column — and a value nothing can subscribe to cannot draw a
 counter, a marker or a hint.
 
 This is therefore not a navigation feature. It is one new derived number and
-three readers of it. No new key bindings, no second notion of "next", no change
+two readers of it. No new key bindings, no second notion of "next", no change
 to what `J` means.
 
 That framing is load-bearing for Principle 2. "Do less, completely" is the
@@ -66,21 +72,42 @@ column already documents — see `reach` in `ui/DiffColumn.tsx`, and
 about our card headers: it sizes every one from a 44px metric and never measures
 one. So the viewer cannot be asked where a hunk is.
 
-Ask the DOM instead, at two points — the top edge of the scrollport and the
-bottom:
+Ask the DOM instead.
+
+**The first design hit-tested for it, and that was wrong — corrected during
+implementation.** It read:
 
 ```
 document.elementFromPoint(x, y)          -> the <diffs-container> host
   host.shadowRoot.elementFromPoint(x, y) -> the row under that point
-  row.closest('[data-line]')             -> the line number
+```
+
+Measured in Chrome against the production build, called from the animation
+frame after a scroll event, `elementFromPoint` resolves the virtualizer's
+content wrapper — `DIV < DIV.diff-view` — and not a card at all, because Pierre
+has recycled the old rows out and not yet put the new ones in. The identical
+call once the page is at rest resolves the card every time. So it passed every
+check made by hand and failed in the only frame the page actually runs it:
+silently, with the coarse fallback covering for it, leaving the counter on
+"Change 1 of 2" for the whole length of every file.
+
+What ships instead asks the column what it already knows. It holds every
+mounted card header in a map and already computes which file is topmost:
+
+```
+headers.get(topmost)                     -> the card header
+  .closest('diffs-container').shadowRoot -> the rows it drew
+  the last [data-line] starting at or above y
   stopAtLine(stops, path, line)          -> the index
 ```
 
-Two hit-tests per animation frame. No traversal of the row list, no arithmetic
-over line counts, and nothing that grows with the size of the pull request.
-`elementFromPoint` retargets to the shadow host, so the path comes from the
-host's own `[data-file-card]` child — the same route `ui/pierreDom.fixture.ts`
-already takes in reverse.
+Nothing is asked of the compositor, so nothing depends on what the virtualizer
+is doing this instant. The scan is over the rows currently mounted — tens of
+them, because of virtualization — and it rounds *backwards*: the section being
+read is the one above the fold, not the one below it. That matters, because the
+~36px hunk separator sits directly under the pinned header, and rounding
+forward through it would call a section read before the reviewer had seen it
+and under-report what is left below.
 
 `data-line` is an attribute observed in Pierre's source rather than a documented
 API. That is the same bet `FULL_WIDTH_RICH_BODY` makes in `ui/DiffColumn.tsx`,
@@ -88,8 +115,8 @@ and it is taken here on the same terms: it must degrade rather than break.
 
 ### 1.2 The fallback, and its direction
 
-When the probe finds no `[data-line]` — the point landed on a card header, a
-hunk separator, an annotation, the tail, or a future Pierre renamed the
+When the scan finds no `[data-line]` — a rendered Markdown card, an image, a
+table, a card momentarily unmounted, or a future Pierre that renamed the
 attribute — fall back to **the first stop of the topmost file**, which
 `topmostFile(cardTops())` already computes on every scroll.
 
@@ -110,8 +137,29 @@ out. Hunk boundaries are crossed far more often than file boundaries, so
 several column renders a second through a scroll, on a page whose entire
 proposition is speed.
 
-Three components subscribe. Nothing else moves. `ShortcutTargetsProvider` is the
+Two components subscribe. Nothing else moves. `ShortcutTargetsProvider` is the
 existing instance of this pattern in this codebase, and for this reason.
+
+**The reading happens inside the existing `reaching` guard, not beside it.**
+This was got wrong first, on the reasoning that the guard is about *reporting*
+which file the reviewer is on, while the cursor is only a position to draw. Two
+things are wrong with that.
+
+It breaks the journey. `reachTo` is a measure-and-correct loop whose own comment
+is explicit that a reading taken mid-flight is either the journey or an error
+already answered, and that folding either in counts it twice. Taking the cursor
+reading on the same frames adds synchronous layout to that loop — a rect per
+mounted card, plus a scan of the rows — and measured against the production
+build that is enough to stop a long jump ever landing. `reaching` then never
+returns to zero and the tree stops following the diff for the rest of the
+session. `the tree follows a hand scroll again after a jump has landed` is the
+test that exists for exactly that, and it caught it: green alone, red as soon as
+a real jump ran before it.
+
+And it buys nothing, which is the part worth remembering. `landOn` publishes the
+destination the moment it is asked for, so the counter already names where the
+reviewer is going for the whole length of the scroll. All the guard suppresses
+is the re-reading of cards being passed over.
 
 ---
 
@@ -153,43 +201,30 @@ a file is finished is the indicator that was asked for. The dangerous moment is
 specifically the long file whose last change sits a screen below where the
 changes appeared to stop.
 
-Past the last section of the file it goes quiet, and the rail and the file tree
-carry the cross-file question from there.
+Past the last section of the file it goes quiet, and the file tree carries the
+cross-file question from there.
 
-### 2.3 The rail
+### 2.3 The rail, and why it is not here
 
-A strip roughly 12px wide to the right of the diff, inside the column and
-outside the scrollport. One tick per section across the **whole diff** in
-reading order, hairline separators at file boundaries, the current file's run
-tinted and the current tick solid. Click a tick to jump. Hover for `path:line`.
+Built, shipped, used, removed. It drew one tick per changed section down the
+right-hand edge — the whole review, index-proportional, the current file tinted,
+clickable, one tab stop with a roving `tabindex`.
 
-**Whole diff rather than current file.** The column is one scroll region across
-every file; a rail that resets at each file boundary fights the thing it sits
-beside. Mapping all of it answers "how much of this review is left", and the
-current file arrives as a highlighted contiguous run inside that — so the
-per-file map is had anyway, without a second mode.
+The verdict on it was that it was not useful, and that is the right kind of
+reason. It answered "where are the changes in this review" — a question the file
+tree already answers by file, and one a reviewer working top to bottom does not
+really ask. What they ask is "is this file finished", and the counter and the
+pill answer that between them, on the card, where the question is.
 
-**Index-proportional, not pixel-proportional.** Every section occupies the same
-height on the rail regardless of how many lines it spans. For "do not let me
-miss one" this is not an approximation of a pixel minimap, it is better than
-one: a four-line change is exactly as findable as a four-hundred-line change,
-which is the opposite of what proportional height would do. It also means the
-rail depends on no geometry the virtualizer owns, so it cannot drift.
+It cost a column of permanent chrome down the side of the diff to say something
+that was mostly already on screen. "Chrome recedes so the diff is the loudest
+thing on screen" is the principle it lost to.
 
-**Compression.** Each stop gets `max(2px, available / stops)`. At a typical
-800px that is about 130 sections before the floor binds. Past the floor, stops
-bucket: a bucket draws one tick at the density of its contents and jumps to its
-first stop.
-
-**Uniform neutral ticks — no red and green.** The rail answers *where*, not
-*what*. Hue-coded ticks would be meaning carried by colour alone, which
-PRODUCT.md's "never colour alone" rules out and which matters more here than
-elsewhere, since this is a diff tool.
-
-**One tab stop, roving tabindex.** Three hundred tab stops between the diff and
-whatever follows it would be a keyboard regression dressed as keyboard support.
-
----
+Removing it took `bucket()` out of `lib/review/hunkNav.ts` and the `goTo` verb
+out of the navigation context; nothing else depended on it. The layout went back
+to what shipped before the feature — `.diff-view` is again a direct flex child
+of `.column` — which is the arrangement `CodeView` has always virtualized
+against.
 
 ## Part 3: The bug this sits on top of
 
@@ -204,7 +239,8 @@ prediction from the code is that it lands on nothing.
 
 Filtering `stops` by the collapsed set fixes it, and is required by this feature
 regardless: a counter must count what the reviewer can actually reach, and a
-rail must not offer a tick that goes nowhere. All four reasons a card collapses
+counter must not claim a section the reviewer cannot get to. All four reasons a
+card collapses
 — viewed, generated, whitespace-emptied, manually folded — mean "not reading
 this now", so excluding them is also the answer a reviewer expects.
 
@@ -217,17 +253,16 @@ claiming it is fixed.
 
 | File | | |
 |---|---|---|
-| `lib/review/hunkNav.ts` | new | Pure. Owns the `HunkStop` type, `stopAtLine`, `fileRun`, `positionInFile`, `remainingInFile`, `bucket`. |
-| `lib/review/hunkNav.test.ts` | new | Node. Resolvers and the bucketing boundary. |
+| `lib/review/hunkNav.ts` | new | Pure. Owns the `HunkStop` type, `stopAtLine`, `fileRun`, `positionInFile`, `remainingInFile`. |
+| `lib/review/hunkNav.test.ts` | new | Node. Every resolver. |
 | `ui/diffItems.ts` | edit | `hunkStops()` takes the collapsed set. `HunkStop` moves to `lib/` and is re-exported, so the dependency points the right way. |
-| `ui/hunkPosition.ts` | new | The two hit-tests and the fallback. The only DOM-touching piece. |
+| `ui/hunkPosition.ts` | new | Reads the rows a card drew, and the fallback. The only DOM-touching piece. |
 | `ui/hunkCursor.ts` | new | Ref-backed store, context, `useSyncExternalStore` hook. |
 | `ui/HunkSteps.tsx` | new | Counter and arrows. Mounted inside `FileCard`, self-subscribing. |
 | `ui/MoreBelow.tsx` | new | The pill. |
-| `ui/HunkRail.tsx` | new | The rail. |
-| `ui/DiffColumn.tsx` | edit | A `.column-body` flex row around `CodeView` and the rail; publish the cursor; filter `stops`. |
+| `ui/DiffColumn.tsx` | edit | Publish the cursor; filter `stops`; land a jump accurately. |
 | `ui/FileCard.tsx` | edit | Mount `HunkSteps` on the head row. |
-| `entrypoints/review/style.css` | edit | `.column-body`, `.hunk-rail`, `.hunk-steps`, `.more-below`. |
+| `entrypoints/review/style.css` | edit | `position: relative` on `.column`, plus `.hunk-steps` and `.more-below`. |
 
 `HunkSteps` subscribes to the store itself rather than taking the cursor as a
 prop. `renderHeader` is memoized and `SlotPortals` watches its identity — a new
@@ -236,9 +271,9 @@ on every hunk boundary, which is the cost this design exists to avoid.
 
 ### Colour
 
-**No new tokens.** `--border-default` for a tick, `--accent-emphasis` for the
-current one, `--accent-subtle-bg` for the current file's run, `--border-muted`
-for separators, `--canvas-overlay` with `--border-default` for the pill.
+**No new tokens.** `--fg-muted` and `--fg-default` for the counter,
+`--border-default` for a pressed arrow, `--canvas-overlay` on
+`--border-default` for the pill.
 
 So `ui/tokens.css` and `lib/theme/tokens.ts` are untouched, `npm run palettes`
 does not need re-running, and `ui/tokens.test.tsx` passes unchanged. Any literal
@@ -247,14 +282,19 @@ hex introduced while building this is a mistake, and that test says so.
 ### Layout
 
 `.column` is a flex column whose `.diff-view` child is the scrollport Pierre
-measures and binds its scroll listener to. The rail goes beside it, which means
-a new row wrapper:
+measures and binds its scroll listener to, and it is again a direct flex child
+of `.column` — the arrangement that shipped before this feature. The only
+addition is an anchor for the pill:
 
 ```css
-.column-body { display: flex; flex: 1 1 auto; min-height: 0; }
-.diff-view   { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; }
-.hunk-rail   { flex: none; }
+.column    { position: relative; }
+.more-below { position: absolute; bottom: 12px; }
 ```
+
+The first implementation put a `.column-body` flex row in between, so that a
+rail could sit beside the scrollport. With the rail gone that wrapper had no
+job, and removing it returns the layout to the one `CodeView` has always
+virtualized against rather than leaving a div behind to be puzzled over.
 
 `min-height: 0` throughout is the rule `FilesView` already states: an
 unconstrained host measures zero and renders nothing at all. Nothing in jsdom
@@ -267,32 +307,31 @@ is unverified.
 
 | | |
 |---|---|
-| Pierre renames or drops `data-line` | Probe returns nothing, fallback reports the topmost file's first stop. Counter coarsens to per-file, pill over-reports, rail still correct. Nothing breaks. |
+| Pierre renames or drops `data-line` | The reading finds nothing, and the fallback reports the topmost file's first stop. The counter coarsens to per-file and the pill over-reports. Nothing breaks. |
 | Point lands on a header, separator, annotation or the tail | Same fallback, same direction. |
 | A file's context is expanded | Stops are read from patch headers, which expansion does not change. Positions are index-based. Unaffected. |
 | Whitespace recompute removes a hunk | `stops` is already built over `drawnFiles`, so the removed hunk was never a stop. |
 | File list replaced (scope change, refresh) | `stops` identity changes and the cursor resets to -1, as `hunkCursor` already does. |
-| Diff with 0 or 1 sections | Rail and counter render nothing; the pill never fires. |
+| Diff with 0 or 1 sections | The counter renders nothing and the pill never fires. |
 | Reduced motion | Jumps are `scrollTo`, which already honours the existing settings. No new transition without a `prefers-reduced-motion` alternative. |
 
 ---
 
 ## Testing
 
-- **`lib/review/hunkNav.test.ts`** — node. Every resolver, plus the bucketing
-  boundary in both directions and the empty list.
-- **jsdom** — `HunkSteps`, `MoreBelow` and `HunkRail` against a stubbed store:
-  what renders at 0, 1 and many sections, what the arrows call, roving tabindex,
-  and that no card with one section grows a counter.
+- **`lib/review/hunkNav.test.ts`** — node. Every resolver, including the empty
+  list and a file that has no sections at all.
+- **jsdom** — `HunkSteps` and `MoreBelow` against a stubbed store: what renders
+  at 0, 1 and many sections, what the arrows call, and that no card with one
+  section grows a counter.
 - **`ui/DiffColumn.test.tsx`** — `stops` excludes collapsed files; the store
   publishes on `goToHunk`.
 - **e2e, and honestly so.** The scroll probe cannot be meaningfully unit tested:
   jsdom performs no layout and does not implement `ShadowRoot.elementFromPoint`.
-  A many-hunk fixture in `e2e/review.spec.ts` asserts that the tick count
-  matches the hunk count, the counter tracks a real scroll, the pill appears and
-  then goes quiet past the file's last section, a tick click lands on the right
-  line, `J` no longer steps into a viewed file, and `.column-body` has not
-  broken Pierre's scrollport measurement.
+  `e2e/review.spec.ts` asserts that every multi-section file says so on its
+  header, that the counter tracks a real scroll under the pinned header, that
+  the pill appears and then goes quiet past the file's last section, and that
+  `J` no longer steps into a viewed file.
 
 Per `CLAUDE.md`, the e2e suite against `npx wxt build` output is the only honest
 check for the built CSS, so the layout change is not verified until it runs
@@ -306,45 +345,69 @@ there.
 model of our headers is documented as wrong, so this means re-deriving the
 column's entire scroll geometry ourselves — and re-deriving it again on every
 Pierre upgrade. Principle 3 is "speed is the budget" and the anti-reference is a
-second GitHub with everything in it. The rail delivers the question a minimap is
-actually asked — where are the changes, how much is left — at a fraction of the
-cost and with better behaviour on small changes.
+second GitHub with everything in it.
 
-**Proportional tick heights.** Truer to the document, worse at the job: it makes
-the small changes, which are the ones people miss, the hardest to hit.
+The cheap version of it — the rail — *was* built, and then removed as not
+useful. That is the stronger argument against the expensive version: the
+question a minimap answers turned out not to be one reviewers were asking here.
 
-**A per-file rail.** Simpler and never needs bucketing, but it redraws on every
-file boundary and duplicates what the file tree already says about cross-file
-position.
+**Proportional tick heights**, and **a per-file rail**. Both were weighed while
+designing the rail. Moot now, and recorded only so that the next proposal does
+not re-tread them.
 
 **The pill whenever anything is below.** Never under-warns, but is lit for
 almost the whole review and therefore stops being read.
 
-**A settings toggle for the rail.** The options page is already long. A feature
-that has to hide behind a preference to be tolerable has not earned its place:
-either it is quiet enough to ship on, or it should not ship.
+**A settings toggle for the rail.** The options page is already long, and a
+feature that has to hide behind a preference to be tolerable has not earned its
+place: either it is quiet enough to ship on, or it should not ship. It was not,
+so it did not — which is the rule working rather than failing.
 
 ---
 
 ## Not doing
 
 - Any new key binding. `J` and `K` already exist and the help overlay lists them.
-- Red and green ticks.
+- A minimap, a rail, or any other permanent chrome down the side of the diff.
 - A second, per-file notion of "next", diverging from what `J` means.
-- Cross-file indicators beyond the rail. The file tree owns that question.
+- Cross-file indicators. The file tree owns that question.
 
 ---
 
-## Open questions — verify before implementing
+## Open questions — answered in the browser
 
-1. **Does `J` actually land on nothing in a collapsed file?** Strongly implied by
-   `drawnFiles` and the `byRule` collapse, not yet observed. Check in the browser
-   first; if it already behaves, the filter is still needed for the counter, but
-   the claim in Part 3 must come out.
-2. **Does `ShadowRoot.elementFromPoint` return a row under `stickyHeaders`?** A
-   pinned header may be the topmost element at the top edge. If so, probe a few
-   pixels below the sticky header's measured bottom rather than at the scrollport
-   edge.
-3. **Does `.column-body` disturb the scrollport?** Pierre measures `.diff-view`
-   for virtualization. Expected to be inert, must be confirmed against
-   `npx wxt build` output rather than the dev server.
+All three were settled against `npx wxt build` output in Chrome. Two changed
+the design, and both were failures that a passing unit suite could not see.
+
+1. **Does `J` land on nothing in a collapsed file?** Yes, and the fix holds.
+   Filtering `stops` by the collapsed set is asserted by
+   *"a file marked viewed is no longer somewhere J can send you"*.
+2. **Does `elementFromPoint` return a row under `stickyHeaders`?** No — and the
+   sticky header was not the reason. It resolves the virtualizer's content
+   wrapper whenever it is called in the frame after a scroll, so the whole
+   hit-testing approach was replaced. See §1.1. The header inset survives and is
+   measured rather than assumed: a card carrying a mode switcher covers 70px of
+   the scrollport against 38px for one that does not.
+3. **Does `.column-body` disturb the scrollport?** No. The pre-existing
+   virtualization and scroll tests — *"scrolling the diff column walks the tree
+   selection forward"* and *"every file in the column can be reached from the
+   tree"* — pass unchanged with it in place.
+
+### One thing found that the design did not anticipate
+
+`CodeView.scrollTo({type: 'line'})` **frequently does not move the column at
+all.** It resolves a line through the same item offsets that `reachTo` already
+documents as wrong about our card headers. Pressing `J` advanced the cursor and
+left the page where it was.
+
+That was pre-existing and invisible, because nothing displayed the cursor.
+Deriving the cursor from the scroll made it visible immediately and made it
+worse: the jump set the target, the scroll that never happened reported the old
+position back, and `J` oscillated between two sections.
+
+`landOn` now does what `reachTo` does one level up — ask, measure the row's real
+position, fold the residual back through the target's `offset`, and stop when
+it is within a pixel or after `REACH_FRAMES`. A `landing` counter keeps the
+scroll reading quiet while a jump is travelling, the same guard `reaching`
+provides for file jumps. Measured after the fix, eight presses of `J` walk
+monotonically down the column instead of oscillating between two sections.

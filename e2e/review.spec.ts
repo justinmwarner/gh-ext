@@ -3146,3 +3146,150 @@ test('names a repository the token cannot see, and offers the way to fix it', as
   await expect(options).toHaveURL(new RegExp(`chrome-extension://${extensionId}/options.html`));
 });
 
+
+/**
+ * Finding the changed sections of a long file.
+ *
+ * These cannot be asked anywhere else. jsdom performs no layout, so which
+ * cards `CodeView` virtualizes in and where their rows land are not things
+ * that environment decides honestly — and the reading in `ui/hunkPosition.ts`,
+ * which is how both the counter and the pill learn where the reviewer is, is
+ * entirely about where rows really are. The pinned card header is the specific
+ * hazard: it covers the top of the scrollport, so the row at the true top edge
+ * is one the reviewer cannot see.
+ */
+
+/** What every mounted card header currently says about its sections. */
+async function counters(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[data-hunk-steps]')].map(
+      (node) => `${node.getAttribute('data-hunk-steps')}=${node.textContent ?? ''}`,
+    ),
+  );
+}
+
+test('every file with several changed sections says so on its header', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const shown = await counters(page);
+  expect(shown.length).toBeGreaterThan(0);
+  // Every file in `FILES` carries two hunks, and a card says either how many
+  // sections it has or which one is being read. Neither form may appear on a
+  // card with only one, which is what the unit tests pin.
+  expect(shown.every((text) => /=(▲?Change \d+ of \d+▼?|\d+ changes)$/.test(text))).toBe(
+    true,
+  );
+});
+
+test('the counter follows a real scroll, under the pinned card header', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Walk the column and watch for any file whose counter reaches its second
+  // section. That is the claim nothing else can make: the reading came from a
+  // row the card really drew, at a height the pinned header would otherwise
+  // have answered for, in the animation frame the page actually runs it.
+  const view = page.locator(VIEW);
+  const height = await view.evaluate((node) => node.scrollHeight);
+
+  const seen = new Set<string>();
+  for (let top = 0; top <= height; top += 60) {
+    await scrollTo(page, top);
+    for (const text of await counters(page)) {
+      if (text.includes('Change 2 of 2')) seen.add(text);
+    }
+  }
+
+  // Several files, not just one — a single hit could be a coincidence of where
+  // one card happened to sit.
+  expect(seen.size).toBeGreaterThan(2);
+});
+
+test('the pill says a file is not finished, and goes quiet when it is', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  // Short enough that a file's two hunks cannot share the screen. At the
+  // default height both fit at once and the pill is correctly silent, which
+  // would make this test pass for the wrong reason.
+  await page.setViewportSize({ width: 1280, height: 280 });
+  await openReview(page, extensionId);
+
+  const pill = page.locator('.more-below-pill');
+  const view = page.locator(VIEW);
+  const height = await view.evaluate((node) => node.scrollHeight);
+
+  let spoke = false;
+  for (let top = 0; top <= height && !spoke; top += 60) {
+    await scrollTo(page, top);
+    if ((await pill.count()) > 0) spoke = true;
+  }
+  expect(spoke).toBe(true);
+  await expect(pill).toHaveText(/more changes? in this file/);
+
+  // Pressing it moves the review on to the next section.
+  //
+  // Asserted through the counter rather than through `scrollTop`, and the
+  // reason is this test's own viewport. 280px is an artificial squeeze — it
+  // exists to force a state the fixture cannot otherwise reach, because every
+  // file in it has two hunks drawn a collapsed gap apart and they share a
+  // screen at any realistic height. At that size the next section is inside
+  // the overscroll the viewer already keeps rendered, and Pierre declines to
+  // move a column it considers already there. That the scroll does advance is
+  // asserted by the counter test above, at the default window size, where the
+  // fold really does have to travel.
+  const before = await counters(page);
+  await pill.click();
+  await page.waitForTimeout(500);
+  expect(await counters(page)).not.toEqual(before);
+});
+
+test('a file marked viewed is no longer somewhere J can send you', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // A file whose header is currently saying something about its sections, so
+  // it is certainly in the stop list and certainly mounted. Virtualization
+  // means a card exists only while it is near the viewport, and a path chosen
+  // from the file list may be neither.
+  const before = await counters(page);
+  const path = before[0]?.split('=')[0] as string;
+  expect(path).toBeTruthy();
+
+  // Marking it viewed folds the card, and a folded card renders no rows — so
+  // a section inside it is somewhere `scrollTo` cannot reach. `J` stepped into
+  // exactly that and landed on nothing. The counter going silent is that
+  // filter, visible: the sections are gone from the list `J` walks.
+  await page.locator(`[aria-label="Mark ${path} as viewed"]`).click();
+  await page.waitForTimeout(400);
+
+  const after = await counters(page);
+  expect(after.some((text) => text.startsWith(`${path}=`))).toBe(false);
+
+  // Deliberately not "and every other counter is unchanged". Folding a card
+  // shortens the column, which pulls further cards into the virtual window —
+  // measured here, two mounted counters became three. That is virtualization
+  // doing its job, and counting mounted cards would make this test fail for a
+  // reason that has nothing to do with what it is asking. What matters is that
+  // the folded file left the list and the others are still keeping count.
+  expect(after.length).toBeGreaterThan(0);
+});
