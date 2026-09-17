@@ -31,7 +31,12 @@ import { parseGitAttributes } from '@/lib/review/generated';
 import { BOTH_SIDES } from '@/lib/review/diffScope';
 import { fileAnchor } from '@/lib/review/selection';
 import { MODE_MEMORY_KEY } from '@/lib/settings';
-import { CODE_VIEW_SAFE_PROPS, DiffColumn, REACH_WINDOW } from './DiffColumn';
+import {
+  CODE_VIEW_SAFE_PROPS,
+  DiffColumn,
+  type DiffColumnHandle,
+  REACH_WINDOW,
+} from './DiffColumn';
 import { request } from './background';
 import { fileDiffFor, fileDiffSignature } from './diffItems';
 import { AT_REST, NO_FILE } from './currentFile';
@@ -2470,5 +2475,35 @@ describe('finding the changed sections', () => {
     await waitFor(() => expect(counter('a.ts')).toBeNull());
     // And only that card. The other file is untouched.
     expect(counter('b.ts')).not.toBeNull();
+  });
+});
+
+/**
+ * Handing the keyboard to the diff.
+ *
+ * The find panel stays open while the reviewer walks its results, and the diff
+ * scrolls underneath without taking focus — `goToLine` only scrolls, which is
+ * what makes walking with one key possible. `Enter` is the other half of that
+ * bargain: the reviewer has found the line and wants to read around it, so the
+ * column has to be able to take the keyboard when it is asked to.
+ */
+describe('focusColumn', () => {
+  it('moves focus to the diff', () => {
+    const handle = { current: null as DiffColumnHandle | null };
+    mount([file({ path: 'src/app.ts' })], { ref: handle });
+
+    act(() => {
+      handle.current?.focusColumn();
+    });
+
+    expect(document.activeElement?.closest('main.column')).not.toBeNull();
+  });
+
+  it('does not put the column in the tab order', () => {
+    // Programmatically focusable, not a tab stop. A reviewer tabbing through
+    // the page should not have to step over the whole diff.
+    mount([file({ path: 'src/app.ts' })]);
+
+    expect(document.querySelector('main.column')?.getAttribute('tabindex')).toBe('-1');
   });
 });

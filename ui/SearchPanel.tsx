@@ -1,27 +1,29 @@
 /**
- * Finding something in the review, in one panel with two questions.
+ * Jumping to a file by name.
  *
- * `/` searches inside the diff — file paths and changed lines — and `Mod+K`
- * filters the file list. They are the same mechanism deliberately: the same
- * box, the same list, the same highlight, the same keys.
+ * `Mod+K`, and only `Mod+K`. This used to be two modes of one panel, with `/`
+ * opening it against the diff — that half is now `ui/FindPanel.tsx`, a panel in
+ * the rail that stays open while its results are walked. The split is the one
+ * VS Code makes between quick-open and find-in-files, and it is a split about
+ * what the reviewer is doing rather than about what is being searched: this one
+ * *finds one thing*. It ranks candidates, jumps to the best and closes, which
+ * is the right shape for "take me to the file I am thinking of" and the wrong
+ * shape for "show me everywhere this appears".
  *
- * The file tree has a filter of its own, and the two are not the same thing.
- * This one *finds*: it ranks candidates, jumps to the best, and closes. That
- * one *narrows*: it stays on, keeps the tree's own order and nesting, and
- * leaves the reviewer working down what is left. Both ask `lib/review/search`
- * what counts as a match, so a query that finds a file here finds it there.
+ * The file tree's own filter is a third thing again: it *narrows*, staying on
+ * and keeping the tree's order while the reviewer works down what is left. All
+ * three ask `lib/review/search` what counts as a match, so a query that finds a
+ * file in one finds it in the others.
  *
- * Everything matched is already in the page: `searchDiff` and `filterPaths` are
- * pure functions over the parsed patch. Nothing here asks GitHub anything, so
+ * Everything matched is already in the page — `filterPaths` is a pure function
+ * over paths the payload already carried. Nothing here asks GitHub anything, so
  * results appear as fast as they are typed.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useModalFocus } from './useModalFocus';
-import { type DiffMatch, filterPaths, searchDiff } from '@/lib/review/search';
+import { filterPaths } from '@/lib/review/search';
 import type { ReviewFile } from './reviewFiles';
-
-export type SearchMode = 'diff' | 'files';
 
 /** Where a chosen result sends the reviewer. */
 export interface SearchTarget {
@@ -32,16 +34,13 @@ export interface SearchTarget {
 }
 
 export interface SearchPanelProps {
-  mode: SearchMode;
   files: readonly ReviewFile[];
   onChoose: (target: SearchTarget) => void;
   onClose: () => void;
 }
 
-const LABELS: Record<SearchMode, { title: string; placeholder: string }> = {
-  diff: { title: 'Search the diff', placeholder: 'Paths and changed lines…' },
-  files: { title: 'Jump to a file', placeholder: 'File name…' },
-};
+const TITLE = 'Jump to a file';
+const PLACEHOLDER = 'File name…';
 
 /** How many results to build. Beyond this nobody is reading, they are retyping. */
 const LIMIT = 100;
@@ -69,31 +68,12 @@ function Highlighted({
 interface Row {
   key: string;
   target: SearchTarget;
-  /** The path, always shown: a line without its file is not a destination. */
   path: string;
-  /** The line's text, or null for a whole-file result. */
-  text: string | null;
   start: number;
   end: number;
-  /** Where it sits, in words. Empty for a path result. */
-  position: string;
 }
 
-const rowsForDiff = (matches: readonly DiffMatch[]): Row[] =>
-  matches.map((match, index) => ({
-    key: `${match.path}:${match.kind}:${match.line ?? 'path'}:${index}`,
-    target: { path: match.path, side: match.side, line: match.line },
-    path: match.path,
-    text: match.kind === 'path' ? null : match.text,
-    start: match.start,
-    end: match.end,
-    position:
-      match.line === null
-        ? ''
-        : `${match.kind === 'addition' ? '+' : '−'}${match.line}`,
-  }));
-
-export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps) {
+export function SearchPanel({ files, onChoose, onClose }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -101,26 +81,23 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
 
   const paths = useMemo(() => files.map((file) => file.path), [files]);
 
-  const rows = useMemo((): Row[] => {
-    if (mode === 'files') {
-      return filterPaths(paths, query, { limit: LIMIT }).map((match) => ({
+  const rows = useMemo(
+    (): Row[] =>
+      filterPaths(paths, query, { limit: LIMIT }).map((match) => ({
         key: match.path,
         target: { path: match.path, side: null, line: null },
         path: match.path,
-        text: null,
         start: match.start,
         end: match.end,
-        position: '',
-      }));
-    }
-    return rowsForDiff(searchDiff(files, query, { limit: LIMIT }));
-  }, [mode, files, paths, query]);
+      })),
+    [paths, query],
+  );
 
   // A new query is a new list, and the old highlight would be pointing at a
   // row that is no longer there.
   useEffect(() => {
     setActive(0);
-  }, [query, mode]);
+  }, [query]);
 
   useEffect(() => {
     input.current?.focus();
@@ -143,7 +120,7 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label={LABELS[mode].title}
+        aria-label={TITLE}
         onClick={(event) => event.stopPropagation()}
         // On the panel rather than on the input, so Escape still closes once
         // Tab has moved into the results — they are real buttons, and from one
@@ -162,8 +139,8 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
           ref={input}
           type="search"
           className="search-input"
-          aria-label={LABELS[mode].title}
-          placeholder={LABELS[mode].placeholder}
+          aria-label={TITLE}
+          placeholder={PLACEHOLDER}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -182,9 +159,7 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
 
         {rows.length === 0 ? (
           <p className="search-empty" role="status">
-            {query.trim() === ''
-              ? 'Type to search the changed lines and paths.'
-              : 'No matches.'}
+            {query.trim() === '' ? 'Type to filter the changed files.' : 'No matches.'}
           </p>
         ) : (
           <ul className="search-results" aria-label="Results">
@@ -196,20 +171,8 @@ export function SearchPanel({ mode, files, onChoose, onClose }: SearchPanelProps
                   onClick={() => choose(row)}
                 >
                   <span className="search-result-path">
-                    {row.text === null ? (
-                      <Highlighted text={row.path} start={row.start} end={row.end} />
-                    ) : (
-                      row.path
-                    )}
+                    <Highlighted text={row.path} start={row.start} end={row.end} />
                   </span>
-                  {row.position !== '' && (
-                    <span className="search-result-line">{row.position}</span>
-                  )}
-                  {row.text !== null && (
-                    <code className="search-result-text">
-                      <Highlighted text={row.text} start={row.start} end={row.end} />
-                    </code>
-                  )}
                 </button>
               </li>
             ))}

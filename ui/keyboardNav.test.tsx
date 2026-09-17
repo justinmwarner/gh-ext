@@ -180,6 +180,14 @@ describe('the shortcut help overlay', () => {
   });
 });
 
+/**
+ * The find panel, reached by keyboard.
+ *
+ * It is a panel in the rail now rather than a modal over the diff, so these
+ * assert against a tree of results that *stays* — which is the whole point of
+ * the change. What it finds and how it is drawn belong to `FindPanel.test`;
+ * what is claimed here is that the two shortcuts reach it.
+ */
 describe('searching the diff', () => {
   it('opens on / and lists changed lines that match', async () => {
     const user = userEvent.setup();
@@ -189,35 +197,37 @@ describe('searching the diff', () => {
     const box = screen.getByRole('searchbox', { name: /search the diff/i });
     await user.type(box, 'after');
 
-    const results = screen.getByRole('list', { name: /results/i });
-    expect(within(results).getAllByText(/src\/app\.ts/).length).toBeGreaterThan(0);
+    const results = screen.getByRole('tree', { name: /results/i });
+    expect(within(results).getAllByText(/app\.ts/).length).toBeGreaterThan(0);
     expect(results.textContent).toContain('after');
   });
 
-  it('does not match a context line nobody changed', async () => {
+  it('matches a context line too, which the old diff search would not', async () => {
+    // The reviewer asked for find-in-files, and a panel that quietly declined
+    // every line the author had not touched would read as broken.
     const user = userEvent.setup();
     render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('/');
     await user.type(screen.getByRole('searchbox', { name: /search the diff/i }), 'twentytwo');
 
-    expect(screen.getByRole('status').textContent).toMatch(/no matches/i);
+    expect(screen.getByRole('status').textContent).toMatch(/result/i);
   });
 
-  it('goes to the file a result is on when it is chosen', async () => {
+  it('goes to the file a result is on, and stays open', async () => {
     const user = userEvent.setup();
     render(<Shell retry={() => {}} payload={payload()} />);
 
     await user.keyboard('/');
     await user.type(screen.getByRole('searchbox', { name: /search the diff/i }), 'new');
 
-    const results = screen.getByRole('list', { name: /results/i });
-    await user.click(within(results).getAllByRole('button')[0] as HTMLElement);
+    const results = screen.getByRole('tree', { name: /results/i });
+    await user.click(within(results).getAllByRole('treeitem')[1] as HTMLElement);
 
     expect(currentFile()).toBe('src/app.ts');
-    // Named, because the file tree carries a filter box of its own now and
-    // the claim here is about the panel rather than about searchboxes.
-    expect(screen.queryByRole('searchbox', { name: /search the diff|jump to a file/i })).toBeNull();
+    // The difference from the modal it replaced: choosing a result does not
+    // take the panel away, because the reviewer is usually not done.
+    expect(screen.getByRole('searchbox', { name: /search the diff/i })).toBeDefined();
   });
 
   it('takes Ctrl+F too, so the browser find bar does not open instead', async () => {

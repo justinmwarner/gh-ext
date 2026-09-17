@@ -16,7 +16,7 @@
  */
 
 import type { Ref } from 'react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { PrPayload } from '@/lib/messages';
 import {
   DiffColumn,
@@ -25,6 +25,13 @@ import {
   type ThreadJump,
 } from './DiffColumn';
 import { FileTree } from './FileTree';
+import {
+  DEFAULT_FIND,
+  FindPanel,
+  type FindPanelHandle,
+  type FindState,
+  type FindTarget,
+} from './FindPanel';
 import { Resizer } from './Resizer';
 import type { BlobRefs } from './blobLoader';
 import type { AnchorableSides } from '@/lib/review/diffScope';
@@ -39,6 +46,21 @@ import { readRailWidth, writeRailWidth } from '@/lib/settings-store';
 
 /** Wide enough for a deep path, narrow enough to leave the diff its width. */
 const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
+
+/** Which of the rail's two trees is showing. */
+type RailTab = 'files' | 'search';
+
+export interface FilesViewHandle {
+  /**
+   * Show the find panel and put the cursor in its box.
+   *
+   * What `Mod+F` and `/` call. A handle rather than a prop, mirroring
+   * `columnRef` one layer up: opening the panel is an event rather than a
+   * state the shell has an opinion about, and a boolean prop would have to be
+   * unset again afterwards by whoever set it.
+   */
+  openFind(): void;
+}
 
 export interface FilesViewProps {
   payload: PrPayload;
@@ -84,6 +106,15 @@ export interface FilesViewProps {
   /** Open the tree with its directories shut. Read once, by the tree. */
   collapseTree?: boolean;
   columnRef?: Ref<DiffColumnHandle>;
+  ref?: Ref<FilesViewHandle>;
+  /**
+   * Send the review to a find result.
+   *
+   * Handled above rather than here, because arriving somewhere is a whole-page
+   * move: it selects a file, scrolls the column, and sometimes hands over the
+   * keyboard, and only the shell holds all three.
+   */
+  onFindResult?: (target: FindTarget) => void;
 }
 
 export function FilesView({
@@ -105,8 +136,37 @@ export function FilesView({
   generatedPatterns,
   collapseTree,
   columnRef,
+  ref,
+  onFindResult,
 }: FilesViewProps) {
   const session = useReviewSession();
+
+  /**
+   * Which tree the rail is showing, and what the find panel has been asked.
+   *
+   * Both held here rather than inside `FindPanel`, so that looking at the file
+   * tree and coming back does not silently throw away a search. The panel keeps
+   * only its folds, which are about a result list that stops existing the
+   * moment the query changes.
+   */
+  const [tab, setTab] = useState<RailTab>('files');
+  const [find, setFind] = useState<FindState>(DEFAULT_FIND);
+  const panel = useRef<FindPanelHandle>(null);
+
+  useImperativeHandle(
+    ref,
+    (): FilesViewHandle => ({
+      openFind() {
+        setTab('search');
+        // After the swap, so the box exists to be focused. A second `Mod+F`
+        // with the panel already open lands here too and selects what is in
+        // it, which is almost always what the reviewer meant by pressing it
+        // again.
+        queueMicrotask(() => panel.current?.focusQuery());
+      },
+    }),
+    [],
+  );
 
   /**
    * The rail's width, kept between sessions.
@@ -202,15 +262,72 @@ export function FilesView({
           aria-label="Changed files"
           style={{ width: `${rail.size}px` }}
         >
-          <FileTree
-            files={files}
-            comments={comments}
-            viewed={viewed}
-            current={current}
-            onSelect={onSelectFromTree}
-            onSetViewed={setViewedMany}
-            collapseTree={collapseTree}
-          />
+          {/* Two trees, one rail. A real `tablist`, so the panel is reachable
+              by pointer rather than only by a shortcut the reviewer has to
+              already know about — the same argument `ViewSwitcher` makes for
+              the three views one level out. */}
+          <div className="rail-tabs" role="tablist" aria-label="Sidebar">
+            {(['files', 'search'] as const).map((which) => (
+              <button
+                key={which}
+                type="button"
+                role="tab"
+                id={`rail-tab-${which}`}
+                aria-controls={`rail-panel-${which}`}
+                aria-selected={tab === which}
+                tabIndex={tab === which ? 0 : -1}
+                className={tab === which ? 'rail-tab rail-tab-active' : 'rail-tab'}
+                onClick={() => setTab(which)}
+              >
+                {which === 'files' ? 'Files' : 'Search'}
+              </button>
+            ))}
+          </div>
+
+          {/* Both mounted, swapped with `visibility` — the pattern `.views`
+              already uses, and for the same reason. Unmounting would cost the
+              file tree its folds and its filter, and the find panel its
+              results and its scroll position, every single time the reviewer
+              glanced at the other one. */}
+          <div className="rail-panels">
+            <div
+              className="rail-panel"
+              id="rail-panel-files"
+              role="tabpanel"
+              aria-labelledby="rail-tab-files"
+              style={{ visibility: tab === 'files' ? 'visible' : 'hidden' }}
+            >
+              <FileTree
+                files={files}
+                comments={comments}
+                viewed={viewed}
+                current={current}
+                onSelect={onSelectFromTree}
+                onSetViewed={setViewedMany}
+                collapseTree={collapseTree}
+              />
+            </div>
+
+            <div
+              className="rail-panel"
+              id="rail-panel-search"
+              role="tabpanel"
+              aria-labelledby="rail-tab-search"
+              style={{ visibility: tab === 'search' ? 'visible' : 'hidden' }}
+            >
+              <FindPanel
+                ref={panel}
+                files={files}
+                state={find}
+                onState={setFind}
+                onGoTo={(target) => onFindResult?.(target)}
+                // Escape on an empty box hands the rail back to the checklist,
+                // which is where a reviewer who has finished searching wants to
+                // be — and is the only way back that does not need the mouse.
+                onClose={() => setTab('files')}
+              />
+            </div>
+          </div>
         </nav>
 
         <Resizer

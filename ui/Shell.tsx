@@ -36,11 +36,12 @@ import {
 import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
 import type { DiffColumnHandle, DiffStyle, ThreadJump } from './DiffColumn';
-import { FilesView } from './FilesView';
+import { FilesView, type FilesViewHandle } from './FilesView';
+import type { FindTarget } from './FindPanel';
 import { OverviewView } from './OverviewView';
 import { ReviewFooter } from './ReviewFooter';
 import { ScopeBar } from './ScopeBar';
-import { SearchPanel, type SearchMode, type SearchTarget } from './SearchPanel';
+import { SearchPanel, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
 import { TopBar } from './TopBar';
 import { type ReviewView, ViewSwitcher, viewId, viewTabId } from './ViewSwitcher';
@@ -63,7 +64,7 @@ import { useSettings } from './useSettings';
 type Overlay =
   | { kind: 'none' }
   | { kind: 'help' }
-  | { kind: 'search'; mode: SearchMode }
+  | { kind: 'file-jump' }
   | { kind: 'commits' };
 
 const NO_OVERLAY: Overlay = { kind: 'none' };
@@ -168,6 +169,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   );
 
   const column = useRef<DiffColumnHandle>(null);
+  const filesView = useRef<FilesViewHandle>(null);
 
   /**
    * Narrowing the column to some of the pull request's commits.
@@ -379,6 +381,23 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   );
 
   /**
+   * A find-panel result, which is `goToResult` plus one decision.
+   *
+   * Moving through the list only scrolls, so the reviewer can walk twenty
+   * matches with one key and watch the diff follow. Choosing one hands the
+   * keyboard over, because at that point they have stopped searching and
+   * started reading. `goToLine` cannot make that distinction itself — it never
+   * touches focus, which is exactly why the walking half works.
+   */
+  const goToFindResult = useCallback(
+    (target: FindTarget) => {
+      goToResult(target);
+      if (target.focusDiff) column.current?.focusColumn();
+    },
+    [goToResult],
+  );
+
+  /**
    * Offer a keystroke to the card the reviewer is on before the column takes it.
    *
    * `J`, `K` and `c` mean the same thing on every card and are answered in two
@@ -415,8 +434,14 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     },
     'reply-to-thread': replyToFocused,
     'toggle-resolved': toggleResolvedOnFocused,
-    'file-jump': () => setOverlay({ kind: 'search', mode: 'files' }),
-    'search-in-diff': () => setOverlay({ kind: 'search', mode: 'diff' }),
+    'file-jump': () => setOverlay({ kind: 'file-jump' }),
+    // The rail, not an overlay. `/` and `Mod+F` open a panel that stays open
+    // while its results are walked, which is the whole difference between
+    // finding one thing and finding all of them.
+    'search-in-diff': () => {
+      setView('files');
+      filesView.current?.openFind();
+    },
     'shortcut-help': () => setOverlay({ kind: 'help' }),
     'open-in-github': openOnGitHub,
     // The hash, not a navigation. The dashboard is a route on this same page,
@@ -536,6 +561,8 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               collapseTree={settings.collapseTree}
               gitAttributes={gitAttributes}
               columnRef={column}
+              ref={filesView}
+              onFindResult={goToFindResult}
             />
             )}
           </div>
@@ -576,9 +603,8 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
       <ReviewFooter viewerIsAuthor={prViewerIsAuthor(payload.pullRequest)} />
 
       {overlay.kind === 'help' && <ShortcutHelp onClose={() => setOverlay(NO_OVERLAY)} />}
-      {overlay.kind === 'search' && (
+      {overlay.kind === 'file-jump' && (
         <SearchPanel
-          mode={overlay.mode}
           files={files}
           onChoose={goToResult}
           onClose={() => setOverlay(NO_OVERLAY)}

@@ -219,8 +219,12 @@ export function SearchTree({ rows, onFold, onReveal, onCommit, ref }: SearchTree
             style={{ paddingLeft: `${row.depth * 14 + 4}px` }}
             onClick={() => {
               setFocused(row.key);
-              if (row.kind === 'match') onReveal(row);
-              else onFold(row.path, row.expanded);
+              // A file row goes to the file, the way clicking a file in the
+              // checklist does. Only a directory folds on a plain click —
+              // folding a *file* is the chevron's job, below, because a file
+              // row is a destination first and a container second.
+              if (row.kind === 'directory') onFold(row.path, row.expanded);
+              else onReveal(row);
             }}
           >
             {row.kind === 'match' ? (
@@ -240,8 +244,23 @@ export function SearchTree({ rows, onFold, onReveal, onCommit, ref }: SearchTree
                 {/* Empty, and drawn by `.tree-chevron::before` — the triangle
                     glyphs come out as specks in the fonts this page falls back
                     through. Present on files too, because it is also the
-                    column that lines the icons up. */}
-                <span className="tree-chevron" aria-hidden="true" />
+                    column that lines the icons up.
+
+                    Here it is a target as well as a drawing, which is the one
+                    thing it is not in the file tree: a result file holds rows
+                    of its own, so it needs a twisty, and the row itself is
+                    already spoken for by "take me there". `stopPropagation`
+                    for the reason `.tree-check` does it — folding must not
+                    also move the diff out from under the reviewer. */}
+                <span
+                  className="tree-chevron"
+                  aria-hidden="true"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setFocused(row.key);
+                    onFold(row.path, row.expanded);
+                  }}
+                />
 
                 <span className="tree-icon-slot" aria-hidden="true">
                   {icon !== null && (

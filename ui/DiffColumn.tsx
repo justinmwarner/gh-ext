@@ -171,6 +171,15 @@ export interface DiffColumnHandle {
   goToHunk(direction: 1 | -1): void;
   /** Bring one line into view. What a search result jumps to. */
   goToLine(path: string, side: AnnotationSide, line: number): void;
+  /**
+   * Take the keyboard.
+   *
+   * The find panel stays open while its results are walked, and `goToLine`
+   * deliberately does not move focus — that is what lets one key step through
+   * twenty matches with the diff following. This is the other half: the
+   * reviewer has found the line and wants to read around it.
+   */
+  focusColumn(): void;
   /** Open the composer on whatever the reviewer has selected in the gutter. */
   commentOnSelection(): void;
 }
@@ -1092,6 +1101,8 @@ export function DiffColumn({
 
   const viewer = useRef<CodeViewHandle<AnnotationMetadata, undefined>>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  /** The column itself, so `focusColumn` has something to hand the keyboard to. */
+  const column = useRef<HTMLElement>(null);
   const headers = useRef(new Map<string, HTMLElement>());
 
   /**
@@ -1347,6 +1358,10 @@ export function DiffColumn({
     ref,
     (): DiffColumnHandle => ({
       goToHunk,
+
+      focusColumn() {
+        column.current?.focus();
+      },
 
       goToLine(path, side, line) {
         viewer.current?.scrollTo({
@@ -2141,8 +2156,12 @@ export function DiffColumn({
     // the same store the rail and the pill read.
     <HunkNavContext.Provider value={nav}>
     <main
+      ref={column}
       className="column"
       aria-label="Diff"
+      // Focusable on request, never a tab stop. A reviewer tabbing through the
+      // page should not have to step over the entire diff to get past it.
+      tabIndex={-1}
       style={{ '--tail-deficit': `${tailSlack}px` } as CSSProperties}
     >
       {diff.source === 'files-api' && (

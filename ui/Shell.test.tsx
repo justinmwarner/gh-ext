@@ -6,7 +6,7 @@
  * reaches them, and that the one thing no view may do is lose a thread.
  */
 
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from '@/lib/settings';
@@ -105,13 +105,18 @@ describe('Shell', () => {
   it('offers the three views down the left, and opens on the diff', () => {
     render(<Shell retry={() => {}} payload={prPayload()} />);
 
+    // Scoped to the view switcher by name. The rail inside the Files view has
+    // a tab set of its own — the file tree and the find panel — so "every tab
+    // on the page" is no longer a claim about the views.
+    const views = within(screen.getByRole('tablist', { name: 'Views' }));
+
     expect(
-      screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label')),
+      views.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label')),
     ).toEqual(['Files', 'Conversations', 'Overview']);
-    expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe(
-      'vertical',
-    );
-    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
+    expect(
+      screen.getByRole('tablist', { name: 'Views' }).getAttribute('aria-orientation'),
+    ).toBe('vertical');
+    expect(views.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
       'Files',
     );
   });
@@ -237,10 +242,12 @@ describe('Shell', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('tab', { name: /conversations/i }));
+    const views = within(screen.getByRole('tablist', { name: 'Views' }));
+
+    await userEvent.click(views.getByRole('tab', { name: /conversations/i }));
     await userEvent.click(screen.getByRole('button', { name: /go to/i }));
 
-    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
+    expect(views.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe(
       'Files',
     );
   });

@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_FIND, FindPanel, type FindState } from './FindPanel';
+import { DEFAULT_FIND, FindPanel, type FindState, type FindTarget } from './FindPanel';
 import type { ReviewFile } from './reviewFiles';
 
 const file = (path: string, patch: string, overrides: Partial<ReviewFile> = {}): ReviewFile => ({
@@ -58,7 +58,7 @@ function Harness({
 }: {
   files?: readonly ReviewFile[];
   initial?: FindState;
-  onGoTo?: (target: { path: string; line: number | null }) => void;
+  onGoTo?: (target: FindTarget) => void;
   onClose?: () => void;
 }) {
   const [state, setState] = useState(initial);
@@ -203,16 +203,33 @@ describe('FindPanel', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('folds a file away and keeps its count', async () => {
+  it('folds a file away from its chevron, and keeps the count', async () => {
     const user = userEvent.setup();
     render(<Harness />);
 
     await user.type(box(), 'heading');
     const fileRow = screen.getByRole('treeitem', { name: /guide\.md/ });
-    await user.click(fileRow);
+    const chevron = fileRow.querySelector('.tree-chevron');
+    if (chevron === null) throw new Error('no chevron on the file row');
+    await user.click(chevron);
 
     expect(fileRow.getAttribute('aria-expanded')).toBe('false');
     expect(within(fileRow).getByText('2')).toBeDefined();
+  });
+
+  it('goes to the file when the row itself is clicked, rather than folding it', async () => {
+    // The convention the checklist already set: clicking a file selects it.
+    // Only a directory folds on a plain click.
+    const user = userEvent.setup();
+    const onGoTo = vi.fn();
+    render(<Harness onGoTo={onGoTo} />);
+
+    await user.type(box(), 'heading');
+    const fileRow = screen.getByRole('treeitem', { name: /guide\.md/ });
+    await user.click(fileRow);
+
+    expect(onGoTo).toHaveBeenCalled();
+    expect(fileRow.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('marks the matched run inside the line', async () => {
@@ -222,5 +239,24 @@ describe('FindPanel', () => {
     await user.type(box(), 'heading');
 
     expect(screen.getAllByText('heading', { selector: 'mark' }).length).toBeGreaterThan(0);
+  });
+});
+
+describe('FindPanel, handing the diff back the keyboard', () => {
+  it('asks for focus to move to the diff on Enter, and not on a move', async () => {
+    const user = userEvent.setup();
+    const onGoTo = vi.fn();
+    render(<Harness onGoTo={onGoTo} />);
+
+    await user.type(box(), 'heading');
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
+
+    // Walking the list leaves the keyboard in the list.
+    expect(onGoTo.mock.calls.every(([target]) => target.focusDiff === false)).toBe(true);
+
+    await user.keyboard('{Enter}');
+
+    // Choosing one is the reviewer saying they are done walking.
+    expect(onGoTo.mock.lastCall?.[0].focusDiff).toBe(true);
   });
 });
