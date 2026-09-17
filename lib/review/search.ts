@@ -24,7 +24,15 @@ export interface SearchableFile {
   patch: string;
 }
 
-export type DiffMatchKind = 'path' | 'addition' | 'deletion';
+/**
+ * `context` is the find panel's alone.
+ *
+ * The diff search never produces one — `changedLines` is its rule and leaves
+ * them out — but a result row has to be able to say that a hit is on a line
+ * nobody touched, because that is the difference between somewhere the review
+ * is and somewhere it merely passes through.
+ */
+export type DiffMatchKind = 'path' | 'addition' | 'deletion' | 'context';
 
 /** Which side of the diff a line lives on, spelled the way Pierre spells it. */
 export type MatchSide = 'additions' | 'deletions';
@@ -58,24 +66,139 @@ const DEFAULT_LIMIT = 200;
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-/** One changed line, as the walk sees it. */
-interface ChangedLine {
-  kind: 'addition' | 'deletion';
+/** What the find panel's three toggles ask for. Every one of them is off by default. */
+export interface MatchOptions {
+  /** `Needle` stops matching `needle`. */
+  caseSensitive?: boolean;
+  /** `cat` stops matching inside `concatenate`. */
+  wholeWord?: boolean;
+  /** Read the query as a pattern rather than as text. */
+  regex?: boolean;
+}
+
+/** Where a hit sits in a string, half-open, so the caller can highlight it. */
+export interface Span {
+  start: number;
+  end: number;
+}
+
+/**
+ * A compiled query, or the reason it would not compile.
+ *
+ * A discriminated union rather than a throw, because the failure is a thing the
+ * panel has to *draw*: a reviewer halfway through typing `(\w+` has an invalid
+ * pattern and has done nothing wrong, and a box that empties itself without
+ * saying why is the silent failure PRODUCT.md's fourth principle forbids.
+ */
+export type Matcher =
+  | { ok: true; spans(text: string): Span[] }
+  | { ok: false; error: string };
+
+/** Everything `RegExp` gives a meaning to, so a plain query can mean itself. */
+const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
+
+/**
+ * A matcher that finds nothing, for a query that asks for nothing.
+ *
+ * Not an error: an empty box is the panel at rest, and what to say about that
+ * is the caller's decision rather than this function's.
+ */
+const NEVER: Matcher = { ok: true, spans: () => [] };
+
+/**
+ * One query, compiled once, for every surface that searches.
+ *
+ * Plain, case-sensitive, whole-word and regular-expression are four spellings
+ * of one operation, and this is where they become one: the query is escaped
+ * unless it is already a pattern, wrapped in word boundaries if it has to be,
+ * and given the `i` flag unless case was asked for. What comes back sweeps a
+ * string for *every* occurrence, because a panel the reviewer steps through has
+ * to agree with the count printed above it.
+ *
+ * Compiling is separated from sweeping so a search over thousands of lines
+ * builds one `RegExp` rather than one per line.
+ */
+export function compileMatcher(query: string, options: MatchOptions = {}): Matcher {
+  const needle = query.trim();
+  if (needle === '') return NEVER;
+
+  const body =
+    options.regex === true ? needle : needle.replace(REGEX_SPECIAL, '\\$&');
+  // Non-capturing, because `\bfoo|bar\b` binds the boundaries to one branch
+  // each — which is not what anyone means by "whole word" with an alternation.
+  const source = options.wholeWord === true ? `\\b(?:${body})\\b` : body;
+
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(source, options.caseSensitive === true ? 'g' : 'gi');
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  return {
+    ok: true,
+    spans(text) {
+      const found: Span[] = [];
+      pattern.lastIndex = 0;
+
+      for (let hit = pattern.exec(text); hit !== null; hit = pattern.exec(text)) {
+        if (hit[0] === '') {
+          // A zero-length match leaves `lastIndex` exactly where it was, so
+          // `a*` would sweep the same position forever and take the tab with
+          // it. It is also not a result: a highlight zero pixels wide points
+          // the reviewer at nothing while counting as somewhere to go.
+          pattern.lastIndex += 1;
+          continue;
+        }
+        found.push({ start: hit.index, end: hit.index + hit[0].length });
+      }
+
+      return found;
+    },
+  };
+}
+
+/** One line of a patch the reviewer can be sent to, as the walk sees it. */
+export interface PatchLine {
+  kind: 'addition' | 'deletion' | 'context';
   side: MatchSide;
   line: number;
   text: string;
 }
 
+/** One changed line. A {@link PatchLine} that is not context. */
+interface ChangedLine extends PatchLine {
+  kind: 'addition' | 'deletion';
+}
+
 /**
  * Every changed line in one file's patch, numbered on its own side.
  *
- * Exported because the search is not the only thing that wants "which lines did
- * this patch actually change" — but it is the only caller today.
+ * The diff search's rule, and the narrower of the two: a hit on a line nobody
+ * touched sends the reviewer somewhere the review is not. The find panel wants
+ * the other one — see {@link patchLines}, which this is a filter over.
  */
 export function changedLines(patch: string): ChangedLine[] {
+  return patchLines(patch).filter(
+    (line): line is ChangedLine => line.kind !== 'context',
+  );
+}
+
+/**
+ * Every line of a patch, context included, numbered on a side.
+ *
+ * The expensive half of a search, and separated from the sweep for that
+ * reason: this runs once per file list, where the sweep over what it returns
+ * runs once per keystroke. `parseFiles` is how a caller holds onto it.
+ *
+ * A context line exists on both sides and needs one number. It gets the
+ * additions side — the new-file numbering, which is what a reviewer means when
+ * they say "line 42", and the side `goToLine` can always scroll to.
+ */
+export function patchLines(patch: string): PatchLine[] {
   if (patch === '') return [];
 
-  const found: ChangedLine[] = [];
+  const found: PatchLine[] = [];
   let inHunk = false;
   let additionLine = 0;
   let deletionLine = 0;
@@ -116,7 +239,15 @@ export function changedLines(patch: string): ChangedLine[] {
       });
       deletionLine += 1;
     } else if (marker === ' ' || raw === '') {
-      // Context: rendered, and a valid comment target, but not a change.
+      // Context: rendered, and a valid comment target, but not a change. It is
+      // reported so the find panel can offer it and filtered back out by
+      // `changedLines`, which is the diff search's narrower rule.
+      found.push({
+        kind: 'context',
+        side: 'additions',
+        line: additionLine,
+        text: raw === '' ? '' : raw.slice(1),
+      });
       additionLine += 1;
       deletionLine += 1;
     } else if (marker === '\\') {
@@ -159,55 +290,100 @@ export function pathMatches(path: string, query: string): boolean {
   return needle === '' || locate(path, needle) !== null;
 }
 
+/** One file's patch, walked once, ready to be swept as often as asked. */
+export interface ParsedFile {
+  path: string;
+  lines: readonly PatchLine[];
+}
+
 /**
- * Everything in the diff that matches, in the order the files were given.
+ * A file list, parsed once.
+ *
+ * What the find panel memoizes against its files, so that typing costs a regex
+ * pass over lines that are already split rather than a re-walk of every patch.
+ * With context lines in scope that corpus is several times what the diff search
+ * used to look at, and PRODUCT.md's third principle makes the difference this
+ * function's whole reason for existing.
+ */
+export function parseFiles(files: readonly SearchableFile[]): ParsedFile[] {
+  return files.map((file) => ({ path: file.path, lines: patchLines(file.patch) }));
+}
+
+/** What a sweep needs to know beyond the query itself. */
+export interface SweepOptions extends SearchOptions {
+  /**
+   * Offer lines nobody changed.
+   *
+   * Off by default, which is the diff search's rule and the reason it is a
+   * *diff* search. The find panel turns it on: a reviewer who has come from an
+   * editor expects find-in-files to find what is in the files.
+   */
+  includeContext?: boolean;
+}
+
+/**
+ * Everything that matches, in the order the files were given.
  *
  * File order is the column's order, which is the order the reviewer reads in,
- * so the jump list runs top to bottom alongside the diff. Within a file the
- * path match comes first, then its changed lines in patch order.
+ * so results run top to bottom alongside the diff. Within a file the path match
+ * comes first, then its lines in patch order, and within a line every
+ * occurrence in turn — a panel that is stepped through has to offer each hit
+ * separately, and the summary above it has to be able to count them.
  */
-export function searchDiff(
-  files: readonly SearchableFile[],
-  query: string,
-  options: SearchOptions = {},
+export function searchParsed(
+  files: readonly ParsedFile[],
+  matcher: Matcher,
+  options: SweepOptions = {},
 ): DiffMatch[] {
-  const needle = query.trim().toLowerCase();
-  if (needle === '') return [];
+  if (!matcher.ok) return [];
 
   const limit = options.limit ?? DEFAULT_LIMIT;
+  const wantsContext = options.includeContext === true;
   const matches: DiffMatch[] = [];
 
   for (const file of files) {
     if (matches.length >= limit) return matches;
 
-    const inPath = locate(file.path, needle);
-    if (inPath !== null) {
-      matches.push({
-        path: file.path,
-        kind: 'path',
-        line: null,
-        side: null,
-        text: file.path,
-        ...inPath,
-      });
+    for (const span of matcher.spans(file.path)) {
+      matches.push({ path: file.path, kind: 'path', line: null, side: null, text: file.path, ...span });
+      // One path result per file. A second hit in the same path is the same
+      // destination twice, unlike a second hit on a line.
+      break;
     }
 
-    for (const changed of changedLines(file.patch)) {
-      if (matches.length >= limit) return matches;
-      const inLine = locate(changed.text, needle);
-      if (inLine === null) continue;
-      matches.push({
-        path: file.path,
-        kind: changed.kind,
-        line: changed.line,
-        side: changed.side,
-        text: changed.text,
-        ...inLine,
-      });
+    for (const line of file.lines) {
+      if (line.kind === 'context' && !wantsContext) continue;
+      for (const span of matcher.spans(line.text)) {
+        if (matches.length >= limit) return matches;
+        matches.push({
+          path: file.path,
+          kind: line.kind,
+          line: line.line,
+          side: line.side,
+          text: line.text,
+          ...span,
+        });
+      }
     }
   }
 
   return matches;
+}
+
+/**
+ * Parse, compile and sweep in one call.
+ *
+ * The convenience form, for a caller with a query and a file list and no reason
+ * to hold either. A pattern that will not compile gives back nothing rather
+ * than throwing; the panel asks {@link compileMatcher} directly so it can draw
+ * the reason instead.
+ */
+export function searchDiff(
+  files: readonly SearchableFile[],
+  query: string,
+  options: SweepOptions & MatchOptions = {},
+): DiffMatch[] {
+  return searchParsed(parseFiles(files), compileMatcher(query, options), options);
 }
 
 export interface PathMatch {

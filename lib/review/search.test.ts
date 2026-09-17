@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { type SearchableFile, filterPaths, pathMatches, searchDiff } from './search';
+import {
+  type SearchableFile,
+  compileMatcher,
+  filterPaths,
+  parseFiles,
+  pathMatches,
+  patchLines,
+  searchDiff,
+  searchParsed,
+} from './search';
 
 const patch = (path: string, body: readonly string[]): string =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...body].join(
@@ -222,5 +231,213 @@ describe('pathMatches', () => {
 
   it('refuses a path it does not appear in', () => {
     expect(pathMatches('src/app.ts', 'zzz')).toBe(false);
+  });
+});
+
+/**
+ * The one matching rule every surface uses.
+ *
+ * Four spellings of the same operation — plain, case-sensitive, whole-word and
+ * regular expression — compiled to a single `RegExp` so there is one behaviour
+ * to learn and one to test, rather than four code paths that agree by accident.
+ */
+describe('compileMatcher', () => {
+  /** The compiled matcher, or a failure the test did not expect. */
+  const spansOf = (query: string, options = {}, text = ''): readonly unknown[] => {
+    const matcher = compileMatcher(query, options);
+    if (!matcher.ok) throw new Error(`expected a matcher, got: ${matcher.error}`);
+    return matcher.spans(text);
+  };
+
+  it('matches a plain substring, ignoring case by default', () => {
+    expect(spansOf('needle', {}, 'a NEEDLE here')).toEqual([{ start: 2, end: 8 }]);
+  });
+
+  it('treats a plain query as text, not as a pattern', () => {
+    // `a.c` must not match `abc`. Without escaping, every plain search
+    // containing a dot, a star or a bracket would quietly mean something else.
+    expect(spansOf('a.c', {}, 'abc')).toEqual([]);
+    expect(spansOf('a.c', {}, 'a.c')).toEqual([{ start: 0, end: 3 }]);
+  });
+
+  it('respects case when asked to', () => {
+    expect(spansOf('Needle', { caseSensitive: true }, 'a needle')).toEqual([]);
+    expect(spansOf('needle', { caseSensitive: true }, 'a needle')).toEqual([
+      { start: 2, end: 8 },
+    ]);
+  });
+
+  it('refuses a hit inside a longer word when whole-word is on', () => {
+    expect(spansOf('cat', { wholeWord: true }, 'concatenate')).toEqual([]);
+    expect(spansOf('cat', { wholeWord: true }, 'the cat sat')).toEqual([
+      { start: 4, end: 7 },
+    ]);
+  });
+
+  it('reads the query as a pattern when regex is on', () => {
+    expect(spansOf('n[ae]edle', { regex: true }, 'a naedle')).toEqual([
+      { start: 2, end: 8 },
+    ]);
+  });
+
+  it('composes whole-word with regex, the way the editor people came from does', () => {
+    expect(spansOf('ca.', { regex: true, wholeWord: true }, 'concatenate')).toEqual([]);
+    expect(spansOf('ca.', { regex: true, wholeWord: true }, 'the cat sat')).toEqual([
+      { start: 4, end: 7 },
+    ]);
+  });
+
+  it('reports every occurrence on the line, not just the first', () => {
+    // A panel the reviewer steps through has to agree with the count above it,
+    // and a line with three hits is three places to go.
+    expect(spansOf('ab', {}, 'ab ab ab')).toEqual([
+      { start: 0, end: 2 },
+      { start: 3, end: 5 },
+      { start: 6, end: 8 },
+    ]);
+  });
+
+  it('says what is wrong with a pattern that will not compile', () => {
+    const matcher = compileMatcher('(unclosed', { regex: true });
+
+    expect(matcher.ok).toBe(false);
+    if (!matcher.ok) expect(matcher.error).not.toBe('');
+  });
+
+  it('only rejects a bad pattern while regex is on', () => {
+    // `(unclosed` is an ordinary thing to search a diff for with regex off.
+    expect(spansOf('(unclosed', {}, 'x (unclosed y')).toEqual([{ start: 2, end: 11 }]);
+  });
+
+  it('terminates on a pattern that can match nothing at all', () => {
+    // `a*` matches the empty string at every position. A sweep that does not
+    // advance past a zero-length match never returns, and the tab is gone.
+    const spans = spansOf('a*', { regex: true }, 'bab');
+
+    expect(spans.length).toBeLessThanOrEqual(4);
+    expect(spans).toContainEqual({ start: 1, end: 2 });
+  });
+
+  it('matches nothing at all for a blank query', () => {
+    // Not an error: an empty box is the panel at rest, and the caller decides
+    // what to say about it.
+    expect(spansOf('', {}, 'anything')).toEqual([]);
+    expect(spansOf('   ', {}, 'anything')).toEqual([]);
+  });
+});
+
+describe('compileMatcher, on a pattern that can match nothing', () => {
+  it('drops a hit that would highlight no characters', () => {
+    // `a*` matches the empty string between every pair of characters. Those are
+    // not places to send anyone: a result row whose highlight is zero pixels
+    // wide points at nothing and counts as something.
+    const matcher = compileMatcher('a*', { regex: true });
+    if (!matcher.ok) throw new Error(matcher.error);
+
+    expect(matcher.spans('bab')).toEqual([{ start: 1, end: 2 }]);
+  });
+});
+
+/**
+ * Every line of a patch the reviewer can be sent to, context included.
+ *
+ * Split out from `changedLines` because the find panel searches context and
+ * the diff search does not, and the parse is the expensive half: it runs once
+ * per file list, where the sweep over it runs once per keystroke.
+ */
+describe('patchLines', () => {
+  it('reports a context line, which changedLines leaves out', () => {
+    const lines = patchLines(patch('src/cache.ts', [
+      '@@ -10,3 +10,4 @@ export class Cache {',
+      '   const existing = this.store.get(key);',
+      '-  return existing;',
+      '+  return existing.value;',
+    ]));
+
+    expect(lines.map((line) => line.kind)).toEqual(['context', 'deletion', 'addition']);
+  });
+
+  it('numbers a context line on the additions side', () => {
+    // A context line exists on both sides and needs one number. The new-file
+    // numbering is what a reviewer means when they say "line 42".
+    const [context] = patchLines(patch('a.ts', [
+      '@@ -5,2 +10,2 @@',
+      ' unchanged',
+      '+added',
+    ]));
+
+    expect(context?.kind).toBe('context');
+    expect(context?.side).toBe('additions');
+    expect(context?.line).toBe(10);
+  });
+
+  it('still leaves the no-newline marker out', () => {
+    const lines = patchLines(patch('a.txt', [
+      '@@ -1,1 +1,1 @@',
+      '-old',
+      '\\ No newline at end of file',
+      '+new',
+    ]));
+
+    expect(lines.map((line) => line.text)).toEqual(['old', 'new']);
+  });
+});
+
+describe('searchDiff, with the find panel’s options', () => {
+  it('finds a context line when asked to include them', () => {
+    const found = searchDiff([CACHE_FILE], 'this.store.get', { includeContext: true });
+
+    expect(found).toHaveLength(1);
+    expect(found[0]?.kind).toBe('context');
+    expect(found[0]?.side).toBe('additions');
+  });
+
+  it('still leaves context out by default, so the diff search is unchanged', () => {
+    expect(searchDiff([CACHE_FILE], 'this.store.get')).toEqual([]);
+  });
+
+  it('reports each occurrence on a line as its own result', () => {
+    const twice = file('a.ts', ['@@ -1,1 +1,1 @@', '+const a = a + a;']);
+    const found = searchDiff([twice], 'a =');
+
+    expect(found).toHaveLength(1);
+    expect(searchDiff([twice], 'a')).toHaveLength(4);
+  });
+
+  it('honours case when the toggle is on', () => {
+    expect(searchDiff([CACHE_FILE], 'UNDEFINED', { caseSensitive: true })).toEqual([]);
+    expect(searchDiff([CACHE_FILE], 'undefined', { caseSensitive: true })).toHaveLength(1);
+  });
+
+  it('honours whole-word and regex too', () => {
+    expect(searchDiff([CACHE_FILE], 'exist', { wholeWord: true })).toEqual([]);
+    expect(searchDiff([CACHE_FILE], 'exist(ing)?', { regex: true }).length).toBeGreaterThan(0);
+  });
+
+  it('gives back nothing rather than throwing on a pattern that will not compile', () => {
+    // The panel asks `compileMatcher` itself to draw the error. This is only
+    // the promise that the convenience wrapper does not take the page down.
+    expect(searchDiff([CACHE_FILE], '(unclosed', { regex: true })).toEqual([]);
+  });
+});
+
+describe('searchParsed', () => {
+  it('searches a file list that was parsed once, ahead of the query', () => {
+    const parsed = parseFiles([CACHE_FILE]);
+    const matcher = compileMatcher('existing', {});
+    if (!matcher.ok) throw new Error(matcher.error);
+
+    const found = searchParsed(parsed, matcher);
+
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.every((match) => match.path === 'src/cache.ts')).toBe(true);
+  });
+
+  it('matches the path as well as the lines, the way searchDiff does', () => {
+    const parsed = parseFiles([CACHE_FILE]);
+    const matcher = compileMatcher('cache', {});
+    if (!matcher.ok) throw new Error(matcher.error);
+
+    expect(searchParsed(parsed, matcher)[0]?.kind).toBe('path');
   });
 });
