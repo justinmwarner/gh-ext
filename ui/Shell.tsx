@@ -414,7 +414,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    * Moving through the list only scrolls, so the reviewer can walk twenty
    * matches with one key and watch the diff follow. Choosing one hands the
    * keyboard over, because at that point they have stopped searching and
-   * started reading. `goToLine` cannot make that distinction itself — it never
+   * started reading. The jump cannot make that distinction itself — it never
    * touches focus, which is exactly why the walking half works.
    */
   const goToFindResult = useCallback(

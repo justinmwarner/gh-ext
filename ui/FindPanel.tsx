@@ -12,8 +12,8 @@
  * worth stating:
  *
  * - **Moving is arriving.** Arrowing onto a result scrolls the diff and leaves
- *   the keyboard here, because `goToLine` only scrolls. Walking twenty hits is
- *   twenty presses of one key, with the code moving underneath.
+ *   the keyboard here, because a `LineJump` only scrolls. Walking twenty hits
+ *   is twenty presses of one key, with the code moving underneath.
  * - **The query and the toggles are held above**, in `FilesView`, so switching
  *   to the file tree and back does not silently reset a search. Only the folds
  *   are local, because they are about a result list that no longer exists once

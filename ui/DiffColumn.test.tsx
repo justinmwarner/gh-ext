@@ -2482,7 +2482,7 @@ describe('finding the changed sections', () => {
  * Handing the keyboard to the diff.
  *
  * The find panel stays open while the reviewer walks its results, and the diff
- * scrolls underneath without taking focus — `goToLine` only scrolls, which is
+ * scrolls underneath without taking focus — a `LineJump` only scrolls, which is
  * what makes walking with one key possible. `Enter` is the other half of that
  * bargain: the reviewer has found the line and wants to read around it, so the
  * column has to be able to take the keyboard when it is asked to.

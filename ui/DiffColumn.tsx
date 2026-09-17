@@ -195,9 +195,9 @@ export interface DiffColumnHandle {
   /**
    * Take the keyboard.
    *
-   * The find panel stays open while its results are walked, and `goToLine`
-   * deliberately does not move focus — that is what lets one key step through
-   * twenty matches with the diff following. This is the other half: the
+   * The find panel stays open while its results are walked, and a {@link
+   * LineJump} deliberately does not move focus — that is what lets one key step
+   * through twenty matches with the diff following. This is the other half: the
    * reviewer has found the line and wants to read around it.
    */
   focusColumn(): void;

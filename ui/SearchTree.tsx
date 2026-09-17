@@ -13,7 +13,7 @@
  * the diff follows is the thing the whole panel exists to do.
  *
  * **Moving is arriving.** `ArrowDown` onto a row reports it, which scrolls the
- * diff without taking the keyboard — `goToLine` only scrolls, which is what
+ * diff without taking the keyboard — a `LineJump` only scrolls, which is what
  * makes this possible and what a modal over the diff could never offer.
  * `Enter` is the one that hands focus over, for a reviewer who has found the
  * line and wants to read around it.

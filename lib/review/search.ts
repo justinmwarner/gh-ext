@@ -1,21 +1,31 @@
 /**
  * Searching the review, over the patch text the page already has.
  *
- * Two searches, one mechanism. `searchDiff` looks inside the diff — file paths
- * and changed lines — and `filterPaths` looks at the file list. Both are plain
- * case-insensitive substring matches that report *where* they matched, so the
- * two surfaces highlight the same way and a reviewer only has to learn one
- * behaviour.
+ * Three surfaces, and they do not all want the same thing — which is the shape
+ * of this file rather than an untidiness in it:
+ *
+ * - **The find panel** sweeps paths, changed lines *and* the context around
+ *   them, through a query the reviewer can make case-sensitive, whole-word or a
+ *   regular expression. `parseFiles` then `searchParsed`, because it re-searches
+ *   on every keystroke and must not re-walk every patch to do it.
+ * - **The diff search** (`searchDiff`) is the same sweep with context left out.
+ *   A hit on a line nobody touched sends the reviewer somewhere the review is
+ *   not, which is precisely what searching a *diff* rather than a file is for.
+ * - **The file tree's filter and `Mod+K`** ask only `pathMatches` and
+ *   `filterPaths`, which stay a lowercased `indexOf`: they re-run over every
+ *   path on every keystroke, and the toggles are not theirs.
+ *
+ * With all three toggles off the compiled matcher and the `indexOf` agree
+ * exactly, so a query that finds a file in one surface finds it in the others.
+ * That is the property worth protecting; sharing an implementation is not.
  *
  * Nothing here is fetched, and nothing is asked of GitHub. The whole diff is
  * already in the page, so the answer is local and instant.
  *
- * The rule that shapes the parser: **only changed lines match.** A hit on a
- * context line sends the reviewer to a line nobody touched, which is precisely
- * what searching a diff rather than a file is meant to avoid. And a line is
- * changed by *position* — inside a hunk body — not by its first character:
- * `--- a/x` is a header that starts with a dash, and a removed `---` from a
- * YAML file is an ordinary deletion. Only tracking the hunk tells them apart.
+ * The rule that shapes the parser: **a line is changed by *position*** — inside
+ * a hunk body — not by its first character. `--- a/x` is a header that starts
+ * with a dash, and a removed `---` from a YAML file is an ordinary deletion.
+ * Only tracking the hunk tells them apart.
  */
 
 export interface SearchableFile {
@@ -193,7 +203,7 @@ export function changedLines(patch: string): ChangedLine[] {
  *
  * A context line exists on both sides and needs one number. It gets the
  * additions side — the new-file numbering, which is what a reviewer means when
- * they say "line 42", and the side `goToLine` can always scroll to.
+ * they say "line 42", and the side a jump to a line can always scroll to.
  */
 export function patchLines(patch: string): PatchLine[] {
   if (patch === '') return [];
