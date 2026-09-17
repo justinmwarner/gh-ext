@@ -24,7 +24,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HunkStop } from '@/lib/review/hunkNav';
-import { cardAt, probeLine, readCursor, rowTop } from './hunkPosition';
+import { cardAt, probeLine, readCursor, rowFor, rowTop } from './hunkPosition';
 
 const STOPS: readonly HunkStop[] = [
   { path: 'a.ts', side: 'additions', line: 10 },
@@ -37,6 +37,16 @@ interface RowSpec {
   line: number | null;
   top: number;
   height?: number;
+  /**
+   * The gutter cell Pierre draws for this row, when a test needs one.
+   *
+   * `data-line-type` is what tells the old half of a changed line from the new
+   * one, and it lives on the number cell — which sits in a list beside the
+   * rows rather than inside one.
+   */
+  type?: 'change-addition' | 'change-deletion' | 'context';
+  /** The row's text, for telling two rows with the same number apart. */
+  text?: string;
 }
 
 const rect = (top: number, height: number): DOMRect =>
@@ -65,11 +75,27 @@ function card(
   document.body.append(host);
 
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
+
+  // The gutter first, then the content rows: two parallel lists in document
+  // order, which is how Pierre really builds a card. Measured against the
+  // production build — the number cell is *not* an ancestor of the row, and a
+  // fixture that nested them tested a structure that does not exist.
+  const gutter = document.createElement('div');
+  for (const spec of rows) {
+    if (spec.type === undefined || spec.line === null) continue;
+    const cell = document.createElement('div');
+    cell.setAttribute('data-column-number', String(spec.line));
+    cell.setAttribute('data-line-type', spec.type);
+    gutter.append(cell);
+  }
+  root.append(gutter);
+
   for (const spec of rows) {
     const row = document.createElement('div');
     if (spec.line !== null) row.setAttribute('data-line', String(spec.line));
     const height = spec.height ?? 20;
     row.getBoundingClientRect = () => rect(spec.top, height);
+    if (spec.text !== undefined) row.textContent = spec.text;
     root.append(row);
   }
 
@@ -306,5 +332,67 @@ describe('readCursor', () => {
     expect(
       readCursor(scroller(0, 200), STOPS, 'a.ts', 40, headersOf(['a.ts', header])),
     ).toMatchObject({ index: 1 });
+  });
+});
+
+/**
+ * The row element itself, so the line a reviewer was sent to can be marked.
+ *
+ * Distinct from `rowTop`, which only wants the measurement. This one has to
+ * pick a *side*: in a split diff two rows carry the same number, one per
+ * column, and marking both would light up a line the search did not find.
+ */
+describe('rowFor', () => {
+  /**
+   * A changed line is drawn twice, with the same number — the old text and the
+   * new one. Told apart by position, so the assertions are about *which of the
+   * two rows* came back rather than about an attribute on it.
+   */
+  const CHANGED: readonly RowSpec[] = [
+    { line: 10, top: 40, type: 'change-deletion', text: 'old' },
+    { line: 10, top: 60, type: 'change-addition', text: 'new' },
+  ];
+
+  it('finds the row carrying a line on the additions side', () => {
+    const header = card('a.ts', CHANGED);
+
+    expect(rowFor(headersOf(['a.ts', header]), 'a.ts', 10, 'additions')?.textContent).toBe(
+      'new',
+    );
+  });
+
+  it('finds the deletion side when that is the one asked for', () => {
+    const header = card('a.ts', CHANGED);
+
+    expect(rowFor(headersOf(['a.ts', header]), 'a.ts', 10, 'deletions')?.textContent).toBe(
+      'old',
+    );
+  });
+
+  it('takes a context row for either side, because it belongs to both', () => {
+    const header = card('a.ts', [{ line: 7, top: 20, type: 'context' }]);
+    const headers = headersOf(['a.ts', header]);
+
+    expect(rowFor(headers, 'a.ts', 7, 'additions')).not.toBeNull();
+    expect(rowFor(headers, 'a.ts', 7, 'deletions')).not.toBeNull();
+  });
+
+  it('falls back to the numbered row when there is no typed cell to go on', () => {
+    // Pierre's attributes are observed rather than promised, and a release that
+    // moved `data-line-type` should cost the highlight its precision rather
+    // than costing it entirely.
+    const header = card('a.ts', [{ line: 10, top: 40 }]);
+
+    expect(rowFor(headersOf(['a.ts', header]), 'a.ts', 10, 'additions')).not.toBeNull();
+  });
+
+  it('finds nothing for a row the card is not drawing', () => {
+    const header = card('a.ts', [{ line: 10, top: 40, type: 'context' }]);
+
+    expect(rowFor(headersOf(['a.ts', header]), 'a.ts', 900, 'additions')).toBeNull();
+  });
+
+  it('finds nothing through a card that is not mounted', () => {
+    expect(rowFor(headersOf(), 'a.ts', 10, 'additions')).toBeNull();
   });
 });

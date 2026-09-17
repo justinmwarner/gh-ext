@@ -3401,3 +3401,77 @@ test('the rail swaps back to the checklist, keeping both sides intact', async ({
   await sidebar.getByRole('tab', { name: 'Search' }).click();
   await expect(box).toHaveValue('twentytwo');
 });
+
+/**
+ * One click, one landing — and something to see when you get there.
+ *
+ * Both halves of a reviewer's report. The click used to take two, because
+ * choosing a result started a multi-frame correcting scroll to the *top* of the
+ * card at the same time as a single scroll to the line, and the loop won. And
+ * landing a line in the middle of a screenful of diff is landing it somewhere
+ * in there: having searched for a word, you should not then hunt the viewport
+ * for it by eye.
+ *
+ * Only a real browser can check either. jsdom performs no layout, so "did the
+ * column end up at the line" has no meaning in it, and Pierre draws the rows
+ * this asserts on into a shadow root it never builds.
+ */
+test('one click on a find result lands on the line and lights it', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('body').press('/');
+  // A code file, and one well down the column, so arriving is a real journey
+  // rather than a card already on screen. Deliberately not a `.md`: those open
+  // on their rendered diff, which draws no code rows for a line to be marked on
+  // — see the note on the mark in `DiffColumn`.
+  await page
+    .getByRole('searchbox', { name: 'Search the diff' })
+    .fill('new tail of src/epsilon.ts');
+
+  const results = page.locator('[role="tree"][aria-label="Results"]');
+  await expect(results.locator('.search-row')).toHaveCount(1);
+
+  // One click. Not two.
+  await results.locator('.search-row').first().click();
+
+  await expect(page.locator('.shell')).toHaveAttribute(
+    'data-current-file',
+    'src/epsilon.ts',
+  );
+
+  // Exactly one row is lit, and the reviewer can actually see it.
+  const lit = page.locator('[data-abr-found]');
+  await expect(lit).toHaveCount(1);
+  await expect(lit).toBeInViewport();
+  await expect(lit).toContainText('new tail of src/epsilon.ts');
+});
+
+test('the light moves to the next result rather than piling up', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('body').press('/');
+  await page.getByRole('searchbox', { name: 'Search the diff' }).fill('new tail of src/');
+
+  const rows = page.locator('[role="tree"][aria-label="Results"] .search-row');
+  await rows.first().click();
+  await expect(page.locator('[data-abr-found]')).toHaveCount(1);
+
+  await rows.nth(1).click();
+
+  // Still one. A trail of lit lines behind the reviewer would be worse than
+  // none, because every one of them is a place the search already took them.
+  await expect(page.locator('[data-abr-found]')).toHaveCount(1);
+  await expect(page.locator('[data-abr-found]')).toBeInViewport();
+});

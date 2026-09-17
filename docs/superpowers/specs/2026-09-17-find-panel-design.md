@@ -61,10 +61,15 @@ declines to match half the lines on screen — or that cannot be told to respect
 case — reads as broken rather than as focused. The scope of the change is
 larger as a result; Part 2 is where that shows up.
 
-**Not doing: highlighting matches inside the diff itself.** `docs/reference/`
+**Not doing: highlighting *every* match inside the diff.** `docs/reference/`
 records that Pierre drops an annotation outside a rendered hunk silently, so
 marks would blink in and out as context expands. A result tree that is honest
 beats an in-diff highlight that is not.
+
+*Revised after use:* the line the reviewer is **sent to** is marked, which is a
+different claim and a much smaller one — one row, the one they just asked for,
+and no promise about matches they have not visited. See "What the
+implementation changed" at the foot of this document.
 
 ---
 
@@ -318,3 +323,54 @@ is zero pixels wide. They are discarded, and the count is honest as a result.
 `SearchPanel` kept its own name rather than being renamed to something like
 `FileJump`. It is reachable only from `Mod+K` now and its doc comment says so; a
 rename would have been a larger diff than the change deserved.
+
+---
+
+## Revision: one click, and something to see on arrival
+
+Two reports from the first real use, with one cause between them and one fix
+that answers both.
+
+**"Sometimes I have to click twice."** Choosing a result did two things at once:
+`fromCommand` moved the current file, whose origin starts `reach` — a correcting
+loop that scrolls to the *top* of the card over many frames — and `goToLine`
+fired one scroll at the line. The loop won. The second click worked because the
+card was already at rest by then, so `reach` was a no-op and the line scroll had
+the column to itself.
+
+Fixed by making it one journey with legs instead of two motions racing.
+`goToLine` is gone from `DiffColumnHandle`; a `LineJump { path, side, line,
+token }` prop takes its place, and `reach` gained an `onArrived` callback so the
+line scroll happens *after* the card has settled. `currentFile.ts` gained a
+fourth origin, `jump`: the tree follows, and the column does not also move
+itself coarsely, because something is already moving it precisely.
+
+**"Highlight it bright so it's easy to find."** Landing a line in the middle of a
+screenful of diff is landing it *somewhere in there*. The row now carries
+`data-abr-found`, drawn through `unsafeCSS` in the same amber the result row's
+`<mark>` uses in the rail — so arriving is recognising rather than re-reading.
+
+Three things that only a real browser could have taught this:
+
+- **`[data-line]` rows and `[data-column-number]` cells are parallel lists, not
+  nested.** The jsdom fixture had encoded the opposite, and passed. A changed
+  line is drawn twice with the *same* `data-line`, and the two halves are told
+  apart only by `data-line-type` on the cell — so picking the right side means
+  pairing the two lists by index, guarded on their lengths.
+- **A frame budget cannot do this job.** A card scrolled in from the far end of
+  a long column renders its rows later than any budget worth spending, and
+  Pierre recycles rows as the reviewer scrolls, quietly taking the attribute
+  back off. A `MutationObserver` on the card's shadow root answers both: the
+  mark goes on when the row appears, and goes back on if it is ever redrawn.
+- **`focusColumn` needed `preventScroll`.** Focusing an element scrolls it into
+  view, and the element is the whole column — so pressing Enter on a result
+  undid the journey it was meant to complete.
+
+**Known limit.** A `.md` file open on its rendered diff draws no code rows at
+all, so there is nothing to mark and nothing to scroll to; the reviewer lands on
+the card. That is the honest outcome rather than a bug in the mark, and it is
+the same fact behind the Markdown mode-switcher report logged separately.
+
+The highlight persists until the next result is chosen. That is deliberate — it
+is a bookmark of where the search took you, which is what the editor it is
+imitating also does — rather than an oversight about clearing it.

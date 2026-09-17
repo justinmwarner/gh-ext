@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NO_FILE,
   fromCommand,
+  fromJump,
   fromScroll,
   fromTree,
   shouldScrollDiff,
@@ -238,5 +239,39 @@ describe('a move neither surface made', () => {
     const at = fromCommand(NO_FILE, 'src/app.ts');
     expect(fromCommand(at, 'src/app.ts')).not.toBe(at);
     expect(shouldScrollDiff(fromCommand(at, 'src/app.ts'))).toBe(true);
+  });
+});
+
+/**
+ * A jump to a *line*, which is a fourth thing that can move the current file.
+ *
+ * The bug it exists for: a find result called `fromCommand`, whose origin tells
+ * the column to scroll to the top of the file — a multi-frame correcting loop —
+ * and then asked it to scroll to a line. The loop won, so the first click
+ * landed on the file and only a second one, with the card already at rest and
+ * the loop a no-op, reached the line.
+ *
+ * So the rule is: the tree still follows, and the column does *not* also move
+ * itself coarsely, because something is already moving it precisely.
+ */
+describe('fromJump', () => {
+  it('leaves the file scroll to whatever is doing the precise move', () => {
+    expect(shouldScrollDiff(fromJump(NO_FILE, 'src/app.ts'))).toBe(false);
+  });
+
+  it('still has the tree follow, so the rail does not point at the wrong file', () => {
+    expect(shouldSelectInTree(fromJump(NO_FILE, 'src/app.ts'))).toBe(true);
+  });
+
+  it('is never an echo, so jumping twice to the same file works twice', () => {
+    // Only a scroll produces echoes. A second result on a file the reviewer is
+    // already on is a real request to go to a different line of it.
+    const at = fromJump(NO_FILE, 'src/app.ts');
+
+    expect(fromJump(at, 'src/app.ts')).not.toBe(at);
+  });
+
+  it('reports the path it was given', () => {
+    expect(fromJump(NO_FILE, 'src/app.ts').path).toBe('src/app.ts');
   });
 });

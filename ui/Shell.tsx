@@ -35,7 +35,7 @@ import {
 } from '@/lib/review/diffScope';
 import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
-import type { DiffColumnHandle, DiffStyle, ThreadJump } from './DiffColumn';
+import type { DiffColumnHandle, DiffStyle, LineJump, ThreadJump } from './DiffColumn';
 import { FilesView, type FilesViewHandle } from './FilesView';
 import type { FindTarget } from './FindPanel';
 import { OverviewView } from './OverviewView';
@@ -45,7 +45,14 @@ import { SearchPanel, type SearchTarget } from './SearchPanel';
 import { ShortcutHelp } from './ShortcutHelp';
 import { TopBar } from './TopBar';
 import { type ReviewView, ViewSwitcher, viewId, viewTabId } from './ViewSwitcher';
-import { type CurrentFile, NO_FILE, fromCommand, fromScroll, fromTree } from './currentFile';
+import {
+  type CurrentFile,
+  NO_FILE,
+  fromCommand,
+  fromJump,
+  fromScroll,
+  fromTree,
+} from './currentFile';
 import { pullRequestUrl } from './githubUrl';
 import type { BlobRefs } from './blobLoader';
 import { prBaseSha, prPermalink, prViewerIsAuthor, prViewerReviewedAt } from './prNode';
@@ -118,6 +125,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const wholeDiff = useMemo(() => reviewFiles(payload), [payload]);
   const [current, setCurrent] = useState<CurrentFile>(NO_FILE);
   const [jump, setJump] = useState<ThreadJump | null>(null);
+  const [lineJump, setLineJump] = useState<LineJump | null>(null);
   const [focusedThread, setFocusedThread] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(NO_OVERLAY);
   const [view, setView] = useState<ReviewView>('files');
@@ -369,13 +377,33 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     window.open(href, '_blank', 'noopener,noreferrer');
   }, [payload]);
 
+  /**
+   * Go to a result.
+   *
+   * A whole-file result is an ordinary command: the column scrolls to the card
+   * and the tree follows. A result on a *line* is not, and the difference is
+   * the bug behind "I had to click it twice" — `fromCommand` starts `reach`, a
+   * correcting loop that scrolls to the top of the card over many frames, and
+   * a single scroll to a line cannot win against it. So a line result uses
+   * `fromJump`, which has the tree follow and leaves the scrolling to the
+   * journey below. See `ui/DiffColumn.tsx`'s `LineJump`.
+   */
   const goToResult = useCallback(
     (target: SearchTarget) => {
       setView('files');
-      selectFromCommand(target.path);
       if (target.line !== null && target.side !== null) {
-        column.current?.goToLine(target.path, target.side, target.line);
+        setCurrent((state) => fromJump(state, target.path));
+        setLineJump((last) => ({
+          path: target.path,
+          side: target.side as 'additions' | 'deletions',
+          line: target.line as number,
+          // A new token every time, so choosing the same result twice is two
+          // journeys rather than one effect that never re-runs.
+          token: (last?.token ?? 0) + 1,
+        }));
+        return;
       }
+      selectFromCommand(target.path);
     },
     [selectFromCommand],
   );
@@ -539,6 +567,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               onSelectFromTree={selectFromTree}
               onSelectFromScroll={selectFromScroll}
               jump={jump}
+              lineJump={lineJump}
               blobs={blobs}
               // The comparison always comes back as a real unified diff, so
               // while it is showing, the files-endpoint warning would be

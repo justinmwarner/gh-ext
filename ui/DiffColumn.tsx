@@ -94,7 +94,7 @@ import {
   showsTextDiff,
 } from './diffItems';
 import { HunkNavContext, createHunkCursorStore } from './hunkCursor';
-import { readCursor, rowTop } from './hunkPosition';
+import { readCursor, rowFor, rowTop, shadowFor } from './hunkPosition';
 import { MoreBelow } from './MoreBelow';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession } from './reviewSession';
@@ -161,6 +161,29 @@ export interface ThreadJump {
 }
 
 /**
+ * A find result, as a journey rather than a call.
+ *
+ * It used to be `goToLine` on the handle, fired the moment a result was
+ * chosen — and that was the bug behind "I have to click it twice". Choosing a
+ * result also moves the current file, which starts `reach`: a correcting loop
+ * that scrolls to the *top* of the card over many frames. One synchronous
+ * scroll to a line cannot win against that, so the first click landed on the
+ * file; the second, with the card already at rest and the loop a no-op,
+ * reached the line.
+ *
+ * As a prop with a token it is one journey with two legs instead of two
+ * motions racing: reach the card, then find the line inside it. The token is
+ * what makes choosing the same result twice a second journey — for the reason
+ * {@link ThreadJump} gives.
+ */
+export interface LineJump {
+  path: string;
+  side: AnnotationSide;
+  line: number;
+  token: number;
+}
+
+/**
  * What the keyboard needs from the column and cannot express as a prop.
  *
  * Three things, and each is about something only this component holds: the
@@ -169,8 +192,6 @@ export interface ThreadJump {
 export interface DiffColumnHandle {
   /** Move to the next hunk (`1`) or the previous one (`-1`), across files. */
   goToHunk(direction: 1 | -1): void;
-  /** Bring one line into view. What a search result jumps to. */
-  goToLine(path: string, side: AnnotationSide, line: number): void;
   /**
    * Take the keyboard.
    *
@@ -204,6 +225,8 @@ export interface DiffColumnProps {
   onScrollTo: (path: string) => void;
   /** The Overview asked for a thread. Null until it has. */
   jump?: ThreadJump | null;
+  /** Where a find result sends the column, and what it marks when it lands. */
+  lineJump?: LineJump | null;
   /**
    * The two commits to read whole files from, for expanding context.
    *
@@ -302,6 +325,40 @@ export type HeldBack = 'generated' | 'whitespace';
  * versions: if a future release moves the annotation, this stops matching and
  * the body goes back to half a card. It does not break anything else.
  */
+/**
+ * What a row wears once a find result has landed on it.
+ *
+ * Its own constant because two places have to agree on the spelling — the
+ * effect that sets it and the stylesheet below that draws it — and a typo in
+ * either is a highlight that silently never appears.
+ */
+const FOUND_ATTRIBUTE = 'data-abr-found';
+
+/**
+ * The line the reviewer was sent to, lit so it can be found by eye.
+ *
+ * Amber, and the same amber the result row's `<mark>` uses in the rail: the
+ * thing that was highlighted in the panel is highlighted the same colour in the
+ * diff, so arriving is recognising rather than re-reading. `--attention-*` is
+ * one of the four named roles in DESIGN.md §2 and no fifth is introduced.
+ *
+ * `!important` because the row already carries an addition or deletion tint
+ * from Pierre's own theme layer, and this has to win over it — that tint is the
+ * background the mark would otherwise be invisible against. The custom
+ * properties resolve: they are inherited from `:root`, and inheritance crosses
+ * a shadow boundary even though selectors do not.
+ *
+ * Delivered through `unsafeCSS` for the reason {@link FULL_WIDTH_RICH_BODY}
+ * explains, and kept to one flat attribute selector because §E.6 warns that
+ * structural selectors are the fragile kind across Pierre versions.
+ */
+const FOUND_LINE = /* css */ `
+[${'data-abr-found'}] {
+  background: var(--attention-subtle-hover) !important;
+  box-shadow: inset 0 0 0 1px var(--attention-border);
+}
+`;
+
 const FULL_WIDTH_RICH_BODY = /* css */ `
 pre[data-diff-type="split"]:has([data-content] > [data-line-annotation="-1,-1"]:only-child) {
   grid-template-columns: 1fr;
@@ -320,7 +377,8 @@ const CODE_VIEW_OPTIONS: CodeViewReactOptions<AnnotationMetadata, undefined> = {
   // The "+" in the gutter, and the drag that turns it into a range.
   enableGutterUtility: true,
   enableLineSelection: true,
-  unsafeCSS: FULL_WIDTH_RICH_BODY,
+  unsafeCSS: `${FULL_WIDTH_RICH_BODY}
+${FOUND_LINE}`,
 };
 
 /**
@@ -464,6 +522,7 @@ export function DiffColumn({
   current,
   onScrollTo,
   jump = null,
+  lineJump = null,
   blobs = null,
   ignoreWhitespace = false,
   hideGenerated = false,
@@ -1103,6 +1162,8 @@ export function DiffColumn({
   const scroller = useRef<HTMLDivElement>(null);
   /** The column itself, so `focusColumn` has something to hand the keyboard to. */
   const column = useRef<HTMLElement>(null);
+  /** The row a find result last landed on, so the next one can unmark it. */
+  const found = useRef<HTMLElement | null>(null);
   const headers = useRef(new Map<string, HTMLElement>());
 
   /**
@@ -1360,17 +1421,12 @@ export function DiffColumn({
       goToHunk,
 
       focusColumn() {
-        column.current?.focus();
-      },
-
-      goToLine(path, side, line) {
-        viewer.current?.scrollTo({
-          type: 'line',
-          id: path,
-          lineNumber: line,
-          side,
-          align: 'center',
-        });
+        // `preventScroll`, because this is called in the same breath as a jump
+        // to a line: focusing an element normally scrolls it into view, and the
+        // element here is the whole column, whose top is nowhere near the line
+        // the reviewer asked for. It would undo the journey it was meant to
+        // follow.
+        column.current?.focus({ preventScroll: true });
       },
 
       commentOnSelection() {
@@ -1904,10 +1960,25 @@ export function DiffColumn({
   }, [cardTops]);
 
   const reach = useCallback(
-    (path: string): (() => void) => {
+    (path: string, onArrived?: () => void): (() => void) => {
       let frame = 0;
       let attempts = 0;
-      const done = hold();
+      let arrived = false;
+      const release = hold();
+      /**
+       * End the journey, and run its second leg if it has one.
+       *
+       * Fired on both non-cancelled exits — settled *and* timed out — because a
+       * line jump has to land either way: a card the loop gave up correcting is
+       * still the card the reviewer asked for, and refusing the second leg
+       * there would leave them on the file with the line unfound.
+       */
+      const done = () => {
+        release();
+        if (arrived) return;
+        arrived = true;
+        onArrived?.();
+      };
 
       // How far the viewer's idea of this item's top is from where the card
       // actually lands. Accumulated rather than assigned: each reading is the
@@ -1979,7 +2050,10 @@ export function DiffColumn({
       settle();
       return () => {
         cancelAnimationFrame(frame);
-        done();
+        // Cancelled rather than finished: release the hold, but do not run a
+        // second leg for a journey that was abandoned.
+        arrived = true;
+        release();
       };
     },
     [cardTops, hold],
@@ -2074,6 +2148,110 @@ export function DiffColumn({
    * frames and, if it never turns up, nothing further happens: the reviewer is
    * on the right file, which is what the list could honestly promise.
    */
+  /**
+   * A find result: reach the card, then the line inside it, then mark it.
+   *
+   * Three legs, and the order is the whole point — see {@link LineJump} for the
+   * bug that the two-motions-at-once version produced.
+   *
+   * The mark is the answer to the other half of the complaint. Landing a line
+   * in the middle of a screenful of diff is landing it *somewhere in there*,
+   * and a reviewer who searched for a word should not then have to search the
+   * viewport for it by eye. It is set as an attribute on Pierre's own row and
+   * drawn by `FOUND_LINE` through `unsafeCSS`, which is the library's sanctioned
+   * door into its shadow root.
+   *
+   * It persists rather than flashing. A flash is gone by the time the scroll
+   * has settled and the eye has arrived, which is precisely when it is wanted;
+   * this clears when the next jump lands, or when the panel asks for it to go.
+   */
+  const jumpLine = lineJump ?? null;
+  const lineToken = jumpLine?.token ?? 0;
+  useEffect(() => {
+    if (jumpLine === null) return;
+    const { path, side, line } = jumpLine;
+
+    let frame = 0;
+    let quiet = REACH_FRAMES;
+    // Held across the scroll, not the marking: `align: 'center'` puts the line
+    // mid-viewport, which can leave the *previous* card's header at the top —
+    // and reporting that would light up the wrong row in the rail while the
+    // reviewer reads the line they asked for.
+    const speak = hold();
+
+    /**
+     * Put the mark on the row, wherever it is now.
+     *
+     * Idempotent, because it is called again every time the card's shadow root
+     * changes. `found` is the column's, not this effect's, so the previous
+     * jump's mark is taken off even though its effect has already been torn
+     * down — one lit line at a time, or the reviewer is left with a trail of
+     * places the search has already taken them.
+     */
+    const apply = (): void => {
+      const row = rowFor(headers.current, path, line, side);
+      if (row === null || row === found.current) return;
+      found.current?.removeAttribute(FOUND_ATTRIBUTE);
+      row.setAttribute(FOUND_ATTRIBUTE, '');
+      found.current = row;
+    };
+
+    /**
+     * Watch the card rather than guess how long it will take.
+     *
+     * Two problems, one answer. A card scrolled in from the far end of a long
+     * column renders its rows well after it arrives — measured against the
+     * production build, later than any frame budget worth spending — and Pierre
+     * recycles rows as the reviewer scrolls, which silently takes the attribute
+     * back off. A fixed number of frames loses the first race and cannot win
+     * the second at all. An observer answers both: the mark goes on when the
+     * row appears, and goes back on if it is ever redrawn.
+     *
+     * It lives as long as this jump is the current one, which is the same
+     * lifetime as the highlight itself.
+     */
+    let watcher: MutationObserver | null = null;
+    const watch = (): void => {
+      const root = shadowFor(headers.current, path);
+      if (root === null) {
+        // The card is not mounted yet. `reach` is bringing it in; look again.
+        frame = requestAnimationFrame(watch);
+        return;
+      }
+      apply();
+      watcher = new MutationObserver(apply);
+      watcher.observe(root, { childList: true, subtree: true });
+    };
+
+    /** Count the jump's scroll out, then hand the column its voice back. */
+    const settle = (): void => {
+      quiet -= 1;
+      if (quiet > 0) frame = requestAnimationFrame(settle);
+      else speak();
+    };
+
+    const stop = reach(path, () => {
+      viewer.current?.scrollTo({
+        type: 'line',
+        id: path,
+        lineNumber: line,
+        side,
+        align: 'center',
+      });
+      watch();
+      frame = requestAnimationFrame(settle);
+    });
+
+    return () => {
+      stop();
+      cancelAnimationFrame(frame);
+      watcher?.disconnect();
+      speak();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the token is the
+    // dependency; re-running on a rebuilt object would re-jump on every render.
+  }, [lineToken, reach, hold]);
+
   const jumpId = jump?.threadId ?? null;
   const jumpToken = jump?.token ?? 0;
   useEffect(() => {

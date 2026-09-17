@@ -32,12 +32,20 @@
 /**
  * Which surface moved the current file.
  *
- * Three, not two, because "neither of them" is a real answer. `j`, the jump
- * panel and a thread link all move it without the tree or the column having
- * acted, and both of those far surfaces need to follow. Reusing `tree` for
- * those meant telling the tree to stand still for a move it did not make.
+ * Four, not two. "Neither of them" is a real answer — `j`, the jump panel and a
+ * thread link all move it without the tree or the column having acted, and both
+ * of those far surfaces need to follow; reusing `tree` for those meant telling
+ * the tree to stand still for a move it did not make.
+ *
+ * And `jump` is a real answer twice over: something is already moving the column
+ * *precisely*, to a line, so the column must not also move itself coarsely to
+ * the top of the file. Those two motions fought, and the coarse one won —
+ * `reach` is a correcting loop that runs for many frames, where a scroll to a
+ * line is one call. The reviewer saw it as having to click a search result
+ * twice: the first click landed on the file, and only the second, with the card
+ * already at rest and the loop a no-op, reached the line.
  */
-export type FileOrigin = 'tree' | 'scroll' | 'command';
+export type FileOrigin = 'tree' | 'scroll' | 'command' | 'jump';
 
 export interface CurrentFile {
   path: string | null;
@@ -74,12 +82,24 @@ export function fromScroll(state: CurrentFile, path: string): CurrentFile {
   return moveTo(state, path, 'scroll');
 }
 
+/**
+ * Something is taking the column to a particular line of this file.
+ *
+ * The tree follows, as it does for a command. The column does not, because it
+ * is already being moved — and by the more precise of the two motions.
+ */
+export function fromJump(state: CurrentFile, path: string): CurrentFile {
+  return moveTo(state, path, 'jump');
+}
+
 export function shouldScrollDiff(state: CurrentFile): boolean {
   return state.origin === 'tree' || state.origin === 'command';
 }
 
 export function shouldSelectInTree(state: CurrentFile): boolean {
-  return state.origin === 'scroll' || state.origin === 'command';
+  return (
+    state.origin === 'scroll' || state.origin === 'command' || state.origin === 'jump'
+  );
 }
 
 /** One mounted file card, and where its header sits relative to the viewport. */

@@ -22,6 +22,7 @@ import {
   DiffColumn,
   type DiffColumnHandle,
   type DiffStyle,
+  type LineJump,
   type ThreadJump,
 } from './DiffColumn';
 import { FileTree } from './FileTree';
@@ -70,6 +71,8 @@ export interface FilesViewProps {
   onSelectFromTree: (path: string) => void;
   onSelectFromScroll: (path: string) => void;
   jump: ThreadJump | null;
+  /** Where a find result sends the column. Passed straight through. */
+  lineJump?: LineJump | null;
   blobs: BlobRefs | null;
   diff: { source: PrPayload['diff']['source']; truncated: boolean };
   /**
@@ -124,6 +127,7 @@ export function FilesView({
   onSelectFromTree,
   onSelectFromScroll,
   jump,
+  lineJump,
   blobs,
   diff,
   sides,
@@ -363,6 +367,7 @@ export function FilesView({
           current={current}
           onScrollTo={onSelectFromScroll}
           jump={jump}
+          lineJump={lineJump}
           blobs={blobs}
         />
       </div>

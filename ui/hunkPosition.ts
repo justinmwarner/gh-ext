@@ -63,6 +63,16 @@ const BOTTOM_CLEARANCE = 4;
 /** Every mounted card header, by path. `DiffColumn` keeps exactly this map. */
 export type CardHeaders = ReadonlyMap<string, HTMLElement>;
 
+/**
+ * The shadow root drawing one file's rows, or null if it is not mounted.
+ *
+ * Exported because a caller that wants to *watch* a card — rather than ask it
+ * one question — needs the root itself to observe.
+ */
+export function shadowFor(headers: CardHeaders, path: string): ShadowRoot | null {
+  return rootFor(headers, path);
+}
+
 /** The shadow root drawing one file's rows, or null if it is not mounted. */
 function rootFor(headers: CardHeaders, path: string): ShadowRoot | null {
   const header = headers.get(path);
@@ -158,6 +168,66 @@ export function rowTop(
   // opaque thread ids elsewhere in the column.
   const row = root.querySelector(`[data-line="${line}"]`);
   return row === null ? null : row.getBoundingClientRect().top;
+}
+
+/**
+ * Which rows belong to a side.
+ *
+ * `data-line-type` is Pierre's, observed rather than promised (§E.6). Context
+ * belongs to both sides because it does: the line exists in the old file and
+ * the new one, and a find result on one is a find result on the other.
+ */
+const SIDE_TYPES: Record<'additions' | 'deletions', readonly string[]> = {
+  additions: ['change-addition', 'context'],
+  deletions: ['change-deletion', 'context'],
+};
+
+/**
+ * The row drawing one line on one side, so it can be marked.
+ *
+ * {@link rowTop} wants the measurement; this wants the element, and the side
+ * matters here in a way it does not there. **A line number is not unique.** In a
+ * unified diff Pierre draws `data-line="21"` twice for a changed line — once for
+ * the old text and once for the new — and the two are told apart only by
+ * `data-line-type`, which lives on the gutter cell.
+ *
+ * The cell is *not* an ancestor of the row. They are two parallel lists in the
+ * same shadow root, in the same order, which is what this pairs by index. That
+ * is a structural assumption of exactly the kind §E.6 warns is fragile across
+ * Pierre versions, so it is guarded: the pairing is only trusted while the two
+ * lists are the same length, and anything else falls back to the first row with
+ * that number. A highlight on the wrong half of a changed line is a smaller
+ * failure than no highlight at all, and both are smaller than a wrong answer
+ * delivered confidently.
+ *
+ * Null when the row is not drawn, which virtualization makes ordinary.
+ */
+export function rowFor(
+  headers: CardHeaders,
+  path: string,
+  line: number,
+  side: 'additions' | 'deletions',
+): HTMLElement | null {
+  const root = rootFor(headers, path);
+  if (root === null) return null;
+
+  const rows = [...root.querySelectorAll('[data-line]')];
+  const cells = [...root.querySelectorAll('[data-column-number]')];
+  const wanted = SIDE_TYPES[side];
+
+  if (cells.length === rows.length) {
+    for (const [at, cell] of cells.entries()) {
+      if (cell.getAttribute('data-column-number') !== String(line)) continue;
+      if (!wanted.includes(cell.getAttribute('data-line-type') ?? '')) continue;
+      const row = rows[at];
+      if (row instanceof HTMLElement) return row;
+    }
+  }
+
+  // Numeric attribute values need no escaping, unlike the opaque thread ids
+  // elsewhere in the column.
+  const plain = root.querySelector(`[data-line="${line}"]`);
+  return plain instanceof HTMLElement ? plain : null;
 }
 
 /**
