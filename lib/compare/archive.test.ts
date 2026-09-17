@@ -10,7 +10,12 @@
 import { describe, expect, it } from 'vitest';
 import { decodeBase64 } from '../github/binary-blobs';
 import { NESTED_ARCHIVE, PAIR_ARCHIVE } from './archive.fixture';
-import { type ArchiveEntry, compareArchives, readArchive } from './archive';
+import {
+  type ArchiveEntry,
+  compareArchives,
+  entryLines,
+  readArchive,
+} from './archive';
 
 const entry = (path: string, over: Partial<ArchiveEntry> = {}): ArchiveEntry => ({
   path,
@@ -166,5 +171,46 @@ describe('readArchive', () => {
     const read = await readArchive(new Uint8Array([0x6e, 0x6f, 0x70, 0x65]));
 
     expect(read.status).toBe('unreadable');
+  });
+});
+
+/**
+ * The archive's members as things a search can look at.
+ *
+ * A `.zip` is binary to GitHub, so its patch is empty and the find panel can
+ * only ever match the archive's own name — which makes the one question a
+ * reviewer has about an archive, *what is inside it*, the one question search
+ * could not answer.
+ */
+describe('entryLines', () => {
+  const comparison = compareArchives(
+    [entry('readme.txt', { size: 5 }), entry('gone.txt', { size: 1 })],
+    [entry('readme.txt', { size: 9 }), entry('notes.md', { size: 2 })],
+  );
+
+  it('offers every member, whatever happened to it', () => {
+    expect(entryLines(comparison).map((line) => line.text).sort()).toEqual([
+      'gone.txt',
+      'notes.md',
+      'readme.txt',
+    ]);
+  });
+
+  it('says what happened to each, in the word the card uses', () => {
+    const status = (path: string): string | undefined =>
+      entryLines(comparison).find((line) => line.text === path)?.status;
+
+    expect(status('notes.md')).toBe('added');
+    expect(status('gone.txt')).toBe('removed');
+    expect(status('readme.txt')).toBe('changed');
+  });
+
+  it('leaves out directory records, which are not files anyone searches for', () => {
+    const nested = compareArchives(
+      [],
+      [entry('docs/', { directory: true }), entry('docs/a.txt', { size: 5 })],
+    );
+
+    expect(entryLines(nested).map((line) => line.text)).toEqual(['docs/a.txt']);
   });
 });

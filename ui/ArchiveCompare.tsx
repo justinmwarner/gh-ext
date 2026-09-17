@@ -18,7 +18,12 @@
  * a changed row here and a changed row there read as the same event.
  */
 
-import type { ArchiveComparison, ArchiveRow, ArchiveStatus } from '@/lib/compare/archive';
+import {
+  type ArchiveComparison,
+  type ArchiveRow,
+  type ArchiveStatus,
+  STATUS_MARKS,
+} from '@/lib/compare/archive';
 import { kb } from './bytes';
 
 export interface ArchiveCompareProps {
@@ -26,14 +31,6 @@ export interface ArchiveCompareProps {
   /** Drop the members that did not change. */
   changedOnly: boolean;
 }
-
-const MARKS: Record<ArchiveStatus, string> = {
-  added: '+',
-  removed: '−',
-  changed: '~',
-  unchanged: '',
-  unknown: '?',
-};
 
 /**
  * The same fact in words, for a reviewer who is not reading the colours.
@@ -129,7 +126,7 @@ export function ArchiveCompare({ comparison, changedOnly }: ArchiveCompareProps)
                 <tr key={row.path} className={`grid-row archive-${row.status}`}>
                   <td className="grid-gutter">
                     <span className="grid-mark" aria-hidden="true">
-                      {MARKS[row.status]}
+                      {STATUS_MARKS[row.status]}
                     </span>
                     <span className="visually-hidden">{WORDS[row.status]}</span>
                   </td>

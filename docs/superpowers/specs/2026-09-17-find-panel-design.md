@@ -374,3 +374,58 @@ the same fact behind the Markdown mode-switcher report logged separately.
 The highlight persists until the next result is chosen. That is deliberate — it
 is a bookmark of where the search took you, which is what the editor it is
 imitating also does — rather than an oversight about clearing it.
+
+---
+
+## Revision: looking inside archives
+
+**"`added.md` is in the zip — can we look into that to find it?"** No, and the
+reason was structural: a `.zip` is binary to GitHub, so its `patch` is empty and
+a panel sweeping patch text could only ever match the archive's own name. The
+one question a reviewer has about an archive — *what is inside it* — was the one
+question search could not answer.
+
+It can now. `lib/compare/archive.ts` already read the zip's central directory
+for the archive card, so the member names and their statuses existed; what was
+missing was getting them to the search.
+
+**The corpus gained a second kind of content.** `ParsedFile` takes an optional
+`entries: ParsedEntry[]` — *named things inside a file* — and `searchParsed`
+sweeps them into `kind: 'entry'` matches carrying a free-text `status`. The
+search module deliberately never says "archive": it knows about text and where
+it was found, and what produced the names is the caller's business. A future
+container kind needs no change here.
+
+**The cost is real and the choice was deliberate.** Reading a zip's index means
+downloading the whole zip, base64-encoded, per side. That was put to the
+reviewer against three cheaper options — search only what is cached, make it an
+opt-in action, or merely mark archives as unsearched — and *always load* was
+chosen, for completeness over conservatism. Three rules keep it honest, and
+`ui/useArchiveIndexes.ts` states them at length:
+
+- **Never before the diff.** The read starts after the payload has arrived. A
+  review containing an archive must not open more slowly than one without.
+- **Never twice.** It goes through `archiveIndex` in `ui/fileSides.ts`, which
+  shares the side cache *and its keys* — so an archive the search read is an
+  archive whose card paints from cache when the reviewer scrolls to it. Part of
+  the cost comes back.
+- **Never fatal.** A side that will not load contributes no entries and says
+  nothing. A card is where that failure has somewhere to be drawn; a search box
+  is not.
+
+Reads are sequential, not parallel: these are the largest downloads in a pull
+request, and eight at once would compete with the blobs the card the reviewer is
+actually looking at needs. Results publish as they arrive, so the first archive
+is searchable before the last is asked for.
+
+**An entry row has no line to go to**, so its destination is the archive's card —
+which `FindTarget` already expresses as `line: null`, needing no new plumbing.
+Its position column carries the member's status instead, in the same character
+the archive card uses; `STATUS_MARKS` moved into `lib/compare/archive.ts` so
+there is one spelling of `+`, `−`, `~` and `?` rather than two.
+
+**Why archives and nothing else.** Notebooks, JSON, CSV and Markdown all carry
+their real content in the patch, so searching them already worked — a notebook's
+cell source appears as escaped JSON, ugly but findable. Images have nothing to
+search. Archives were the only kind whose content the patch cannot see at all,
+which is what made this a bounded change rather than an open-ended one.

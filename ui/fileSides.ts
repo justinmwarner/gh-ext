@@ -299,6 +299,40 @@ export function useImageSides(request_: ImageSidesRequest): SidesState<LoadedIma
   );
 }
 
+/**
+ * Both sides of one archive's index, without a component to hang a hook on.
+ *
+ * The find panel wants every archive in the pull request, not the one card that
+ * happens to be on screen, so it cannot use {@link useArchiveSides} — but it
+ * must not fetch anything twice either. This goes through the same `remember`
+ * and, crucially, **the same cache keys**, so search warming an archive means
+ * the card paints from cache when the reviewer eventually scrolls to it. The
+ * cost the panel pays is partly given back.
+ *
+ * Resolves rather than rejects, and reports nothing rather than a reason: a
+ * side that would not load costs the search that archive's contents, and the
+ * card is where that failure has somewhere to be drawn.
+ */
+export async function archiveIndex(
+  refs: BlobRefs,
+  path: string,
+  oldPath: string,
+  sides: ChangeSides,
+): Promise<{ before: readonly ArchiveEntry[]; after: readonly ArchiveEntry[] }> {
+  const pr = refs.pr;
+  const read = async (ref: string, at: string): Promise<readonly ArchiveEntry[]> => {
+    const loaded = await remember(`archive ${ref} ${at}`, () => loadArchive(pr, ref, at));
+    return loaded.ok ? loaded.value : [];
+  };
+
+  const [before, after] = await Promise.all([
+    sides === 'added' ? Promise.resolve<readonly ArchiveEntry[]>([]) : read(refs.baseSha, oldPath),
+    sides === 'deleted' ? Promise.resolve<readonly ArchiveEntry[]>([]) : read(refs.headSha, path),
+  ]);
+
+  return { before, after };
+}
+
 export function useArchiveSides(
   request_: SidesRequest,
 ): SidesState<readonly ArchiveEntry[]> {

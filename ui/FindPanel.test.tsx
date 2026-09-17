@@ -14,6 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_FIND, FindPanel, type FindState, type FindTarget } from './FindPanel';
 import type { ReviewFile } from './reviewFiles';
+import type { ArchiveIndexes } from './useArchiveIndexes';
 
 const file = (path: string, patch: string, overrides: Partial<ReviewFile> = {}): ReviewFile => ({
   path,
@@ -52,11 +53,13 @@ const FILES: ReviewFile[] = [
 /** Mount with state held above, the way `FilesView` holds it. */
 function Harness({
   files = FILES,
+  archives,
   initial = DEFAULT_FIND,
   onGoTo = vi.fn(),
   onClose = vi.fn(),
 }: {
   files?: readonly ReviewFile[];
+  archives?: ArchiveIndexes;
   initial?: FindState;
   onGoTo?: (target: FindTarget) => void;
   onClose?: () => void;
@@ -65,6 +68,7 @@ function Harness({
   return (
     <FindPanel
       files={files}
+      archives={archives}
       state={state}
       onState={setState}
       onGoTo={onGoTo}
@@ -258,5 +262,79 @@ describe('FindPanel, handing the diff back the keyboard', () => {
 
     // Choosing one is the reviewer saying they are done walking.
     expect(onGoTo.mock.lastCall?.[0].focusDiff).toBe(true);
+  });
+});
+
+/**
+ * What is inside an archive.
+ *
+ * A `.zip` is binary to GitHub, so its patch is empty and everything else this
+ * panel searches is invisible in one. The entries arrive separately, after the
+ * diff — so what is asserted here is that they land in the results at all, and
+ * that choosing one goes to the archive rather than to a line it does not have.
+ */
+describe('FindPanel, over archive contents', () => {
+  const BUNDLE = file('fixtures/bundle.zip', '');
+  const INSIDE = new Map([
+    [
+      'fixtures/bundle.zip',
+      [
+        { text: 'notes.md', status: 'added' as const },
+        { text: 'readme.txt', status: 'changed' as const },
+      ],
+    ],
+  ]);
+
+  it('finds a file that exists only inside the archive', async () => {
+    const user = userEvent.setup();
+    render(<Harness files={[BUNDLE]} archives={INSIDE} />);
+
+    await user.type(box(), 'notes.md');
+
+    expect(screen.getByRole('status').textContent).toMatch(/1 result in 1 file/i);
+    expect(screen.getByTitle('notes.md')).toBeDefined();
+  });
+
+  it('finds nothing inside one whose index has not arrived yet', async () => {
+    // The honest resting state: the entries are fetched after the diff, and
+    // until they land the archive is what GitHub says it is — binary.
+    const user = userEvent.setup();
+    render(<Harness files={[BUNDLE]} />);
+
+    await user.type(box(), 'notes.md');
+
+    expect(screen.getByRole('status').textContent).toMatch(/no results/i);
+  });
+
+  it('says what happened to the member, in the archive card’s own mark', async () => {
+    const user = userEvent.setup();
+    render(<Harness files={[BUNDLE]} archives={INSIDE} />);
+
+    await user.type(box(), 'md');
+    const row = screen.getByTitle('notes.md');
+
+    expect(within(row).getByText('+')).toBeDefined();
+  });
+
+  it('sends the reviewer to the archive, which has no line to go to', async () => {
+    const user = userEvent.setup();
+    const onGoTo = vi.fn();
+    render(<Harness files={[BUNDLE]} archives={INSIDE} onGoTo={onGoTo} />);
+
+    await user.type(box(), 'notes.md');
+    await user.click(screen.getByTitle('notes.md'));
+
+    expect(onGoTo).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'fixtures/bundle.zip', line: null, side: null }),
+    );
+  });
+
+  it('still matches the archive by its own name', async () => {
+    const user = userEvent.setup();
+    render(<Harness files={[BUNDLE]} archives={INSIDE} />);
+
+    await user.type(box(), 'bundle');
+
+    expect(screen.getByRole('treeitem', { name: /bundle\.zip/ })).toBeDefined();
   });
 });

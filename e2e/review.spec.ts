@@ -3475,3 +3475,44 @@ test('the light moves to the next result rather than piling up', async ({
   await expect(page.locator('[data-abr-found]')).toHaveCount(1);
   await expect(page.locator('[data-abr-found]')).toBeInViewport();
 });
+
+/**
+ * Searching inside an archive.
+ *
+ * The one gap the panel had. A `.zip` is binary to GitHub, so its patch is
+ * empty and everything else the panel sweeps is invisible in one — which left
+ * the single question a reviewer has about an archive, *what is inside it*, as
+ * the question search could not answer.
+ *
+ * Only a real browser can check this. The index is read by downloading the
+ * whole blob and parsing the zip's central directory through a lazily imported
+ * chunk; jsdom has neither the fetch nor the chunk.
+ */
+test('the find panel looks inside an archive for a file that is only there', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('body').press('/');
+  // `notes.md` exists in the head side of the fixture archive and nowhere else
+  // in the pull request — not as a path, not in any patch.
+  await page.getByRole('searchbox', { name: 'Search the diff' }).fill('notes.md');
+
+  // The indexes are read after the diff, so the result arrives a moment later.
+  // That lateness is the design rather than a race: a review with an archive in
+  // it must not open more slowly than one without.
+  await expect(page.locator('.filetree-count')).toHaveText(/1 result in 1 file/);
+
+  const results = page.locator('[role="tree"][aria-label="Results"]');
+  await expect(results.getByRole('treeitem', { name: /bundle\.zip/ })).toBeVisible();
+
+  const entry = results.locator('.search-row');
+  await expect(entry).toHaveCount(1);
+  // Added inside the archive, in the mark the archive card itself uses.
+  await expect(entry).toContainText('notes.md');
+  await expect(entry.locator('.search-row-line')).toHaveText('+');
+});

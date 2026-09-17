@@ -62,6 +62,17 @@ ours" is the wrong instinct here.
   over the Conversations view where it silently eats clicks. Only the e2e suite
   caught it; jsdom performs no hit-testing.
 
+- **The find panel downloads every archive, and that is on purpose.** A `.zip`
+  is binary to GitHub, so its patch is empty and search could not see inside
+  one. `ui/useArchiveIndexes.ts` reads each archive's index so its members are
+  searchable, which costs a whole-blob download per side — the only fetching
+  any search on this page does. Three rules make it affordable and they are
+  stated in that file: never before the diff has arrived, never twice (it
+  shares `fileSides`' cache *and its keys*, so a card later paints from cache),
+  and never fatal. If you add a container kind, `ParsedEntry` in
+  `lib/review/search.ts` is the seam — that module deliberately never says
+  "archive".
+
 - **The file icons are generated, like the palettes.** `material-icon-theme` is
   a devDependency and nothing from it ships; `npm run file-icons` writes the
   drawings to `public/file-icons/` and the mapping to `lib/icons/material.ts`.

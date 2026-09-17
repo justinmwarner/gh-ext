@@ -29,7 +29,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { DiffMatchKind, Span } from '@/lib/review/search';
+import { STATUS_MARKS } from '@/lib/compare/archive';
+import type { DiffMatch, Span } from '@/lib/review/search';
 import type { SearchRow } from './searchRows';
 import { type KeyRow, claimsTreeKey, resolveTreeKey } from './treeKeys';
 import { useFileIcons } from './useFileIcons';
@@ -52,15 +53,22 @@ function Highlighted({ text, span }: { text: string; span: Span | null }) {
 /**
  * Where a match sits, as the gutter says it.
  *
- * Signed for a changed line and bare for context, because "did the author touch
- * this line" is the first thing a reviewer needs from a result — and with
- * context now in scope it is a difference this panel actually has to draw.
+ * Signed for a changed line and bare for context, because "did the author
+ * touch this line" is the first thing a reviewer needs from a result — and
+ * with context in scope it is a difference this panel has to draw.
+ *
+ * An archive member has no line to report, so the slot carries what happened
+ * to it instead, in the character the archive card already uses for it. Same
+ * column, same question answered: *is this one of the things that moved?*
  */
-function position(kind: DiffMatchKind, line: number | null): string {
-  if (line === null) return '';
-  if (kind === 'addition') return `+${line}`;
-  if (kind === 'deletion') return `${MINUS}${line}`;
-  return `${line}`;
+function position(match: DiffMatch): string {
+  if (match.kind === 'entry') {
+    return STATUS_MARKS[match.status as keyof typeof STATUS_MARKS] ?? '';
+  }
+  if (match.line === null) return '';
+  if (match.kind === 'addition') return `+${match.line}`;
+  if (match.kind === 'deletion') return `${MINUS}${match.line}`;
+  return `${match.line}`;
 }
 
 /**
@@ -230,7 +238,7 @@ export function SearchTree({ rows, onFold, onReveal, onCommit, ref }: SearchTree
             {row.kind === 'match' ? (
               <>
                 <span className="search-row-line" aria-hidden="true">
-                  {position(row.match.kind, row.match.line)}
+                  {position(row.match)}
                 </span>
                 <code className="search-row-text">
                   <Highlighted

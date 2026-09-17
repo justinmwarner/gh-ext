@@ -34,6 +34,7 @@ import {
   searchParsed,
 } from '@/lib/review/search';
 import { SearchTree, type SearchTreeHandle } from './SearchTree';
+import type { ArchiveIndexes } from './useArchiveIndexes';
 import type { ReviewFile } from './reviewFiles';
 import { type SearchRow, searchRows } from './searchRows';
 
@@ -76,6 +77,14 @@ export interface FindPanelHandle {
 
 export interface FindPanelProps {
   files: readonly ReviewFile[];
+  /**
+   * What is inside each archive, once it has been read.
+   *
+   * Arrives after the diff and grows as archives are read, which is why it is a
+   * prop rather than something this component fetches: the results simply
+   * improve underneath a query already on screen.
+   */
+  archives?: ArchiveIndexes;
   state: FindState;
   onState: (next: FindState) => void;
   onGoTo: (target: FindTarget) => void;
@@ -121,6 +130,7 @@ function summarise(
 
 export function FindPanel({
   files,
+  archives,
   state,
   onState,
   onGoTo,
@@ -153,7 +163,17 @@ export function FindPanel({
    * several times what the diff search used to look at, and re-walking it on
    * every keystroke would spend the speed budget PRODUCT.md sets.
    */
-  const parsed = useMemo(() => parseFiles(files), [files]);
+  const parsed = useMemo(() => {
+    const walked = parseFiles(files);
+    if (archives === undefined || archives.size === 0) return walked;
+    // A `.zip` has no lines, so this is the whole of what there is to search in
+    // one — the names of its members. `ParsedEntry` is structural, so the
+    // archive comparison's own shape goes straight in.
+    return walked.map((file) => {
+      const entries = archives.get(file.path);
+      return entries === undefined ? file : { ...file, entries };
+    });
+  }, [files, archives]);
 
   const matcher = useMemo(
     () =>

@@ -40,6 +40,7 @@ import type { CurrentFile } from './currentFile';
 import { fileComments } from './fileTreeData';
 import type { GeneratedRule } from '@/lib/review/generated';
 import type { ReviewFile } from './reviewFiles';
+import { useArchiveIndexes } from './useArchiveIndexes';
 import { useReviewSession } from './reviewSession';
 import { useDragSize } from './useDragSize';
 import type { LineDiff } from '@/lib/settings';
@@ -156,6 +157,15 @@ export function FilesView({
   const [tab, setTab] = useState<RailTab>('files');
   const [find, setFind] = useState<FindState>(DEFAULT_FIND);
   const panel = useRef<FindPanelHandle>(null);
+
+  /**
+   * What is inside every archive, read after the diff is on screen.
+   *
+   * Here rather than in `FindPanel` because it is about the *review* rather
+   * than about the box: it keeps going while the reviewer is looking at the
+   * file tree, so a search started a minute later is already complete.
+   */
+  const archives = useArchiveIndexes(files, blobs);
 
   useImperativeHandle(
     ref,
@@ -331,6 +341,7 @@ export function FilesView({
               <FindPanel
                 ref={panel}
                 files={files}
+                archives={archives}
                 state={find}
                 onState={setFind}
                 onGoTo={(target) => onFindResult?.(target)}

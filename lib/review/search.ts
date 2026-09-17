@@ -19,8 +19,12 @@
  * exactly, so a query that finds a file in one surface finds it in the others.
  * That is the property worth protecting; sharing an implementation is not.
  *
- * Nothing here is fetched, and nothing is asked of GitHub. The whole diff is
- * already in the page, so the answer is local and instant.
+ * Nothing here fetches anything, and nothing here asks GitHub anything. Almost
+ * all of what it sweeps is patch text the page already has, so the answer is
+ * local and instant. The one exception is `ParsedEntry` — names of things
+ * *inside* a file, which a patch cannot carry — and the exception is only about
+ * where the caller got them: an archive's members cost a download, which is why
+ * `ui/useArchiveIndexes.ts` reads them once, after the diff, rather than here.
  *
  * The rule that shapes the parser: **a line is changed by *position*** — inside
  * a hunk body — not by its first character. `--- a/x` is a header that starts
@@ -41,8 +45,13 @@ export interface SearchableFile {
  * them out — but a result row has to be able to say that a hit is on a line
  * nobody touched, because that is the difference between somewhere the review
  * is and somewhere it merely passes through.
+ *
+ * `entry` is the find panel's too, and is *not* a line at all: it is something
+ * inside a file that has a name of its own, which today means a member of an
+ * archive. Its destination is the file, because a `.zip` has nowhere else to
+ * send anyone.
  */
-export type DiffMatchKind = 'path' | 'addition' | 'deletion' | 'context';
+export type DiffMatchKind = 'path' | 'addition' | 'deletion' | 'context' | 'entry';
 
 /** Which side of the diff a line lives on, spelled the way Pierre spells it. */
 export type MatchSide = 'additions' | 'deletions';
@@ -59,6 +68,14 @@ export interface DiffMatch {
   start: number;
   /** One past where it ends. */
   end: number;
+  /**
+   * For an `entry` hit: whatever the caller said about it, in a word.
+   *
+   * Carried rather than interpreted. An archive says `added`, `removed`,
+   * `changed`, `unchanged` or `unknown`; this module does not know or care
+   * which, and a future kind of container can say something else.
+   */
+  status?: string;
 }
 
 export interface SearchOptions {
@@ -300,10 +317,25 @@ export function pathMatches(path: string, query: string): boolean {
   return needle === '' || locate(path, needle) !== null;
 }
 
+/**
+ * Something inside a file that has a name of its own.
+ *
+ * Content the patch cannot carry. An archive's members are the case this exists
+ * for — a `.zip` is binary to GitHub, so its patch is empty — and the caller is
+ * what knows how to get them; see `entryLines` in `lib/compare/archive.ts`.
+ */
+export interface ParsedEntry {
+  text: string;
+  /** What happened to it, in a word. Passed through to the match untouched. */
+  status?: string;
+}
+
 /** One file's patch, walked once, ready to be swept as often as asked. */
 export interface ParsedFile {
   path: string;
   lines: readonly PatchLine[];
+  /** Named things inside the file, when the caller has any. */
+  entries?: readonly ParsedEntry[];
 }
 
 /**
@@ -371,6 +403,23 @@ export function searchParsed(
           line: line.line,
           side: line.side,
           text: line.text,
+          ...span,
+        });
+      }
+    }
+
+    // After the lines, which costs nothing to order this way: the only files
+    // that have entries today are archives, and an archive has no lines.
+    for (const entry of file.entries ?? []) {
+      for (const span of matcher.spans(entry.text)) {
+        if (matches.length >= limit) return matches;
+        matches.push({
+          path: file.path,
+          kind: 'entry',
+          line: null,
+          side: null,
+          text: entry.text,
+          status: entry.status,
           ...span,
         });
       }

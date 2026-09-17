@@ -441,3 +441,79 @@ describe('searchParsed', () => {
     expect(searchParsed(parsed, matcher)[0]?.kind).toBe('path');
   });
 });
+
+/**
+ * Things inside a file that have names of their own.
+ *
+ * An archive's members, today. The corpus this module sweeps is patch text, and
+ * a `.zip` has none — so its contents were invisible to search while being the
+ * one thing a reviewer actually wants to know about an archive. `entries` is
+ * how a caller hands over content the patch cannot carry.
+ *
+ * Deliberately not called "archive" anywhere in here. This module knows about
+ * text and where it was found; what produced the names is the caller's business.
+ */
+describe('searchParsed, over entries', () => {
+  const withEntries = (): ReturnType<typeof parseFiles> => {
+    const [file] = parseFiles([{ path: 'fixtures/bundle.zip', patch: '' }]);
+    if (file === undefined) throw new Error('no parsed file');
+    return [
+      {
+        ...file,
+        entries: [
+          { text: 'notes.md', status: 'added' },
+          { text: 'readme.txt', status: 'changed' },
+        ],
+      },
+    ];
+  };
+
+  const sweep = (query: string) => {
+    const matcher = compileMatcher(query, {});
+    if (!matcher.ok) throw new Error(matcher.error);
+    return searchParsed(withEntries(), matcher);
+  };
+
+  it('finds a name that exists only inside the file', () => {
+    const found = sweep('notes.md');
+
+    expect(found).toHaveLength(1);
+    expect(found[0]?.path).toBe('fixtures/bundle.zip');
+    expect(found[0]?.text).toBe('notes.md');
+  });
+
+  it('marks the hit as an entry rather than as a line', () => {
+    const [match] = sweep('notes.md');
+
+    expect(match?.kind).toBe('entry');
+    // No line and no side: the destination is the file, not a place in it.
+    expect(match?.line).toBeNull();
+    expect(match?.side).toBeNull();
+  });
+
+  it('carries whatever the caller said about the entry', () => {
+    expect(sweep('notes.md')[0]?.status).toBe('added');
+    expect(sweep('readme')[0]?.status).toBe('changed');
+  });
+
+  it('reports where the query hit, so it can be highlighted', () => {
+    const [match] = sweep('notes');
+
+    expect(match?.text.slice(match.start, match.end)).toBe('notes');
+  });
+
+  it('still matches the archive by its own path', () => {
+    expect(sweep('bundle.zip')[0]?.kind).toBe('path');
+  });
+
+  it('counts entries against the limit like anything else', () => {
+    const matcher = compileMatcher('e', {});
+    if (!matcher.ok) throw new Error(matcher.error);
+
+    expect(searchParsed(withEntries(), matcher, { limit: 1 })).toHaveLength(1);
+  });
+
+  it('is unbothered by a file with no entries at all', () => {
+    expect(searchDiff([CACHE_FILE], 'existing').length).toBeGreaterThan(0);
+  });
+});

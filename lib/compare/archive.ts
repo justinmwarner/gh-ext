@@ -22,6 +22,21 @@
  */
 export type ArchiveStatus = 'added' | 'removed' | 'changed' | 'unchanged' | 'unknown';
 
+/**
+ * What each status is drawn as, in one character.
+ *
+ * Here rather than in the card because two surfaces draw it now — the archive
+ * comparison and the find panel's results — and a product that means one thing
+ * by `~` should draw one `~`. U+2212 MINUS SIGN, which is what aligns with `+`.
+ */
+export const STATUS_MARKS: Record<ArchiveStatus, string> = {
+  added: '+',
+  removed: '−',
+  changed: '~',
+  unchanged: '',
+  unknown: '?',
+};
+
 /** One member of an archive, as its index describes it. */
 export interface ArchiveEntry {
   /** The path inside the archive, as stored. */
@@ -79,6 +94,43 @@ function byPath(entries: readonly ArchiveEntry[]): Map<string, ArchiveEntry> {
     kept.set(entry.path, entry);
   }
   return kept;
+}
+
+/**
+ * One member of an archive, as something a search can look at.
+ *
+ * Structurally what `lib/review/search.ts` calls a `ParsedEntry`, and
+ * deliberately not an import of it: this module is a comparison primitive and
+ * has no business depending on the search. TypeScript is structural, so the
+ * find panel can hand one straight to the other.
+ */
+export interface ArchiveEntryLine {
+  /** The path inside the archive — what the reviewer is looking for. */
+  text: string;
+  /** What happened to it, in the word {@link ArchiveStatus} spells. */
+  status: ArchiveStatus;
+}
+
+/**
+ * An archive's members, flattened for searching.
+ *
+ * A `.zip` is binary to GitHub, so its patch is empty and a find panel sweeping
+ * patch text can only ever match the archive's own name. That left the one
+ * question a reviewer actually has about an archive — *what is inside it* — as
+ * the one question search could not answer.
+ *
+ * Directory records are left out. They are names without content, and nobody
+ * searching a bundle is looking for `docs/`.
+ */
+export function entryLines(comparison: ArchiveComparison): ArchiveEntryLine[] {
+  const lines: ArchiveEntryLine[] = [];
+
+  for (const row of comparison.rows) {
+    if ((row.before ?? row.after)?.directory === true) continue;
+    lines.push({ text: row.path, status: row.status });
+  }
+
+  return lines;
 }
 
 export function compareArchives(
