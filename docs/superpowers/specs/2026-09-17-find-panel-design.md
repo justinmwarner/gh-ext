@@ -1,7 +1,7 @@
 # The Find Panel — Design
 
 **Date:** 2026-09-17
-**Status:** Planned
+**Status:** Implemented
 **Register:** product
 
 ## Goal
@@ -103,9 +103,12 @@ export function compileMatcher(query: string, options: MatchOptions): Matcher;
   panel prints it. PRODUCT.md principle 4 is that nothing fails silently, and a
   box that goes blank when you type `(` is the failure it names.
 
-This replaces the private `locate`, so every surface matches by one rule.
-`pathMatches` and `filterPaths` keep plain-substring defaults: the toggles are
-the find panel's, not the tree filter's and not `Mod+K`'s.
+`searchParsed` and `searchDiff` match through this and nothing else.
+`pathMatches` and `filterPaths` keep the private `locate` — a lowercased
+`indexOf`, which is what the tree filter wants when it re-runs over every path
+on every keystroke. With all three toggles off the two agree exactly, so a
+query that finds a file in one finds it in the others; the toggles are the find
+panel's alone.
 
 ### Context lines
 
@@ -283,3 +286,35 @@ Changed: `lib/review/search.ts`, `ui/FileTree.tsx` (adopts `treeKeys`),
 
 Docs: a note in CLAUDE.md that `treeRows` now has a second consumer and why
 `searchRows` defers to it.
+
+---
+
+## What the implementation changed
+
+Three things the design did not anticipate, recorded because each was decided
+against a real alternative.
+
+**Clicking a file row goes to the file; the chevron folds it.** The design left
+this unsaid and the obvious reading — click folds, like a directory — turned out
+to contradict the checklist standing beside it, where clicking a file *selects*
+it and only directories fold. A result file is a destination first and a
+container second, so the row navigates and the chevron became a target as well
+as a drawing. It is the one place the two trees' chevrons differ, and the
+comment beside it says why.
+
+**The showing rail panel must inherit its visibility, not declare it.** Setting
+`visibility: visible` on the active panel overrides a hidden *ancestor*, and this
+rail sits inside the Files view, which is hidden the same way while the reviewer
+is on Conversations or Overview. The result was an invisible but fully
+hit-testable file tree lying over the Conversations view, eating clicks. Only
+`npm run test:e2e` caught it — jsdom does no hit-testing — which is the argument
+CLAUDE.md already makes for that suite, now with a scar to point at.
+
+**A zero-length match is dropped, not just stepped over.** The design only
+required that `a*` terminate. Terminating is not enough: every position in every
+line matches it, so the panel would report thousands of results whose highlight
+is zero pixels wide. They are discarded, and the count is honest as a result.
+
+`SearchPanel` kept its own name rather than being renamed to something like
+`FileJump`. It is reachable only from `Mod+K` now and its doc comment says so; a
+rename would have been a larger diff than the change deserved.

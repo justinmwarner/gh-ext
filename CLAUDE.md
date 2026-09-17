@@ -49,7 +49,18 @@ ours" is the wrong instinct here.
   `reviewFiles` sorts by it, so the whole diff and a narrowed one are laid out
   by the same rule without either caller knowing there is one. Do not re-sort
   at a surface: they disagreed once, and a root-level `README.md` came first in
-  the column and last in the tree.
+  the column and last in the tree. There are **two** trees now — the checklist
+  and the find panel's results — and `ui/searchRows.ts` defers to `treeRows`
+  for exactly this reason rather than laying its own files out. Their shared
+  keyboard is `ui/treeKeys.ts`, for the same reason twice over.
+
+- **The rail's two panels must not declare `visibility: visible`.** `FilesView`
+  stacks the file tree and the find panel in one grid cell and hides the
+  inactive one, the way `.views` does one level out. The *showing* one is left
+  to inherit. Declaring it visible overrides the hidden ancestor when the whole
+  Files view is hidden, which puts an invisible, fully hit-testable file tree
+  over the Conversations view where it silently eats clicks. Only the e2e suite
+  caught it; jsdom performs no hit-testing.
 
 - **The file icons are generated, like the palettes.** `material-icon-theme` is
   a devDependency and nothing from it ships; `npm run file-icons` writes the
