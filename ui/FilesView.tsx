@@ -288,14 +288,23 @@ export function FilesView({
               already uses, and for the same reason. Unmounting would cost the
               file tree its folds and its filter, and the find panel its
               results and its scroll position, every single time the reviewer
-              glanced at the other one. */}
+              glanced at the other one.
+
+              The showing panel is left to *inherit* its visibility rather than
+              declaring `visible`, and that is not a style preference. This
+              whole rail sits inside the Files view, which is itself hidden the
+              same way while the reviewer is on Conversations or Overview — and
+              `visibility: visible` on a descendant overrides a hidden
+              ancestor. Declaring it here put an invisible but fully
+              hit-testable file tree over the Conversations view, where it
+              silently ate clicks. */}
           <div className="rail-panels">
             <div
               className="rail-panel"
               id="rail-panel-files"
               role="tabpanel"
               aria-labelledby="rail-tab-files"
-              style={{ visibility: tab === 'files' ? 'visible' : 'hidden' }}
+              style={{ visibility: tab === 'files' ? undefined : 'hidden' }}
             >
               <FileTree
                 files={files}
@@ -313,7 +322,7 @@ export function FilesView({
               id="rail-panel-search"
               role="tabpanel"
               aria-labelledby="rail-tab-search"
-              style={{ visibility: tab === 'search' ? 'visible' : 'hidden' }}
+              style={{ visibility: tab === 'search' ? undefined : 'hidden' }}
             >
               <FindPanel
                 ref={panel}

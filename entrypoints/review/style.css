@@ -1035,14 +1035,72 @@ button.scope-showing:hover {
   min-height: 0;
 }
 
-/* The tree owns the width the drag gave it and does its own scrolling. A
-   column, because the filter sits above the rows rather than beside them. */
+/* The rail owns the width the drag gave it and does its own scrolling. A
+   column, because the tabs and the filter sit above the rows rather than
+   beside them. */
 .filetree {
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
   min-height: 0;
   padding: 8px 0 8px 8px;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------ the rail's two trees
+
+   The checklist and the find panel. Two panels stacked in one grid cell and
+   swapped with `visibility`, exactly as `.views` does one level out and for
+   the same reason: unmounting would cost the tree its folds and its filter,
+   and the panel its results, every time the reviewer looked at the other. */
+
+.rail-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-right: 6px;
+  padding-bottom: 6px;
+}
+
+.rail-tab {
+  flex: 1 1 0;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rail-tab:not(.rail-tab-active):hover {
+  color: var(--fg-default);
+  background: var(--canvas-subtle);
+}
+
+/* A tint and a border rather than a fill. This is a two-way switch inside a
+   sidebar, not a primary action, and the diff beside it is what should be the
+   loudest thing on screen. */
+.rail-tab-active {
+  color: var(--fg-default);
+  background: var(--canvas-subtle);
+  border-color: var(--border-default);
+}
+
+.rail-panels {
+  display: grid;
+  grid-template: 1fr / 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.rail-panel {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -2905,6 +2963,129 @@ button.scope-showing:hover {
 
 .shortcut-or {
   color: var(--fg-muted);
+}
+
+/* ---------------------------------------------------------------- find panel
+
+   The rail's other tree. What it shares with the file tree it shares through
+   `.tree-row` and friends, deliberately: a file should look like the same file
+   in both. What is here is only the box, its three toggles, and the row kind
+   the checklist does not have. */
+
+/* The box and the toggles are one control to the eye: the input has no border
+   of its own and this draws it, so pressing a toggle does not look like
+   reaching outside the field. */
+.find-box {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+.find-box:focus-within {
+  border-color: var(--accent-fg);
+}
+
+/* Overrides the border and radius `.filetree-search` carries, because the
+   wrapper above is drawing them now. */
+.find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  outline-offset: -2px;
+}
+
+.find-toggles {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 1px;
+}
+
+/* Sized against the rail's 180px minimum, which is the tightest these ever
+   have to fit: three of them plus a usable field. */
+.find-toggle {
+  min-width: 20px;
+  padding: 1px 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.find-toggle:hover {
+  color: var(--fg-default);
+  background: var(--canvas-subtle);
+}
+
+/* Pressed has to win against hover, or a toggle the reviewer is pointing at
+   stops saying whether it is on — which is the one thing it is for. */
+.find-toggle[aria-pressed='true'] {
+  color: var(--accent-fg);
+  background: var(--accent-subtle-bg);
+}
+
+.find-toggle[aria-pressed='true']:hover {
+  background: var(--accent-subtle-hover);
+}
+
+/* A match row. Shorter than a file row and monospaced, because what it is
+   showing is a line of code rather than a name. */
+.search-row {
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.search-row-line {
+  flex: 0 0 auto;
+  color: var(--fg-subtle);
+  text-align: right;
+}
+
+/* Clipped rather than wrapped: a minified file has lines thousands of
+   characters long, and one of them must not become the whole result list. */
+.search-row-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+
+/* Stronger than `--attention-subtle-bg`, which is a panel tint. This is a run
+   of matched characters a few pixels wide, and a tint that reads correctly
+   behind a whole chip disappears at that size. The same choice
+   `.search-result mark` makes, for the same reason. */
+.search-row mark,
+.tree-name mark {
+  color: inherit;
+  background: var(--attention-subtle-hover);
+  border-radius: 2px;
+}
+
+/* How many matches a file or a directory holds. A folded row keeps it, so the
+   number never disagrees with rows that are merely hidden. */
+.search-row-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* The twisty. In the checklist the chevron is only a drawing; here it is a
+   target too, because a result file holds rows of its own and the row itself
+   already means "take me there". */
+.filetree-rows[aria-label='Results'] .tree-chevron {
+  cursor: pointer;
 }
 
 /* ------------------------------------------------------------- search panel */

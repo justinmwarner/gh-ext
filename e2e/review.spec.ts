@@ -3293,3 +3293,111 @@ test('a file marked viewed is no longer somewhere J can send you', async ({
   // the folded file left the list and the others are still keeping count.
   expect(after.length).toBeGreaterThan(0);
 });
+
+/**
+ * The find panel, in the rail rather than over the diff.
+ *
+ * The claim worth making in a real browser is the one jsdom cannot make: that
+ * walking the results with one key moves the diff underneath while the keyboard
+ * stays in the list. Every part of that is layout — a scrollport Pierre
+ * measures, a card that has to come into view, and focus that has to not move.
+ */
+test('the find panel walks results while the diff follows underneath', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const body = page.locator('body');
+  await body.press('/');
+
+  const box = page.getByRole('searchbox', { name: 'Search the diff' });
+  await expect(box).toBeFocused();
+
+  // A string that appears in exactly one file, so the destination is known.
+  await box.fill('new docs/changelog.md');
+  await expect(page.locator('.filetree-count')).toHaveText(/1 result in 1 file/);
+
+  // Down into the tree, then down through the directory and file rows onto the
+  // match itself.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+
+  await expect(page.locator('.shell')).toHaveAttribute(
+    'data-current-file',
+    'docs/changelog.md',
+  );
+
+  // The two halves of the bargain: the panel is still there, and the keyboard
+  // never left it. A modal could do neither.
+  await expect(box).toBeVisible();
+  await expect(page.locator('[role="tree"][aria-label="Results"] [data-key]:focus')).toHaveCount(1);
+});
+
+test('the find panel matches context, and the toggles narrow what it finds', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('body').press('/');
+  const box = page.getByRole('searchbox', { name: 'Search the diff' });
+
+  // `line twentytwo` is a context line in every fixture patch — a line nobody
+  // changed. The old diff search refused these on purpose; this one offers
+  // them, because a reviewer who asked for find-in-files meant the files.
+  await box.fill('twentytwo');
+  await expect(page.locator('.filetree-count')).toHaveText(/\d+ results in \d+ files/);
+
+  // Whole word, against a query that is only ever part of a longer one.
+  await box.fill('twenty');
+  const loose = await page.locator('.filetree-count').textContent();
+  await page.getByRole('button', { name: 'Whole word' }).click();
+  await expect(page.locator('.filetree-count')).not.toHaveText(loose ?? '');
+
+  // And a pattern that cannot compile says so rather than going blank.
+  await page.getByRole('button', { name: 'Whole word' }).click();
+  await page.getByRole('button', { name: 'Use regular expression' }).click();
+  await box.fill('(unclosed');
+  await expect(page.locator('.filetree-count')).toHaveText(/Invalid pattern/);
+});
+
+test('the rail swaps back to the checklist, keeping both sides intact', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.locator('body').press('/');
+  const box = page.getByRole('searchbox', { name: 'Search the diff' });
+  await box.fill('twentytwo');
+
+  // Escape on a query clears it; Escape on an empty box hands the rail back.
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('searchbox', { name: 'Filter files' })).toBeVisible();
+
+  // Scoped to the rail's own tablist: the view switcher has a `Files` tab too,
+  // and the two mean entirely different things.
+  const sidebar = page.getByRole('tablist', { name: 'Sidebar' });
+
+  // The search survives the round trip, because both trees stay mounted. A
+  // reviewer who glanced at the file list has not lost what they were doing.
+  await sidebar.getByRole('tab', { name: 'Search' }).click();
+  await box.fill('twentytwo');
+  await sidebar.getByRole('tab', { name: 'Files' }).click();
+  await expect(page.getByRole('searchbox', { name: 'Filter files' })).toBeVisible();
+  await sidebar.getByRole('tab', { name: 'Search' }).click();
+  await expect(box).toHaveValue('twentytwo');
+});

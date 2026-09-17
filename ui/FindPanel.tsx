@@ -282,12 +282,15 @@ export function FindPanel({
         )}
       </div>
 
+      {/* Only while nothing has been typed. Once there is a query, the status
+          line above has already said "No results", and a second sentence
+          saying it again is furniture. */}
       {rows.length === 0 ? (
-        <p className="search-empty">
-          {state.query.trim() === ''
-            ? 'Type to search paths, changed lines and the code around them.'
-            : ''}
-        </p>
+        state.query.trim() === '' && (
+          <p className="search-empty">
+            Type to search paths, changed lines and the code around them.
+          </p>
+        )
       ) : (
         <SearchTree
           ref={tree}
