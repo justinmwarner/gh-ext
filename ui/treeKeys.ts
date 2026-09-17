@@ -34,6 +34,29 @@ export type TreeKeyAction =
   | { kind: 'move'; index: number }
   | { kind: 'fold'; path: string; shut: boolean };
 
+/** The six keys a tree navigates with, and the whole of what it claims. */
+const NAVIGATION: ReadonlySet<string> = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+]);
+
+/**
+ * Whether the tree is answering this key at all.
+ *
+ * A different question from whether {@link resolveTreeKey} found anywhere to
+ * go, and the caller needs both: `ArrowDown` on the last row moves nothing and
+ * must still be swallowed, or the rail scrolls out from under a reviewer who
+ * has simply reached the bottom of the list. Asked here rather than inferred
+ * from a null resolution, so there is one list of claimed keys rather than two.
+ */
+export function claimsTreeKey(key: string): boolean {
+  return NAVIGATION.has(key);
+}
+
 /** The directory a path sits in, or null at the top level. */
 function parentOf(path: string): string | null {
   const body = path.endsWith('/') ? path.slice(0, -1) : path;

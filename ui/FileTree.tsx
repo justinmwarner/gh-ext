@@ -51,6 +51,7 @@ import { pathMatches } from '@/lib/review/search';
 import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import type { FileComments } from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
+import { claimsTreeKey, resolveTreeKey } from './treeKeys';
 import { type TreeRow, checkState, directoryPaths, treeRows } from './treeRows';
 import { useFileIcons } from './useFileIcons';
 
@@ -155,13 +156,6 @@ const STATUS: Record<PatchStatus, string> = {
   MODIFIED: 'modified',
   CHANGED: 'modified',
 };
-
-/** The directory a path sits in, or null at the top level. */
-function parentOf(path: string): string | null {
-  const body = path.endsWith('/') ? path.slice(0, -1) : path;
-  const cut = body.lastIndexOf('/');
-  return cut === -1 ? null : body.slice(0, cut + 1);
-}
 
 export interface FileTreeProps {
   files: readonly ReviewFile[];
@@ -359,22 +353,22 @@ export function FileTree({
     if (row === undefined) return;
 
     const key = event.key;
-    if (key === 'ArrowDown') move(rows[index + 1]);
-    else if (key === 'ArrowUp') move(rows[index - 1]);
-    else if (key === 'Home') move(rows[0]);
-    else if (key === 'End') move(rows[rows.length - 1]);
-    else if (key === 'ArrowRight') {
-      if (row.kind === 'directory' && !row.expanded) fold(row.path, false);
-      else if (row.kind === 'directory') move(rows[index + 1]);
-      else return;
-    } else if (key === 'ArrowLeft') {
-      if (row.kind === 'directory' && row.expanded) fold(row.path, true);
-      else {
-        const parent = parentOf(row.path);
-        if (parent === null) return;
-        move(rows.find((candidate) => candidate.path === parent));
-      }
-    } else if (key === ' ') toggleViewed(row);
+
+    // Navigation first, and shared with the find panel's tree — see
+    // `treeKeys`. Claimed keys are swallowed whether or not they found
+    // anywhere to go, which is what `ArrowRight` on a file has always done.
+    if (claimsTreeKey(key)) {
+      const action = resolveTreeKey(rows, index, key);
+      if (action?.kind === 'move') move(rows[action.index]);
+      else if (action?.kind === 'fold') fold(action.path, action.shut);
+      event.preventDefault();
+      return;
+    }
+
+    // What is left is what a *checklist* does with a key, which is why it is
+    // still here: in the result tree Space means nothing and Enter goes to a
+    // line, so neither can be shared.
+    if (key === ' ') toggleViewed(row);
     else if (key === 'Enter') {
       if (row.kind === 'directory') fold(row.path, row.expanded);
       else onSelect(row.path);

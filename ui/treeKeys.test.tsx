@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { type KeyRow, resolveTreeKey } from './treeKeys';
+import { type KeyRow, claimsTreeKey, resolveTreeKey } from './treeKeys';
 
 /**
  * A small tree, flat and in draw order, the way `treeRows` hands one over.
@@ -104,5 +104,34 @@ describe('resolveTreeKey', () => {
     ];
 
     expect(resolveTreeKey(deep, 2, 'ArrowLeft')).toEqual({ kind: 'move', index: 1 });
+  });
+});
+
+/**
+ * Whether the tree is answering a key, which is not the same question as
+ * whether it has anywhere to go.
+ *
+ * `ArrowDown` on the last row moves nothing and must still be swallowed: the
+ * tree owns the arrow keys for as long as it holds focus, and letting the last
+ * one through would scroll the rail out from under a reviewer who had simply
+ * reached the bottom of the list.
+ */
+describe('claimsTreeKey', () => {
+  it('claims the six keys it navigates with', () => {
+    for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End']) {
+      expect(claimsTreeKey(key)).toBe(true);
+    }
+  });
+
+  it('leaves everything else to the caller', () => {
+    expect(claimsTreeKey('Enter')).toBe(false);
+    expect(claimsTreeKey(' ')).toBe(false);
+    expect(claimsTreeKey('a')).toBe(false);
+    expect(claimsTreeKey('Escape')).toBe(false);
+  });
+
+  it('claims a key even where resolving it finds nowhere to go', () => {
+    expect(resolveTreeKey(ROWS, 3, 'ArrowDown')).toBeNull();
+    expect(claimsTreeKey('ArrowDown')).toBe(true);
   });
 });
