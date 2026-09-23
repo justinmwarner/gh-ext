@@ -291,8 +291,8 @@ want the add-on unlisted.
 
 1. <https://addons.mozilla.org/developers/> → **Submit a New Add-on**
 2. Choose listed or unlisted
-3. Upload `.output/a-better-reviewer-1.0.0-firefox.zip`
-4. When asked for source code, upload `.output/a-better-reviewer-1.0.0-sources.zip`
+3. Upload `.output/a-better-reviewer-<version>-firefox.zip`
+4. When asked for source code, upload `.output/a-better-reviewer-<version>-sources.zip`
 
 Step 4 is **required**, not optional: the submission is bundled and minified, so
 a reviewer cannot read it. WXT generates the sources zip during `zip:firefox`
@@ -302,16 +302,24 @@ Reuse the same listing copy and privacy policy from [LISTING.md](LISTING.md).
 
 ## Expected lint warnings
 
-`npx web-ext lint --source-dir .output/firefox-mv2` reports 0 errors and ~25
-warnings. All of them are expected:
+`npx web-ext lint --source-dir .output/firefox-mv2` reports **0 errors** and 36
+warnings at 1.1.0. All of them are expected, and every one is in vendor code —
+which is the other thing the sources zip is for. Counts drift upward as the
+bundle grows; what matters is that the *classes* stay these three.
 
-- **23 × `UNSAFE_VAR_ASSIGNMENT`** — `innerHTML` and `insertAdjacentHTML` inside
-  the bundled `@pierre/diffs` viewer. Vendor code, which is what the sources zip
-  lets a reviewer confirm. The extension's own Markdown path sanitises through
-  DOMPurify.
-- **2 × `KEY_FIREFOX_*_UNSUPPORTED_BY_MIN_VERSION`** — `data_collection_permissions`
-  needs Firefox 140 and the manifest declares a floor of 115. Deliberate; see
-  the comment in `wxt.config.ts`.
+- **30 × `UNSAFE_VAR_ASSIGNMENT`** — `innerHTML` and `insertAdjacentHTML` inside
+  the bundled `@pierre/diffs` viewer. The extension's own Markdown path
+  sanitises through DOMPurify.
+- **4 × `DANGEROUS_EVAL`** — "The Function constructor is eval", in Mermaid's
+  dependency tree: `cytoscape` is a direct dependency of `mermaid` and the
+  lodash-shaped `_baseUniq` chunk comes in with it. Expect a reviewer to ask
+  about this one specifically, because `eval` is the word that stops a review.
+  The answer is that it is `new Function` inside a graph-layout library, it is
+  reachable only through the lazy Mermaid import that draws diagrams in a
+  rendered Markdown diff, and no string from GitHub is ever passed to it.
+- **2 × `KEY_FIREFOX_*`** — `data_collection_permissions` needs Firefox 140 and
+  the manifest declares a floor of 115, plus the Android variant of the same
+  complaint. Deliberate; see the comment in `wxt.config.ts`.
 
 ## The add-on id is permanent
 
