@@ -463,6 +463,41 @@ describe('DiffColumn', () => {
     ).toBeTruthy();
   });
 
+  it('opens a folded card so a find result has a line to land on', () => {
+    // The other half of the one-click landing. A folded card is sized at its
+    // header and renders no rows at all, so a jump into one reached the file
+    // and stopped: nothing to scroll to, nothing to light, and a panel that
+    // had just claimed a result there. Marked viewed is the case that matters
+    // — by the time a reviewer is searching, the files they have finished with
+    // are exactly the ones folded away.
+    mount(
+      [
+        file({
+          path: 'src/app.ts',
+          patch: gappedPatch('src/app.ts'),
+          viewedState: 'VIEWED',
+        }),
+      ],
+      { lineJump: { path: 'src/app.ts', side: 'additions', line: 2, token: 1 } },
+    );
+
+    expect(
+      within(card('src/app.ts')).getByRole('button', { name: /collapse/i }),
+    ).toBeTruthy();
+  });
+
+  it('leaves the fold alone on a whole-file result, which names no line', () => {
+    // A path match is not a line match. It selects the file the way the
+    // checklist does, and the checklist has never unfolded anything — a
+    // reviewer clicking through names is not asking for four thousand lines
+    // of lockfile back.
+    mount([file({ path: 'src/app.ts', viewedState: 'VIEWED' })]);
+
+    expect(
+      within(card('src/app.ts')).getByRole('button', { name: /expand/i }),
+    ).toBeTruthy();
+  });
+
   it('opens a review with the files already marked viewed folded away', () => {
     // What a reload looks like. Not a persisted interface preference — this
     // page keeps none — but GitHub's own viewed state, read the same way the

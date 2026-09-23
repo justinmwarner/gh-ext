@@ -2171,6 +2171,33 @@ export function DiffColumn({
     if (jumpLine === null) return;
     const { path, side, line } = jumpLine;
 
+    /**
+     * Open the card before going looking inside it.
+     *
+     * A folded card is sized at its header region and renders no rows, so the
+     * three legs below had nothing to work with: `reach` arrived at the file,
+     * `scrollTo` had no line to find and the mark had no row to go on. The
+     * reviewer was left on a file the panel had just told them held a result,
+     * with nothing showing it. By the time anyone is searching, the files they
+     * have finished with are marked viewed and therefore exactly the folded
+     * ones — so this is the common case rather than the corner.
+     *
+     * Recorded as the reviewer's own override, because that is what it is: an
+     * explicit request to see this line outranks every rule that folds a card,
+     * the same way pressing the chevron does. It is written only for a card
+     * that is *actually* folded, so walking a result list does not quietly pin
+     * twenty open cards against a rule that has not fired yet.
+     *
+     * Only the fold is lifted. A file whose whole diff was whitespace and is
+     * being drawn without it has no such row to reveal — that line is not in
+     * the diff on screen at all, and restoring GitHub's patch for it is
+     * `toggleShown`'s job and remounts the viewer. The jump lands on the file
+     * and stops, which is what it has always honestly promised.
+     */
+    if (collapsed.has(path)) {
+      setFolds((previous) => new Map(previous).set(path, false));
+    }
+
     let frame = 0;
     let quiet = REACH_FRAMES;
     // Held across the scroll, not the marking: `align: 'center'` puts the line
@@ -2250,6 +2277,10 @@ export function DiffColumn({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the token is the
     // dependency; re-running on a rebuilt object would re-jump on every render.
+    // `collapsed` is read above and deliberately absent: React runs the closure
+    // from the render that moved the token, so the fold it sees is the one the
+    // reviewer is looking at — while listing it would tear the mark down and
+    // re-jump every time any card in the column folded.
   }, [lineToken, reach, hold]);
 
   const jumpId = jump?.threadId ?? null;

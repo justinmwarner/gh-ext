@@ -429,3 +429,50 @@ their real content in the patch, so searching them already worked — a notebook
 cell source appears as escaped JSON, ugly but findable. Images have nothing to
 search. Archives were the only kind whose content the patch cannot see at all,
 which is what made this a bounded change rather than an open-ended one.
+
+---
+
+## Revision: a result in a file that is folded shut
+
+**"When I click a file that is collapsed, expand it, then go to the line."** The
+journey above assumed there was a line to reach. A folded card is sized at its
+header region and renders no rows at all, so all three legs came up empty:
+`reach` arrived at the file, the line scroll had nothing to find, and the mark
+had no row to go on. The reviewer was left looking at a card the panel had just
+told them held a result, with nothing on it showing where.
+
+It is not a corner case. By the time anyone is searching they have read some of
+the pull request, the files they have read are marked viewed, and a viewed file
+is folded — so the results most likely to land badly are the ones in the code
+they have already been through.
+
+**The jump opens the card.** One line in the `LineJump` effect, before its first
+leg: if the target is in `collapsed`, record a fold override of "open" for it.
+Three decisions inside that sentence:
+
+- **An override rather than a special case in `collapsed`.** It is exactly what
+  the reviewer's own chevron press records, and it outranks every rule that
+  folds a card — viewed, generated, whitespace-emptied — for the same reason the
+  chevron does. A card the search opened stays open afterwards, like one they
+  opened by hand.
+- **Only for a card that is actually folded.** Writing the override
+  unconditionally would pin every file a reviewer walked past permanently open,
+  against rules that have not fired yet.
+- **Both legs, not just `Enter`.** `LineJump` carries no reveal/commit
+  distinction and deliberately gains none. Arrowing onto a result is the panel's
+  central promise — *moving is arriving* — and a folded file that silently shows
+  nothing breaks it in exactly the way clicking did.
+
+**One limit stays.** A file whose whole diff was whitespace, drawn with
+`ignoreWhitespace` on, has no such row to reveal: that line is not in the diff on
+screen at all. Restoring GitHub's patch for it is `toggleShown`'s job and
+remounts the viewer mid-journey, which is a far larger change than the case
+earns. The jump lands on the file and stops — the same honest outcome as the
+rendered-Markdown limit above.
+
+`ui/DiffColumn.test.tsx` covers the card opening, which is React state in light
+DOM and so is a fair jsdom claim. That the rest of the journey then finishes
+inside it is only checkable in a browser, and `e2e/review.spec.ts` does it —
+ticking the file viewed from the rail rather than from its own card, because a
+file far enough down the column to make arriving a real journey may not be
+mounted to have a checkbox yet.

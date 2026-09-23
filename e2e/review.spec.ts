@@ -3477,6 +3477,62 @@ test('the light moves to the next result rather than piling up', async ({
 });
 
 /**
+ * A result inside a file the reviewer has already finished with.
+ *
+ * The common case rather than the corner: by the time anyone is searching, the
+ * files they have read are marked viewed, and a viewed file is folded. A folded
+ * card is sized at its header and renders no rows, so the landing had nothing
+ * to work with — the column reached the file, the scroll had no line to find
+ * and the mark had no row to go on, leaving the reviewer on a card the panel
+ * had just told them held a result, with nothing showing it.
+ *
+ * jsdom can say the card opened and does, in `ui/DiffColumn.test.tsx`. Only a
+ * browser can say the rest of the journey then finished inside it.
+ */
+test('a result in a folded file opens the card on the way to the line', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // Ticked from the checklist rather than from the card's own box. This file is
+  // well down the column and virtualization means its card may not be mounted
+  // at all yet; the rail lists every file in the pull request either way.
+  const path = 'src/epsilon.ts';
+  await page
+    .locator(`[role="tree"][aria-label="Changed files"] [data-path="${path}"] .tree-check`)
+    .click();
+  await expect(
+    page.locator(`[role="tree"][aria-label="Changed files"] [data-path="${path}"]`),
+  ).toHaveAttribute('aria-checked', 'true');
+
+  await page.locator('body').press('/');
+  await page
+    .getByRole('searchbox', { name: 'Search the diff' })
+    .fill('new tail of src/epsilon.ts');
+
+  const results = page.locator('[role="tree"][aria-label="Results"]');
+  await expect(results.locator('.search-row')).toHaveCount(1);
+
+  // Still one click. The unfold is part of the journey, not a step before it.
+  await results.locator('.search-row').first().click();
+
+  // The card opened, and it says so the way the reviewer's own chevron would.
+  await expect(
+    page.locator(`[data-file-card="${path}"] .collapse-toggle`),
+  ).toHaveAttribute('aria-expanded', 'true');
+
+  // And the line is there to be seen, which is the whole point of opening it.
+  const lit = page.locator('[data-abr-found]');
+  await expect(lit).toHaveCount(1);
+  await expect(lit).toBeInViewport();
+  await expect(lit).toContainText('new tail of src/epsilon.ts');
+});
+
+/**
  * Searching inside an archive.
  *
  * The one gap the panel had. A `.zip` is binary to GitHub, so its patch is
