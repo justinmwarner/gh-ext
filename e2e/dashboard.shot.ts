@@ -12,7 +12,7 @@
  */
 
 import { mkdirSync } from 'node:fs';
-import { dashboardUrl, expect, test } from './extension';
+import { dashboardUrl, expect, pinDashboardClock, test } from './extension';
 
 /**
  * The dashboard reads nothing until a repository is opted in, so a shot of it
@@ -38,6 +38,10 @@ for (const scheme of ['light', 'dark'] as const) {
   test(`the dashboard, ${scheme}`, async ({ page, context, extensionId, api }) => {
     void api;
     await watch(context);
+    // Same clock the fixture was written against, or the shot ages: rows drift
+    // into Quiet one at a time and a bucket eventually loses its heading
+    // altogether. See `pinDashboardClock`.
+    await pinDashboardClock(page);
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width: 1100, height: 1000 });
     await page.goto(dashboardUrl(extensionId));

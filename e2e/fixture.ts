@@ -808,7 +808,16 @@ export const COMPARE_DIFF = [
  */
 const DAY = 86_400_000;
 
-/** Fixed, so a screenshot taken twice is the same screenshot. */
+/**
+ * Fixed, so a screenshot taken twice is the same screenshot.
+ *
+ * Half of a promise, and the half that cannot keep itself. Freezing the rows
+ * only makes them deterministic against a reader that is frozen with them —
+ * the page ages every row against its own `Date.now()`, so this date drifting
+ * into the past is the same thing as the whole fixture getting older.
+ * `pinDashboardClock` in `e2e/extension.ts` is the other half, and says what
+ * it cost to learn that. Use both or neither.
+ */
 export const DASHBOARD_NOW = Date.parse('2026-09-13T12:00:00Z');
 
 const iso = (daysAgo: number) => new Date(DASHBOARD_NOW - daysAgo * DAY).toISOString();

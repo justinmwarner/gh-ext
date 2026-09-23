@@ -15,7 +15,19 @@
 import { expect } from '@playwright/test';
 import type { BrowserContext } from '@playwright/test';
 import { DASHBOARD_RESPONSE } from './fixture';
-import { dashboardUrl, reviewUrl, test } from './extension';
+import { dashboardUrl, pinDashboardClock, reviewUrl, test } from './extension';
+
+/**
+ * Every test in this file reads the clock, whether it says so or not.
+ *
+ * The dashboard sorts and ages rows against `Date.now()`, so a fixture frozen
+ * at one moment and a page reading another is a suite that passes on the day
+ * it is written and fails later for reasons no diff explains.
+ * `pinDashboardClock` says at length which day, and what it cost to find out.
+ */
+test.beforeEach(async ({ page }) => {
+  await pinDashboardClock(page);
+});
 
 /**
  * Opt repositories in, the way the picker would have.

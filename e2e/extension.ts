@@ -18,12 +18,13 @@
 
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { type BrowserContext, type Route, test as base } from '@playwright/test';
+import { type BrowserContext, type Page, type Route, test as base } from '@playwright/test';
 import {
   BASE_SHA,
   COMMIT_NODES,
   COMPARE_DIFF,
   CONTRIBUTED_REPOS_RESPONSE,
+  DASHBOARD_NOW,
   DASHBOARD_RESPONSE,
   TITLE_SEARCH_RESPONSE,
   FIRST_COMMIT_DIFF,
@@ -620,6 +621,32 @@ export const reviewUrl = (extensionId: string): string =>
 /** The list route on the same page. See `e2e/dashboard.spec.ts`. */
 export const dashboardUrl = (extensionId: string): string =>
   `chrome-extension://${extensionId}/review.html#/prs`;
+
+/**
+ * Stop the clock where the dashboard fixture left it.
+ *
+ * `DASHBOARD_NOW` pins the fixture's timestamps and its comment says why — a
+ * screenshot taken twice should be the same screenshot. What was never pinned
+ * is the *reader*: the page classifies every row against its own `Date.now()`,
+ * so the gap between the fixture's idea of today and the machine's widened by
+ * a day, every day.
+ *
+ * It took ten days to bite and then bit hard. `#487` crossed the fourteen-day
+ * staleness line, fell out of "Waiting on others" into "Quiet", and took a
+ * whole heading off the page — failing a test that had passed every day until
+ * then, and quietly spoiling the store screenshot beside it. A fixture that
+ * freezes only half of a comparison is not frozen.
+ *
+ * `setFixedTime` rather than `install`: the only thing that has to be
+ * deterministic is what day it is. Faking the timers too would stop the
+ * polling and the transitions the rest of the page is built on.
+ *
+ * Call it before `goto`, and only for the dashboard. The worker keeps the real
+ * clock — it builds the ninety-day search window, and nothing asserts which
+ * ninety days those are.
+ */
+export const pinDashboardClock = (page: Page): Promise<void> =>
+  page.clock.setFixedTime(DASHBOARD_NOW);
 
 export { expect } from '@playwright/test';
 export { HEAD_SHA, BASE_SHA, PRIOR_SHA, FIRST_SHA, PR, ARCHIVE_FILE, IMAGE_FILE, TABLE_FILE };
