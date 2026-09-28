@@ -7,7 +7,8 @@
  * the page.
  *
  * It carries the four things §5 asks for: the path, the added and removed
- * counts, the viewed checkbox, and the collapse toggle, plus the controls that
+ * counts, the viewed checkbox, and the collapse toggle — which is now the path
+ * itself, with a button beside it to copy the path — plus the controls that
  * change what the card shows.
  *
  * **Everything here is fixed height, and that is a hard constraint rather than
@@ -28,6 +29,7 @@ import {
   whitespaceLabel,
   whitespaceNotice,
 } from '@/lib/review/whitespace';
+import { CopyPath } from './CopyPath';
 import type { HeldBack } from './DiffColumn';
 import { HunkSteps } from './HunkSteps';
 import { ModeSwitcher } from './ModeSwitcher';
@@ -201,6 +203,23 @@ export function FileCard({
   const collapsible = !emptied;
   const modes = modesForFile(file);
 
+  const name = (
+    <span className="file-path">
+      {file.isRename && (
+        <>
+          <span className="file-path-old">{file.oldPath}</span>
+          <span aria-hidden="true"> {'→'} </span>
+          <span className="visually-hidden">renamed to</span>
+        </>
+      )}
+      <span>{file.path}</span>
+    </span>
+  );
+  // What a screen reader hears of the name, which inside the button below is
+  // the label and nothing else — so a rename has to be said here as well, or
+  // the old path is simply gone for anyone not looking at the strikethrough.
+  const spoken = file.isRename ? `${file.oldPath} renamed to ${file.path}` : file.path;
+
   return (
     <div
       className="file-card"
@@ -211,28 +230,35 @@ export function FileCard({
       }}
     >
       <div className="file-card-head">
-        {collapsible && (
-          <button
-            type="button"
-            className="collapse-toggle"
-            aria-expanded={!collapsed}
-            aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${file.path}`}
-            onClick={() => onToggleCollapsed(file.path)}
-          >
-            <span aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
-          </button>
-        )}
+        {/* The name is the fold control, chevron and all. It was a label
+            beside a 20px chevron, and a reviewer reaching for the widest thing
+            on the row — the thing they were reading — got nothing.
 
-        <span className="file-path">
-          {file.isRename && (
-            <>
-              <span className="file-path-old">{file.oldPath}</span>
-              <span aria-hidden="true"> {'→'} </span>
-              <span className="visually-hidden">renamed to</span>
-            </>
+            One button, rather than a click handler on the label beside it: a
+            second, pointer-only target would leave the keyboard and a screen
+            reader with the chevron alone, and it is the same press either way.
+            Its hit area carries on past the end of the name to the counts,
+            which is what the name covered as a label; `.collapse-toggle::after`
+            in the stylesheet is how. */}
+        <div className="file-title">
+          {collapsible ? (
+            <button
+              type="button"
+              className="collapse-toggle"
+              aria-expanded={!collapsed}
+              aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${spoken}`}
+              onClick={() => onToggleCollapsed(file.path)}
+            >
+              <span className="collapse-chevron" aria-hidden="true">
+                {collapsed ? '▸' : '▾'}
+              </span>
+              {name}
+            </button>
+          ) : (
+            name
           )}
-          <span>{file.path}</span>
-        </span>
+          <CopyPath path={file.path} />
+        </div>
 
         <span className="file-counts">
           <span className="additions">{`+${file.additions}`}</span>

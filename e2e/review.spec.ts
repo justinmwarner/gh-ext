@@ -2724,6 +2724,127 @@ test('no card header is taller than the height the viewer assumes', async ({
   expect(over).toEqual([]);
 });
 
+/** The middle of an element, for a press that has to land exactly there. */
+async function centreOf(locator: ReturnType<Page['locator']>): Promise<{ x: number; y: number }> {
+  const box = await locator.boundingBox();
+  if (box === null) throw new Error('nothing there to press');
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/**
+ * The name on a card's head row folds the card, all the way out to the counts.
+ *
+ * In a browser because every claim here is hit-testing, which jsdom does not
+ * do. The button is only as wide as the name; what carries its target on across
+ * the empty stretch after it is a pseudo-element, and so is what would take a
+ * press meant for the copy button if the stylesheet stopped lifting that
+ * button above it.
+ */
+test('the whole name folds its card, and the copy button beside it does not', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+  await goToFile(page, 'src/app.ts');
+
+  const card = page.locator('[data-file-card="src/app.ts"]');
+  const fold = card.locator('.collapse-toggle');
+  const copy = card.getByRole('button', { name: 'Copy src/app.ts' });
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+
+  // Past the end of the name and its copy button, short of the counts: the
+  // empty stretch that was the name's own box when it was a label.
+  const end = await copy.boundingBox();
+  const counts = await card.locator('.file-counts').boundingBox();
+  if (end === null || counts === null) throw new Error('the head row did not lay out');
+  const stretch = counts.x - (end.x + end.width);
+  expect(stretch).toBeGreaterThan(40);
+  await page.mouse.click(end.x + end.width + stretch / 2, end.y + end.height / 2);
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+
+  // And the letters themselves, on the way back. By coordinates rather than by
+  // clicking the text's locator: what is under the pointer there is the
+  // button's own hit area, which is the point, and Playwright would call that
+  // an interception.
+  const letters = await centreOf(card.getByText('src/app.ts', { exact: true }));
+  await page.mouse.click(letters.x, letters.y);
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+
+  // The write is recorded rather than made. The real clipboard is the
+  // machine's, and a suite that overwrote a developer's clipboard on every run
+  // would be a bug of its own; what only a browser can say is where the press
+  // lands. Playwright will not click an element that another one covers, so
+  // this fails as well if the fold control's hit area is lying over the button.
+  await page.evaluate(() => {
+    const written: string[] = [];
+    Object.assign(window, { written });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          written.push(text);
+        },
+      },
+    });
+  });
+  await copy.click();
+
+  await expect(copy).toHaveAttribute('data-copy-state', 'copied');
+  expect(await page.evaluate(() => (window as unknown as { written: string[] }).written)).toEqual([
+    'src/app.ts',
+  ]);
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+});
+
+/**
+ * Folding the file being read, from the header pinned over it.
+ *
+ * The chevron could always do this, and the viewed box folds a card too, but a
+ * name the width of the row makes it the ordinary way to put a file away — and
+ * the reviewer doing it is part-way down that file, with its header stuck to
+ * the top of the column. Where the column lands afterwards is layout, so only
+ * a browser can say.
+ */
+test('folding the file being read, from its pinned header, stays on that file', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const path = 'src/app.ts';
+  await goToFile(page, path);
+
+  // Into the body, far enough that the rows at the top have gone under the
+  // header, which is then pinned rather than sitting where the card starts.
+  const view = page.locator(VIEW);
+  const start = await view.evaluate((node) => node.scrollTop);
+  await scrollTo(page, start + 120);
+  const origin = (await view.boundingBox())?.y ?? 0;
+  const diffTop = (await diffFor(page, path).boundingBox())?.y ?? 0;
+  expect(diffTop).toBeLessThan(origin);
+
+  const card = page.locator(`[data-file-card="${path}"]`);
+  const name = await centreOf(card.getByText(path, { exact: true }));
+  await page.mouse.click(name.x, name.y);
+  await expect(card.locator('.collapse-toggle')).toHaveAttribute('aria-expanded', 'false');
+
+  // Settled with the folded card as the file being read: at the top of the
+  // column, where going to a file leaves one. `CodeView` on its own held the
+  // next file still instead, which put this header 446px down and filled the
+  // space above it with the end of the file before — the one already read.
+  const settled = async () =>
+    (await cardTops(page)).find((entry) => entry.path === path)?.top ??
+    Number.POSITIVE_INFINITY;
+  await expect.poll(settled).toBeLessThanOrEqual(REACHED);
+  expect(await settled()).toBeGreaterThanOrEqual(0);
+});
+
 /**
  * Markdown, rendered and marked, in a browser that will actually run things.
  *

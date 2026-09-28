@@ -1167,18 +1167,60 @@ export function DiffColumn({
   const headers = useRef(new Map<string, HTMLElement>());
 
   /**
+   * Where the cards are, measured rather than counted.
+   *
+   * `CodeView` keeps its item offsets private, so the answer comes from where
+   * the mounted card headers actually are. Virtualization means only the
+   * headers near the viewport exist, which is exactly the set that could be at
+   * the top of it.
+   *
+   * Three callers, and they have to measure the same way: one reports which
+   * file the reviewer is looking at, one asks whether a file the column was
+   * told to go to has arrived, and a fold asks whether the card it is folding
+   * is the one being read. Two spellings of "where is this card" would let the
+   * column decide it had arrived somewhere it was not about to report.
+   */
+  const cardTops = useCallback((): CardTop[] => {
+    const container = scroller.current;
+    if (container === null) return [];
+
+    const origin = container.getBoundingClientRect().top;
+    const tops: CardTop[] = [];
+    for (const [path, node] of headers.current) {
+      if (!node.isConnected) continue;
+      tops.push({ path, top: node.getBoundingClientRect().top - origin });
+    }
+    return tops;
+  }, []);
+
+  /**
    * Fold or unfold one card, whatever it was doing before.
    *
    * Written against the *effective* state rather than the override, so the
    * first press on a withheld card opens it rather than recording "fold this
    * one" on something already folded and appearing to do nothing.
+   *
+   * **Folding the file being read comes back to it.** That file's header is
+   * pinned over rows the reviewer has scrolled past, and `CodeView` answers
+   * the fold by holding the *next* file still — so the header they pressed
+   * dropped out from under the pointer, hundreds of pixels down, and the top
+   * of the column filled up with the end of the file before it: the one they
+   * had already read. Measured in Chrome at 446px down on the fixture; this
+   * puts the card back at the top, where going to a file leaves one. The name
+   * being the whole width of the row made this the common way to put a file
+   * away rather than a corner of the chevron.
+   *
+   * Only that file. A card folded from further down the screen stays where it
+   * is and the next one closes up beneath it, which is already right, and
+   * scrolling it to the top would be a jump nobody asked for.
    */
   const toggleCollapsed = useCallback(
     (path: string) => {
       const open = !collapsed.has(path);
       setFolds((previous) => new Map(previous).set(path, open));
+      if (open && topmostFile(cardTops()) === path) returnToCard(path);
     },
-    [collapsed],
+    [collapsed, cardTops, returnToCard],
   );
 
   /**
@@ -1704,32 +1746,6 @@ export function DiffColumn({
       toggleShown,
     ],
   );
-
-  /**
-   * Where the cards are, measured rather than counted.
-   *
-   * `CodeView` keeps its item offsets private, so the answer comes from where
-   * the mounted card headers actually are. Virtualization means only the
-   * headers near the viewport exist, which is exactly the set that could be at
-   * the top of it.
-   *
-   * Two callers, and they have to measure the same way: one reports which file
-   * the reviewer is looking at, the other asks whether a file the column was
-   * told to go to has arrived. Two spellings of "where is this card" would let
-   * the column decide it had arrived somewhere it was not about to report.
-   */
-  const cardTops = useCallback((): CardTop[] => {
-    const container = scroller.current;
-    if (container === null) return [];
-
-    const origin = container.getBoundingClientRect().top;
-    const tops: CardTop[] = [];
-    for (const [path, node] of headers.current) {
-      if (!node.isConnected) continue;
-      tops.push({ path, top: node.getBoundingClientRect().top - origin });
-    }
-    return tops;
-  }, []);
 
   const reported = useRef<string | null>(null);
   /**

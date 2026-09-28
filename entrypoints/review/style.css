@@ -118,7 +118,8 @@ code {
 .button,
 .view-tab,
 .search-result,
-.collapse-toggle {
+.collapse-chevron,
+.copy-path {
   transition:
     background-color 0.12s ease,
     border-color 0.12s ease;
@@ -1593,29 +1594,103 @@ button.scope-showing:hover {
   min-width: 0;
 }
 
-/* The file's name is the thing this band exists to say. */
-.file-card-head .file-path {
+/* The file's name is the thing this band exists to say, so it takes whatever
+   the row has left over. `position` is for the fold control's hit area below,
+   which is measured against this box; nothing here moves. */
+.file-title {
+  position: relative;
+  display: flex;
   flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.file-card-head .file-path {
   font-weight: 600;
 }
 
+/* Chevron and name, one button. As wide as the name and no wider, so what
+   sits after it in `.file-title` sits at the end of the name rather than over
+   by the counts; `min-width` lets it give way to a long path, which then
+   loses its directory rather than the button losing its end. */
 .collapse-toggle {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
+  gap: var(--gap);
+  min-width: 0;
   padding: 0;
   font: inherit;
   color: inherit;
+  text-align: inherit;
   border: 0;
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
 }
 
-.collapse-toggle:hover {
+/* The rest of the target: the button's hit area, carried across the empty
+   stretch after the name to the counts, which is the span the name covered
+   when it was a label. A pseudo-element rather than a handler on the row, so
+   it is still the one button — and anything that has to stay pressable inside
+   the stretch lifts itself above this rather than stopping a click. */
+.collapse-toggle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* The box and the hover the chevron had as a button of its own. It now lights
+   wherever on the stretch the pointer is, which is the one mark saying that
+   all of it folds the card. */
+.collapse-chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.collapse-toggle:hover .collapse-chevron {
   background: var(--neutral-hover);
+}
+
+/* Copy the path, from the end of the name, where GitHub keeps its own. It is
+   inside the fold control's stretched hit area, and lifted over it: without
+   the lift the press lands on the `::after` and folds the card. The lift goes
+   no further than the header, which Pierre's sticky row stacks by itself. */
+.copy-path {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--fg-muted);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.copy-path:hover {
+  color: var(--fg-default);
+  background: var(--neutral-hover);
+}
+
+/* After the hover rule, so the answer outlasts the pointer. The glyph says it —
+   a tick, a cross — and the colour only agrees with it. */
+.copy-path[data-copy-state='copied'] {
+  color: var(--success-fg);
+}
+
+.copy-path[data-copy-state='failed'] {
+  color: var(--danger-fg);
 }
 
 .file-path {
