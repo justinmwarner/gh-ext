@@ -533,6 +533,18 @@ not the headline. The icons are Material Icon Theme's, and they are the one
 place in the product drawing colours this system did not choose; the Don'ts
 below records why that is allowed and what it is not a precedent for.
 
+Above the rows sit the two ways to narrow the tree: the "Filter files…" box, and
+a funnel at the end of the same line. The box narrows the rail while the
+reviewer looks for something. The funnel's menu narrows the *review*, tree and
+column together, so it is held to a stricter rule: while anything is filtered,
+the funnel is drawn on (its outline fills, and it takes the active rail tab's
+tint and border, so the state is a change of shape before it is a change of
+colour), and it is said in words twice, in the line under the box and in the
+scope bar above the diff ("Showing 12 of 40 files"). The menu uses sentence-case
+headings in Foreground Muted to divide its sections (never an eyebrow), a muted
+count after each row, and ticks that stay open under the pointer, because the
+reviewer is there to set several things at once.
+
 ### The injected card (signature component)
 
 The one place in the product with expressive treatment, and the reasoning belongs

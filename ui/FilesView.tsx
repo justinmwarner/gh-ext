@@ -36,9 +36,17 @@ import {
 import { Resizer } from './Resizer';
 import type { BlobRefs } from './blobLoader';
 import type { AnchorableSides } from '@/lib/review/diffScope';
+import {
+  type FileFacets,
+  type FileFilters,
+  NO_FILTERS,
+  fileFacets,
+} from '@/lib/review/fileFilters';
 import type { CurrentFile } from './currentFile';
+import { FilterMenu, type OwnershipNote } from './FilterMenu';
 import { fileComments } from './fileTreeData';
 import type { GeneratedRule } from '@/lib/review/generated';
+import type { MenuButtonHandle } from './MenuButton';
 import type { ReviewFile } from './reviewFiles';
 import { useArchiveIndexes } from './useArchiveIndexes';
 import { useReviewSession } from './reviewSession';
@@ -52,6 +60,9 @@ const RAIL = { axis: 'x', min: 180, max: 560, initial: 296 } as const;
 /** Which of the rail's two trees is showing. */
 type RailTab = 'files' | 'search';
 
+/** Nothing hidden, shared so a view with no filters builds no set per render. */
+const NOTHING_HIDDEN: ReadonlySet<string> = new Set();
+
 export interface FilesViewHandle {
   /**
    * Show the find panel and put the cursor in its box.
@@ -62,6 +73,15 @@ export interface FilesViewHandle {
    * unset again afterwards by whoever set it.
    */
   openFind(): void;
+  /**
+   * Show the file tree and open its filter menu.
+   *
+   * What the scope bar's "Showing 12 of 40 files" does when pressed: a sentence
+   * saying the review is narrowed should lead to the controls narrowing it.
+   * The tree first, because the menu hangs off its filter row and is not on
+   * screen while the find panel is.
+   */
+  openFilters(): void;
 }
 
 export interface FilesViewProps {
@@ -109,6 +129,34 @@ export interface FilesViewProps {
   generatedPatterns?: readonly string[];
   /** Open the tree with its directories shut. Read once, by the tree. */
   collapseTree?: boolean;
+  /**
+   * Paths the filter menu leaves out of the review.
+   *
+   * `files` stays the whole list and this travels beside it, rather than a
+   * shorter `files` arriving instead, for three readers that need the whole
+   * one: the column, whose viewer is keyed on the list and would be rebuilt by
+   * a narrower one; the tree, whose count is against every file; and the find
+   * panel, which walks every patch once and would walk them all again each
+   * time a filter moved.
+   */
+  hidden?: ReadonlySet<string>;
+  /**
+   * The filter menu's state and its way back to the shell.
+   *
+   * No menu is drawn without `onFilters`, which is the state a component test
+   * mounting this view on its own is in.
+   */
+  filters?: FileFilters;
+  facets?: FileFacets;
+  onFilters?: (next: FileFilters) => void;
+  /** Anything is being filtered. */
+  filtering?: boolean;
+  /** What the ownership row can offer, and what to say about it. */
+  ownership?: OwnershipNote;
+  /** The filter menu opened or shut. Passed straight through to it. */
+  onFiltersOpen?: (open: boolean) => void;
+  /** Which file a composer is open on. Passed straight up from the column. */
+  onComposing?: (path: string | null) => void;
   columnRef?: Ref<DiffColumnHandle>;
   ref?: Ref<FilesViewHandle>;
   /**
@@ -140,11 +188,24 @@ export function FilesView({
   lineDiff,
   generatedPatterns,
   collapseTree,
+  hidden = NOTHING_HIDDEN,
+  filters = NO_FILTERS,
+  facets,
+  onFilters,
+  filtering = false,
+  ownership,
+  onFiltersOpen,
+  onComposing,
   columnRef,
   ref,
   onFindResult,
 }: FilesViewProps) {
   const session = useReviewSession();
+  const menu = useRef<MenuButtonHandle>(null);
+
+  // Worked out here only when the shell did not hand them over, which is a
+  // test mounting this view by itself.
+  const counted = useMemo(() => facets ?? fileFacets(files), [facets, files]);
 
   /**
    * Which tree the rail is showing, and what the find panel has been asked.
@@ -177,6 +238,13 @@ export function FilesView({
         // it, which is almost always what the reviewer meant by pressing it
         // again.
         queueMicrotask(() => panel.current?.focusQuery());
+      },
+      openFilters() {
+        setTab('files');
+        // After the swap, for the reason `openFind` waits: the menu measures
+        // its trigger when it opens, and a trigger in a hidden panel is not
+        // where it is about to be.
+        queueMicrotask(() => menu.current?.open());
       },
     }),
     [],
@@ -328,6 +396,21 @@ export function FilesView({
                 onSelect={onSelectFromTree}
                 onSetViewed={setViewedMany}
                 collapseTree={collapseTree}
+                hidden={hidden}
+                menuFiltering={filtering}
+                filterMenu={
+                  onFilters === undefined ? undefined : (
+                    <FilterMenu
+                      ref={menu}
+                      filters={filters}
+                      facets={counted}
+                      onChange={onFilters}
+                      active={filtering}
+                      ownership={ownership}
+                      onOpenChange={onFiltersOpen}
+                    />
+                  )
+                }
               />
             </div>
 
@@ -341,6 +424,7 @@ export function FilesView({
               <FindPanel
                 ref={panel}
                 files={files}
+                hidden={hidden}
                 archives={archives}
                 state={find}
                 onState={setFind}
@@ -375,6 +459,9 @@ export function FilesView({
           hideGenerated={hideGenerated}
           generatedPatterns={generatedPatterns}
           gitAttributes={gitAttributes}
+          hidden={hidden}
+          onShowAllFiles={onFilters === undefined ? undefined : () => onFilters(NO_FILTERS)}
+          onComposing={onComposing}
           current={current}
           onScrollTo={onSelectFromScroll}
           jump={jump}

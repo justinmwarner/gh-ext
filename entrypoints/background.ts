@@ -40,6 +40,7 @@ import { type BlobResult, BlobCache, fetchBlob } from '@/lib/github/blobs';
 import {
   AuthError,
   GitHubClient,
+  GraphQLError,
   MissingTokenError,
   RateLimitError,
 } from '@/lib/github/client';
@@ -49,7 +50,9 @@ import {
   CONTRIBUTED_REPOS_QUERY,
   DASHBOARD_QUERY,
   TITLE_SEARCH_QUERY,
+  VIEWER_TEAMS_QUERY,
 } from '@/lib/github/queries';
+import { type ViewerTeams, readViewerTeams } from '@/lib/github/teams';
 import type { DeniedField } from '@/lib/github/graphql-errors';
 import { NO_PROBE, type Probe, diagnose, statedDiagnosis } from '@/lib/github/diagnosis';
 import { evidenceOf, worthProbing } from '@/lib/github/evidence';
@@ -564,6 +567,41 @@ export default defineBackground({
     }
 
     /**
+     * Who the reviewer is and which of the owner's teams they are on.
+     *
+     * Two requests, the login first. The teams are the half a token can be
+     * refused, and a refusal must not take the login down with it: "matching
+     * your login only" is a usable answer, and "GitHub would not say who you
+     * are" is not. So a GraphQL failure of the teams request — however GitHub
+     * chooses to shape it, `data: null` included — is read as teams nobody can
+     * see. A rate limit or a rejected token is not caught here: those are the
+     * whole read failing, and the page is told so.
+     *
+     * `onPartial` on the teams request, because a person's repository answers
+     * with a NOT_FOUND beside its data rather than instead of it, and that is
+     * an answer too. `readViewerTeams` tells them apart.
+     */
+    async function getViewerTeams(pr: PrRef): Promise<ViewerTeams> {
+      const who = await client.graphql<{ viewer: { login: string } }>(VIEWER_QUERY, {});
+      const login = who.viewer.login;
+
+      let refused: DeniedField[] = [];
+      try {
+        const data = await client.graphql<unknown>(
+          VIEWER_TEAMS_QUERY,
+          { owner: pr.owner, login },
+          (denied) => {
+            refused = denied;
+          },
+        );
+        return readViewerTeams(pr.owner, login, data, refused);
+      } catch (error) {
+        if (error instanceof GraphQLError) return { login, teams: null, truncated: false };
+        throw error;
+      }
+    }
+
+    /**
      * Every pull request this account is involved in, in one request.
      *
      * `onPartial` rather than letting a refusal throw, and that is the whole
@@ -806,6 +844,8 @@ export default defineBackground({
             return ok<'get-blob-bytes'>(
               await getBlobBytes(message.pr, message.path, message.ref),
             );
+          case 'get-viewer-teams':
+            return ok<'get-viewer-teams'>(await getViewerTeams(message.pr));
           case 'validate-token':
             return ok<'validate-token'>(await validateToken());
           case 'get-rate-limit':

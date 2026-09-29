@@ -130,3 +130,28 @@ export function remainingInFile(
   const passed = at === -1 ? 0 : at - start + 1;
   return count - passed;
 }
+
+/**
+ * The cursor's index in a new stop list: the same section, wherever it is now.
+ *
+ * The list is rebuilt whenever a card folds or a filter takes a file out, and
+ * most of those rebuilds do not touch the section the reviewer is on — they
+ * move it. Throwing the index away instead left `J` with nothing to step from:
+ * pressed while the file just left was being taken out of the column, it
+ * re-landed on the section it had just reached, and the counter went blank
+ * under a reviewer who had not moved.
+ *
+ * -1 when that section is not in the new list — its file folded or hidden, or
+ * a different comparison altogether — which is the cursor's own "not known".
+ */
+export function carryCursor(
+  previous: readonly HunkStop[],
+  next: readonly HunkStop[],
+  index: number,
+): number {
+  const was = previous[index];
+  if (was === undefined) return -1;
+  return next.findIndex(
+    (stop) => stop.path === was.path && stop.side === was.side && stop.line === was.line,
+  );
+}

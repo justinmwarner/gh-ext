@@ -21,6 +21,7 @@ import type { ParsedDiffFile } from './github/diff';
 import type { Diagnosis } from './github/diagnosis';
 import type { DeniedField } from './github/graphql-errors';
 import type { FallbackDiffFile } from './github/files-fallback';
+import type { ViewerTeams } from './github/teams';
 import type { PrCommit, ReviewThread } from './github/types';
 import type { Warning } from './log';
 import type { OpenReason } from './review/openTarget';
@@ -304,6 +305,20 @@ export interface ProtocolMap {
     response: BinaryBlobResult;
   };
 
+  /**
+   * Review page → worker: who the reviewer is, as CODEOWNERS would name them.
+   *
+   * Their login, and their teams in the organization that owns `pr`'s
+   * repository. What "Show only files you own" matches a CODEOWNERS line
+   * against — the file itself comes through `get-blob`, like `.gitattributes`.
+   * Asked only while that filter is on: the teams a reviewer is on are not
+   * something to read out of GitHub on their behalf uninvited.
+   */
+  'get-viewer-teams': {
+    request: { pr: PrRef };
+    response: ViewerTeams;
+  };
+
   /** Options page → worker: does the stored token work, and who is it? */
   'validate-token': { request: Record<string, never>; response: TokenValidation };
 
@@ -542,6 +557,7 @@ const MESSAGE_KINDS: Record<MessageKind, true> = {
   'compare-diff': true,
   'get-blob': true,
   'get-blob-bytes': true,
+  'get-viewer-teams': true,
   'validate-token': true,
   'get-rate-limit': true,
   'get-warnings': true,

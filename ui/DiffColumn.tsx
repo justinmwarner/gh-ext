@@ -94,6 +94,7 @@ import {
   showsTextDiff,
 } from './diffItems';
 import { HunkNavContext, createHunkCursorStore } from './hunkCursor';
+import { carryCursor } from '@/lib/review/hunkNav';
 import { readCursor, rowFor, rowTop, shadowFor } from './hunkPosition';
 import { MoreBelow } from './MoreBelow';
 import type { ReviewFile } from './reviewFiles';
@@ -286,6 +287,39 @@ export interface DiffColumnProps {
    * patterns exist. Read once per pull request by `useGitAttributes`.
    */
   gitAttributes?: readonly GeneratedRule[];
+  /**
+   * Files the reviewer's filters leave out of the column, by path.
+   *
+   * Hidden rather than folded: a folded card keeps its header, and a hidden one
+   * has no card and no sections for `J` to land in. `files` stays the whole
+   * list all the same, and that is the point of taking a set rather than a
+   * shorter array. The viewer's `key` is derived from `files`, so a narrower
+   * array would be a new viewer — scroll gone, every measurement gone — for a
+   * press in a menu. Held as the same viewer, `CodeView` keeps the reader's
+   * place by itself: it anchors on the first element on screen that survives
+   * the change before it reconciles the items, and puts that element back
+   * where it was.
+   *
+   * Everything about where a comment goes keeps reading `files` too, for the
+   * reason `drawnFiles` gives. Only what is *drawn* is narrowed.
+   */
+  hidden?: ReadonlySet<string>;
+  /**
+   * Put every file back, from the column's own empty state.
+   *
+   * Only reachable when the filters have hidden everything, which is when the
+   * reviewer is furthest from the menu that set them.
+   */
+  onShowAllFiles?: () => void;
+  /**
+   * Which file a composer is open on, or null once none is.
+   *
+   * Said upward because the shell decides what the filters hide, and a file
+   * with an open composer is one they must not: the words in it are the
+   * reviewer's, and a composer whose card has gone from the column is writing
+   * the reviewer can no longer see or send.
+   */
+  onComposing?: (path: string | null) => void;
   ref?: Ref<DiffColumnHandle>;
 }
 
@@ -422,6 +456,9 @@ const NO_LAYOUT: FileThreadLayout = { annotations: NO_ANNOTATIONS, listed: NO_LI
 /** Shared, so a file with no comment in flight allocates nothing for one. */
 const NO_POSTING: readonly PostingComment[] = [];
 
+/** Nothing hidden, shared so a column with no filters builds no set per render. */
+const NO_HIDDEN: ReadonlySet<string> = new Set();
+
 /**
  * The two questions only the renderer can answer about a hydrated diff.
  *
@@ -528,6 +565,9 @@ export function DiffColumn({
   hideGenerated = false,
   generatedPatterns = DEFAULT_SETTINGS.generatedPatterns,
   gitAttributes = NO_ATTRIBUTES,
+  hidden = NO_HIDDEN,
+  onShowAllFiles,
+  onComposing,
   diffStyle = 'unified',
   syntaxTheme = '',
   lineDiff = 'word-alt',
@@ -589,6 +629,19 @@ export function DiffColumn({
    */
   const [returnTo, setReturnTo] = useState<CardReturn | null>(null);
   const [composer, setComposer] = useState<ComposerTarget | null>(null);
+
+  /**
+   * Say which file the composer is on, whenever that changes.
+   *
+   * After the commit rather than during render: the shell's answer is about
+   * what to hide, and nothing here draws differently for having told it.
+   */
+  const composingPath = composer?.path ?? null;
+  const tellComposing = useRef(onComposing);
+  tellComposing.current = onComposing;
+  useEffect(() => {
+    tellComposing.current?.(composingPath);
+  }, [composingPath]);
   const [unplaceable, setUnplaceable] = useState<string | null>(null);
   const [expansionError, setExpansionError] = useState<string | null>(null);
 
@@ -808,6 +861,19 @@ export function DiffColumn({
   const drawnByPath = useMemo(
     () => new Map(drawnFiles.map((file) => [file.path, file])),
     [drawnFiles],
+  );
+
+  /**
+   * The drawn list, less whatever the filters hide.
+   *
+   * Taken *after* `drawnFiles` and never folded into it, because `generation`
+   * below is derived from `drawnFiles` and must not move when a filter does.
+   * See {@link DiffColumnProps.hidden}.
+   */
+  const visibleFiles = useMemo(
+    () =>
+      hidden.size === 0 ? drawnFiles : drawnFiles.filter((file) => !hidden.has(file.path)),
+    [drawnFiles, hidden],
   );
 
   // Derived from the drawn list, so toggling whitespace on one file remounts
@@ -1125,8 +1191,8 @@ export function DiffColumn({
   }, [drawnFiles, layouts, postings, recomputed]);
 
   const items = useMemo(
-    () => codeViewItems(drawnFiles, collapsed, annotationsByPath, modes, withBody),
-    [drawnFiles, collapsed, annotationsByPath, modes, withBody],
+    () => codeViewItems(visibleFiles, collapsed, annotationsByPath, modes, withBody),
+    [visibleFiles, collapsed, annotationsByPath, modes, withBody],
   );
 
   /**
@@ -1141,6 +1207,11 @@ export function DiffColumn({
    * Counted off the same predicate `codeViewItems` collapses on, because they
    * are the same cards: the ones whose header carries a comparison the metric
    * knows nothing about.
+   *
+   * Over every drawn file, hidden ones included. The footer is measured once, at
+   * mount, and the viewer outlives every filter change, so this has to cover
+   * whichever files come back — and slack is the harmless direction to be
+   * wrong in. Too little is a last card whose controls cannot be reached.
    */
   const tailSlack = useMemo(
     () =>
@@ -1296,8 +1367,9 @@ export function DiffColumn({
   // hunk the recompute took away is not one of them. Collapsed cards are
   // excluded for the stronger version of the same reason — a collapsed item
   // renders no rows at all, so a stop inside one is a destination `scrollTo`
-  // cannot reach, and `J` stepped into it and landed on nothing.
-  const stops = useMemo(() => hunkStops(drawnFiles, collapsed), [drawnFiles, collapsed]);
+  // cannot reach, and `J` stepped into it and landed on nothing. A hidden card
+  // is the strongest version: it is not an item at all.
+  const stops = useMemo(() => hunkStops(visibleFiles, collapsed), [visibleFiles, collapsed]);
   const hunkCursor = useRef(-1);
   const currentPath = useRef(current.path);
   currentPath.current = current.path;
@@ -1326,10 +1398,16 @@ export function DiffColumn({
   const landing = useRef(0);
   const landingFrame = useRef(0);
 
+  // A new stop list invalidates every index into the old one, so the section
+  // the cursor is on is looked up again rather than dropped: a card folding or
+  // a filter taking a file out moves the section without leaving it, and `J`
+  // pressed across that change used to re-land where it had just been.
+  const lastStops = useRef(stops);
   useEffect(() => {
-    // A new file list invalidates every index into the old one.
-    hunkCursor.current = -1;
-    cursorStore.set({ stops, index: -1 });
+    const index = carryCursor(lastStops.current, stops, hunkCursor.current);
+    lastStops.current = stops;
+    hunkCursor.current = index;
+    cursorStore.set({ stops, index });
   }, [stops, cursorStore]);
 
   /**
@@ -2415,6 +2493,19 @@ export function DiffColumn({
 
       {files.length === 0 ? (
         <p className="placeholder">No changed files.</p>
+      ) : visibleFiles.length === 0 ? (
+        // Its own sentence rather than the one above. "No changed files" is a
+        // claim about the pull request, and the truth is about what the
+        // reviewer asked to be shown. The viewer unmounts here; nothing it had
+        // measured is worth keeping for a column with nothing in it.
+        <div className="placeholder column-empty">
+          <p>{`Your filters hide all ${files.length} ${files.length === 1 ? 'file' : 'files'}.`}</p>
+          {onShowAllFiles !== undefined && (
+            <button type="button" className="button" onClick={onShowAllFiles}>
+              Show all files
+            </button>
+          )}
+        </div>
       ) : (
         /*
           A fragment, so `.diff-view` stays a direct flex child of `.column` —

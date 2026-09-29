@@ -73,6 +73,21 @@ ours" is the wrong instinct here.
   `lib/review/search.ts` is the seam — that module deliberately never says
   "archive".
 
+- **The file filters narrow the column with a set, never with a shorter list.**
+  `DiffColumn` keys its viewer on the identity of `files`, so handing it the
+  filtered array rebuilds the viewer on every press in the funnel menu: scroll
+  gone, and Pierre's own anchoring — which is what keeps the line being read
+  still while cards leave above it — never gets to run. The column and the tree
+  take the whole list and `hidden` beside it; everything that only walks files
+  (`j`/`k`, `Mod+K`, the scope bar) takes `useFileFilter`'s `shown`. The
+  e2e test "narrows the column without moving the line being read" is the
+  check. Its companion rule lives in `ui/useFileFilter.ts`: what may leave the
+  screen, and when. The file the reviewer is on, a file they have just ticked or
+  resolved, and a file with unsent writing on it are never in `hidden` — thread
+  links rely on the first to bring a hidden file back — and a filter change
+  moves the reviewer only if it is what hides their file. Tests that pin each
+  half are in `ui/fileFilter.test.tsx`; change the rule there first.
+
 - **The file icons are generated, like the palettes.** `material-icon-theme` is
   a devDependency and nothing from it ships; `npm run file-icons` writes the
   drawings to `public/file-icons/` and the mapping to `lib/icons/material.ts`.

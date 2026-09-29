@@ -23,13 +23,21 @@
  * it costs — no measured heights, no scroll anchoring, no rows that exist for
  * the reviewer but not for `Ctrl+F`.
  *
- * **The filter narrows, it does not find.** `Mod+K` already finds a file and
+ * **The box narrows, it does not find.** `Mod+K` already finds a file and
  * jumps to it; the box at the top of this rail is the other half — it stays on,
  * keeps the tree's order and nesting, and leaves a reviewer working down an
  * area of the change. It narrows *this rail only*: the diff column keeps every
  * file, because a control in the sidebar that quietly removed files from a
  * review is the thing `lib/settings.ts` argues at length against. What it is
  * doing is said in words above the rows, so it cannot be left on by accident.
+ *
+ * **The funnel beside it is the other kind of narrowing**, and not a quiet
+ * one. The filter menu takes files out of the whole review — this tree, the
+ * column and `j`/`k` together — and says so here and in the bar above the
+ * diff. By the time its choices reach this component they are a set of hidden
+ * paths (`hidden`), which the box then narrows further. The count below the box
+ * is against every file in the pull request either way, because a count
+ * against what the menu left would hide that it had left anything out.
  *
  * **The icons are Material Icon Theme's, and they arrive late.** A coloured
  * dot stood here for a while and was the wrong answer: a 7px square of
@@ -45,8 +53,18 @@
  * What is here is only how a row is drawn and which key does what.
  */
 
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FileViewedState, PatchStatus } from '@/lib/github/types';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import type { FileViewedState } from '@/lib/github/types';
+import { changeKind } from '@/lib/review/fileFilters';
 import { pathMatches } from '@/lib/review/search';
 import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import type { FileComments } from './fileTreeData';
@@ -143,19 +161,8 @@ function CommentGlyph() {
   );
 }
 
-/**
- * A copy is a new file at its destination, so it reads as `added`; `CHANGED` is
- * GitHub's word for a content change it declined to classify further, which is
- * `modified`. Everything else maps across by name.
- */
-const STATUS: Record<PatchStatus, string> = {
-  ADDED: 'added',
-  DELETED: 'deleted',
-  RENAMED: 'renamed',
-  COPIED: 'added',
-  MODIFIED: 'modified',
-  CHANGED: 'modified',
-};
+/** Nothing hidden, shared so an unfiltered tree builds no set per render. */
+const NOTHING_HIDDEN: ReadonlySet<string> = new Set();
 
 export interface FileTreeProps {
   files: readonly ReviewFile[];
@@ -186,6 +193,25 @@ export interface FileTreeProps {
    * would throw that away to tell them something they already knew.
    */
   collapseTree?: boolean;
+  /**
+   * Paths the filter menu leaves out of the review.
+   *
+   * `files` stays the whole list, and that is deliberate rather than a second
+   * way of saying the same thing: the count under the box is against every
+   * file in the pull request, and a shorter `files` would have made it a count
+   * against whatever the menu happened to leave.
+   */
+  hidden?: ReadonlySet<string>;
+  /**
+   * The menu is narrowing something, whether or not it hid a file here.
+   *
+   * What keeps the count line up when the box is empty. A filter that matched
+   * nothing on this pull request is still switched on, and the line is how a
+   * reviewer is kept from forgetting that one is.
+   */
+  menuFiltering?: boolean;
+  /** Drawn at the end of the box's row. The funnel, in practice. */
+  filterMenu?: ReactNode;
 }
 
 export function FileTree({
@@ -196,6 +222,9 @@ export function FileTree({
   onSelect,
   onSetViewed,
   collapseTree = false,
+  hidden = NOTHING_HIDDEN,
+  menuFiltering = false,
+  filterMenu,
 }: FileTreeProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NOTHING_COLLAPSED);
   const [focused, setFocused] = useState<string | null>(null);
@@ -241,15 +270,20 @@ export function FileTree({
   }
 
   /**
-   * What the filter leaves, or `paths` itself when there is no filter.
+   * What the menu leaves, then what the box leaves of that — or `paths` itself
+   * when neither is doing anything.
    *
    * The same array rather than a copy in the common case, so the rows below are
    * rebuilt only when something actually moved.
    */
+  const kept = useMemo(
+    () => (hidden.size === 0 ? paths : paths.filter((path) => !hidden.has(path))),
+    [paths, hidden],
+  );
   const filtering = query.trim() !== '';
   const shown = useMemo(
-    () => (filtering ? paths.filter((path) => pathMatches(path, query)) : paths),
-    [filtering, paths, query],
+    () => (filtering ? kept.filter((path) => pathMatches(path, query)) : kept),
+    [filtering, kept, query],
   );
 
   const rows = useMemo(
@@ -311,6 +345,42 @@ export function FileTree({
   // folded away or the file list changed underneath it.
   const tabbable =
     rows.find((row) => row.path === focused)?.path ?? rows[0]?.path ?? null;
+
+  /**
+   * The row that has the keyboard, and where in the list it sits.
+   *
+   * For the one way a row can leave while it is focused: the filters taking it
+   * away — a folder ticked with Space under "Hide viewed files", left behind
+   * when the reviewer moves on. A focused element removed from the page takes
+   * the focus to `<body>`, where the tree's own keys no longer reach, and a
+   * keyboard reviewer is left with nothing on screen saying where they are.
+   * So the next row down takes it, which is where walking the list would have
+   * gone anyway.
+   *
+   * Only when the row was taken, not when the reviewer went elsewhere. A blur
+   * whose element is still on the page afterwards is the reviewer moving on
+   * — to the diff, to the box — and following them would steal the keyboard
+   * back. One whose element is gone is the row being removed.
+   */
+  const holding = useRef<{ path: string; index: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const held = holding.current;
+    if (held === null) return;
+    const still = rows.findIndex((row) => row.path === held.path);
+    if (still !== -1) {
+      held.index = still;
+      return;
+    }
+    holding.current = null;
+    const active = document.activeElement;
+    // Somewhere else has it already, and that is not this tree's to undo.
+    if (active !== null && active !== document.body) return;
+    const next = rows[Math.min(held.index, rows.length - 1)];
+    if (next === undefined) return;
+    setFocused(next.path);
+    elements.current.get(next.path)?.focus();
+  }, [rows]);
 
   const move = useCallback(
     (to: TreeRow | undefined) => {
@@ -389,34 +459,44 @@ export function FileTree({
    * that lies — the same objection `lib/settings.ts` makes to a preference that
    * hides lines without saying it is on.
    */
-  const narrowed = !filtering
-    ? ''
-    : shown.length === 0
-      ? `No file matches “${query.trim()}”`
-      : `${shown.length} of ${paths.length} files`;
+  const narrowed =
+    !filtering && !menuFiltering
+      ? ''
+      : shown.length > 0
+        ? `${shown.length} of ${paths.length} files`
+        : // Which of the two emptied the tree. The box's sentence would be a
+          // false one when the menu had already hidden every file before the
+          // query was typed: there was nothing left for it to match.
+          filtering && kept.length > 0
+          ? `No file matches “${query.trim()}”`
+          : `Your filters hide all ${paths.length} files`;
 
   return (
     <>
       <div className="filetree-filter">
-        <input
-          type="search"
-          className="filetree-search"
-          aria-label="Filter files"
-          placeholder="Filter files…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            // Escape rather than selecting the text and deleting it. This box
-            // is meant to be picked up and put down between one look and the
-            // next, and `lib/keymap.ts` already ignores keys typed in an input,
-            // so the single-letter shortcuts are not at risk either way.
-            if (event.key === 'Escape') setQuery('');
-            // Straight into what was found, without reaching for the mouse.
-            else if (event.key === 'ArrowDown') move(rows[0]);
-            else return;
-            event.preventDefault();
-          }}
-        />
+        <div className="filetree-filter-row">
+          <input
+            type="search"
+            className="filetree-search"
+            aria-label="Filter files"
+            placeholder="Filter files…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              // Escape rather than selecting the text and deleting it. This box
+              // is meant to be picked up and put down between one look and the
+              // next, and `lib/keymap.ts` already ignores keys typed in an
+              // input, so the single-letter shortcuts are not at risk either
+              // way.
+              if (event.key === 'Escape') setQuery('');
+              // Straight into what was found, without reaching for the mouse.
+              else if (event.key === 'ArrowDown') move(rows[0]);
+              else return;
+              event.preventDefault();
+            }}
+          />
+          {filterMenu}
+        </div>
         {narrowed !== '' && (
           /* Rendered only when it has something to say. A live region that is
              permanently present and permanently empty is a node every other
@@ -428,7 +508,30 @@ export function FileTree({
         )}
       </div>
 
-      <div className="filetree-rows" role="tree" aria-label="Changed files" onKeyDown={onKeyDown}>
+      <div
+        className="filetree-rows"
+        role="tree"
+        aria-label="Changed files"
+        onKeyDown={onKeyDown}
+        onFocus={(event) => {
+          const path = (event.target as HTMLElement).closest('[data-path]')?.getAttribute('data-path');
+          if (path === null || path === undefined) return;
+          holding.current = { path, index: rows.findIndex((row) => row.path === path) };
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          // To another row, whose own focus is about to say so.
+          if (next instanceof Node && event.currentTarget.contains(next)) return;
+          const left = event.target as HTMLElement;
+          // Asked once the blur has finished: still on the page means the
+          // reviewer went somewhere, and the hand-off above must not follow.
+          queueMicrotask(() => {
+            if (left.isConnected && holding.current?.path === left.getAttribute('data-path')) {
+              holding.current = null;
+            }
+          });
+        }}
+      >
       {rows.map((row) => {
         const file = byPath.get(row.path);
         const icon = icons.urlFor(row.path, row.kind, row.expanded);
@@ -446,7 +549,7 @@ export function FileTree({
             className="tree-row"
             role="treeitem"
             data-path={row.path}
-            data-status={file === undefined ? undefined : STATUS[file.changeType]}
+            data-status={file === undefined ? undefined : changeKind(file.changeType)}
             data-noise={file?.noise === true ? 'true' : undefined}
             // The name is the basename, which is all a narrow column fits. The
             // path is what says which of four `index.ts` this one is.
@@ -548,7 +651,7 @@ export function FileTree({
                 column they were actually reading down. */}
             {file !== undefined && (
               <span className="tree-status" aria-hidden="true">
-                {STATUS[file.changeType].charAt(0).toUpperCase()}
+                {changeKind(file.changeType).charAt(0).toUpperCase()}
               </span>
             )}
           </div>

@@ -29,9 +29,22 @@ import { formatTimestamp } from './timestamp';
 export interface ConversationsViewProps {
   /** The paths the diff column has cards for, in the order it shows them. */
   paths: readonly string[];
+  /**
+   * Paths among those that the file filters are keeping out of the column.
+   *
+   * Listed all the same, in their place, because this view is the only index
+   * of every thread there is — and a reviewer who hid deleted files has not
+   * asked to stop hearing about a conversation on one. What changes is the
+   * sentence: the file is in the diff, and saying otherwise would send them
+   * looking for a reason it had gone.
+   */
+  hidden?: ReadonlySet<string>;
   /** Show me this thread: switch to the diff and scroll to it. */
   onGoTo: (threadId: string, path: string) => void;
 }
+
+/** Nothing hidden, shared so an unfiltered view builds no set per render. */
+const NOTHING_HIDDEN: ReadonlySet<string> = new Set();
 
 /**
  * The prose of the opening comment, and whether it proposed an edit.
@@ -122,9 +135,12 @@ function Entry({
 
 function Group({
   group,
+  filtered,
   onGoTo,
 }: {
   group: FileThreadGroup;
+  /** The file filters are keeping this file out of the column. */
+  filtered: boolean;
   onGoTo: ConversationsViewProps['onGoTo'];
 }) {
   return (
@@ -140,6 +156,14 @@ function Group({
         // this group is here rather than dropped.
         <p className="conversation-absent" role="note">
           Not in this diff
+        </p>
+      )}
+
+      {group.inDiff && filtered && (
+        // In the diff, and out of view by the reviewer's own choice. Going to
+        // a thread here still works: the review shows the file it is on.
+        <p className="conversation-absent" role="note">
+          In a file your filters hide
         </p>
       )}
 
@@ -159,7 +183,11 @@ function Group({
   );
 }
 
-export function ConversationsView({ paths, onGoTo }: ConversationsViewProps) {
+export function ConversationsView({
+  paths,
+  hidden = NOTHING_HIDDEN,
+  onGoTo,
+}: ConversationsViewProps) {
   const session = useReviewSession();
   const groups = useMemo(
     () => threadGroups(session.threads, paths),
@@ -177,7 +205,12 @@ export function ConversationsView({ paths, onGoTo }: ConversationsViewProps) {
   return (
     <div className="conversations">
       {groups.map((group) => (
-        <Group key={group.path} group={group} onGoTo={onGoTo} />
+        <Group
+          key={group.path}
+          group={group}
+          filtered={hidden.has(group.path)}
+          onGoTo={onGoTo}
+        />
       ))}
     </div>
   );

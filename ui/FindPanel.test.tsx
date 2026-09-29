@@ -57,12 +57,14 @@ function Harness({
   initial = DEFAULT_FIND,
   onGoTo = vi.fn(),
   onClose = vi.fn(),
+  hidden,
 }: {
   files?: readonly ReviewFile[];
   archives?: ArchiveIndexes;
   initial?: FindState;
   onGoTo?: (target: FindTarget) => void;
   onClose?: () => void;
+  hidden?: ReadonlySet<string>;
 }) {
   const [state, setState] = useState(initial);
   return (
@@ -73,9 +75,34 @@ function Harness({
       onState={setState}
       onGoTo={onGoTo}
       onClose={onClose}
+      hidden={hidden}
     />
   );
 }
+
+describe('FindPanel, under the file filters', () => {
+  it('says how many files it is not searching while the filters hide some', () => {
+    // A search that found nothing in a narrowed review has not looked
+    // everywhere, and "No results" alone would say that it had.
+    render(<Harness hidden={new Set(['docs/guide.md'])} />);
+
+    expect(screen.getByText('Not searching 1 file your filters hide')).toBeDefined();
+  });
+
+  it('finds nothing in a file the filters hide', async () => {
+    render(<Harness hidden={new Set(['docs/guide.md'])} />);
+
+    await userEvent.type(box(), 'heading');
+
+    expect(screen.getByRole('status').textContent).toBe('No results');
+  });
+
+  it('says nothing of the kind while nothing is hidden', () => {
+    render(<Harness hidden={new Set()} />);
+
+    expect(screen.queryByText(/not searching/i)).toBeNull();
+  });
+});
 
 const box = (): HTMLInputElement => screen.getByRole('searchbox', { name: /search the diff/i });
 

@@ -1081,6 +1081,28 @@ describe('starting a comment from the gutter', () => {
     });
   });
 
+  it('tells the page which file has a composer open, and when none does', async () => {
+    // The file filters keep a file with an open composer: the words in it are
+    // the reviewer's, and a composer whose card had gone would be writing they
+    // could neither see nor send. The column is the only one that knows.
+    const onComposing = vi.fn();
+    mount([file({ path: 'src/app.ts', patch: gappedPatch('src/app.ts') })], { onComposing });
+    await untilDrawn('src/app.ts');
+
+    await act(async () => {
+      clickGutterUtility('src/app.ts', 2, 'additions');
+    });
+
+    await waitFor(() => expect(onComposing).toHaveBeenLastCalledWith('src/app.ts'));
+
+    const cancel = await screen.findByRole('button', { name: /cancel/i });
+    await act(async () => {
+      fireEvent.click(cancel);
+    });
+
+    await waitFor(() => expect(onComposing).toHaveBeenLastCalledWith(null));
+  });
+
   it('replaces the composer with the comment, rather than showing both', async () => {
     // The bug. Publishing one comment is three round trips; the thread arrives
     // from the second, and the composer used to stay open until the third —
@@ -1784,6 +1806,105 @@ describe('DiffColumn, unified against split', () => {
  * the file's name, counts and change type are GitHub's throughout, and the
  * only thing folded is the reading of it.
  */
+/**
+ * A column narrowed by the file filters.
+ *
+ * Hiding is not folding. A folded card keeps its header in the column; a hidden
+ * one is not in the column at all, and neither are its sections. What makes that
+ * safe to do mid-review is the viewer staying the same viewer: `CodeView` keeps
+ * the reader's place itself when its items change — it anchors on the first
+ * surviving element on screen before reconciling — but only if it is not torn
+ * down and rebuilt, and a rebuild is what a new `key` does.
+ *
+ * Where the reader actually ends up is a question for a browser, since jsdom
+ * lays nothing out. What is asked here is whether the viewer survived, which is
+ * the precondition, and `e2e/review.spec.ts` asks the rest.
+ */
+describe('DiffColumn, narrowed by a filter', () => {
+  // One section each. jsdom's viewport is zero pixels tall, so the viewer
+  // mounts only what fits in its overscroll, and three files of two sections
+  // apiece is more than that: the second card never mounts at all.
+  const FILES = [file({ path: 'a.ts' }), file({ path: 'b.ts' }), file({ path: 'c.ts' })];
+
+  const hasCard = (path: string): boolean =>
+    document.querySelector(`[data-file-card="${path}"]`) !== null;
+
+  /** One store for every render, so a rerender is the same session. */
+  const drafts = new DraftStore(memoryStore());
+  const tree = (props: Record<string, unknown>) => (
+    <ReviewSessionProvider pullRequest={pullRequestNode()} prRef={PR_REF} threads={[]} drafts={drafts}>
+      <DiffColumn
+        files={FILES}
+        diff={UNIFIED}
+        sides={BOTH_SIDES}
+        current={NO_FILE}
+        onScrollTo={() => {}}
+        {...props}
+      />
+    </ReviewSessionProvider>
+  );
+
+  it('draws no card for a hidden file, and every card for the rest', async () => {
+    mount(FILES, { hidden: new Set(['b.ts']) });
+
+    await waitFor(() => expect(hasCard('a.ts')).toBe(true));
+    expect(hasCard('c.ts')).toBe(true);
+    expect(hasCard('b.ts')).toBe(false);
+  });
+
+  it('keeps the same viewer when a file is hidden, and when it comes back', async () => {
+    const view = render(tree({}));
+    await waitFor(() => expect(hasCard('b.ts')).toBe(true));
+    const viewer = document.querySelector('.diff-view');
+    expect(viewer).not.toBeNull();
+
+    view.rerender(tree({ hidden: new Set(['b.ts']) }));
+    await waitFor(() => expect(hasCard('b.ts')).toBe(false));
+    // A new element here is a new `CodeView`, which starts at the top with
+    // nothing it had measured — the reader's place gone for a menu press.
+    expect(document.querySelector('.diff-view')).toBe(viewer);
+
+    view.rerender(tree({ hidden: new Set() }));
+    await waitFor(() => expect(hasCard('b.ts')).toBe(true));
+    expect(document.querySelector('.diff-view')).toBe(viewer);
+  });
+
+  it('takes a hidden file’s sections out of the J and K walk', async () => {
+    const scrolls = vi.spyOn(CodeViewCore.prototype, 'scrollTo');
+    try {
+      const handle = { current: null as DiffColumnHandle | null };
+      mount(FILES, { hidden: new Set(['b.ts']), ref: handle });
+      await waitFor(() => expect(hasCard('c.ts')).toBe(true));
+
+      // One section a file and one file hidden, so two stops, and four presses
+      // runs off the end of them. Whatever the cursor makes of a document with
+      // no layout, every stop it can land on comes from the list.
+      for (let press = 0; press < 4; press += 1) {
+        act(() => handle.current?.goToHunk(1));
+      }
+
+      const lines = scrolls.mock.calls.flatMap(([target]) =>
+        target.type === 'line' ? [target.id] : [],
+      );
+      expect(lines).toContain('c.ts');
+      expect(lines).not.toContain('b.ts');
+    } finally {
+      scrolls.mockRestore();
+    }
+  });
+
+  it('says so when every file is hidden, and offers the way back', async () => {
+    const onShowAllFiles = vi.fn();
+    mount(FILES, { hidden: new Set(['a.ts', 'b.ts', 'c.ts']), onShowAllFiles });
+
+    // Not "No changed files", which would be a claim about the pull request
+    // rather than about what the reviewer asked to be shown.
+    expect(screen.getByText('Your filters hide all 3 files.')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all files' }));
+    expect(onShowAllFiles).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('DiffColumn, folding generated files', () => {
   const HIDING = { hideGenerated: true };
 

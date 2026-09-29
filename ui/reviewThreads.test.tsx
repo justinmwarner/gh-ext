@@ -20,6 +20,7 @@ import {
   sourceLines,
   threadGroups,
   threadPosition,
+  threadStep,
 } from './reviewThreads';
 import { reviewComment, reviewThread } from './prPayload.fixture';
 
@@ -631,5 +632,67 @@ describe('orderedThreads', () => {
     );
 
     expect(ordered.map(({ thread }) => thread.id)).toEqual(['PRRT_a.ts:2', 'stale']);
+  });
+});
+
+/**
+ * Where `n` and `p` go from the focused thread.
+ *
+ * The walk starts from the focused thread's place in the *whole* order, and
+ * only then skips what does not qualify. Filtering first and looking the
+ * focused thread up afterwards is the bug this exists for: a focused thread
+ * that stopped qualifying — resolved under `N`, or in a file the filters have
+ * since hidden — is not in the filtered list, so the lookup found nothing and
+ * the next press started again from the top of the pull request.
+ */
+describe('threadStep', () => {
+  const ordered = orderedThreads(
+    [
+      reviewThread({ path: 'a.ts', line: 1 }),
+      reviewThread({ path: 'b.ts', line: 1 }),
+      reviewThread({ path: 'c.ts', line: 1 }),
+      reviewThread({ path: 'd.ts', line: 1 }),
+    ],
+    ['a.ts', 'b.ts', 'c.ts', 'd.ts'],
+  );
+  const every = () => true;
+  const id = (entry: { thread: { id: string } } | undefined) => entry?.thread.id;
+
+  it('goes to the first or the last with nothing focused', () => {
+    expect(id(threadStep(ordered, null, 1, every))).toBe('PRRT_a.ts:1');
+    expect(id(threadStep(ordered, null, -1, every))).toBe('PRRT_d.ts:1');
+  });
+
+  it('goes to the next and the previous', () => {
+    expect(id(threadStep(ordered, 'PRRT_b.ts:1', 1, every))).toBe('PRRT_c.ts:1');
+    expect(id(threadStep(ordered, 'PRRT_b.ts:1', -1, every))).toBe('PRRT_a.ts:1');
+  });
+
+  it('stays at the end rather than wrapping', () => {
+    expect(id(threadStep(ordered, 'PRRT_d.ts:1', 1, every))).toBe('PRRT_d.ts:1');
+  });
+
+  it('steps on from a focused thread that no longer qualifies, rather than starting over', () => {
+    // `b.ts` has been hidden since its thread was focused.
+    const shown = (entry: { thread: { path: string } }) => entry.thread.path !== 'b.ts';
+
+    expect(id(threadStep(ordered, 'PRRT_b.ts:1', 1, shown))).toBe('PRRT_c.ts:1');
+    expect(id(threadStep(ordered, 'PRRT_b.ts:1', -1, shown))).toBe('PRRT_a.ts:1');
+  });
+
+  it('skips what does not qualify on the way', () => {
+    const notC = (entry: { thread: { path: string } }) => entry.thread.path !== 'c.ts';
+
+    expect(id(threadStep(ordered, 'PRRT_b.ts:1', 1, notC))).toBe('PRRT_d.ts:1');
+  });
+
+  it('falls back to the nearest that qualifies when nothing further does', () => {
+    const onlyA = (entry: { thread: { path: string } }) => entry.thread.path === 'a.ts';
+
+    expect(id(threadStep(ordered, 'PRRT_c.ts:1', 1, onlyA))).toBe('PRRT_a.ts:1');
+  });
+
+  it('goes nowhere when nothing qualifies', () => {
+    expect(threadStep(ordered, 'PRRT_a.ts:1', 1, () => false)).toBeUndefined();
   });
 });

@@ -80,6 +80,16 @@ export interface ScopeBarProps {
   onOpenPicker: () => void;
   onSinceReview: () => void;
   onShowAll: () => void;
+  /**
+   * How many files there are before the file filters, while one is on.
+   *
+   * Absent or null while nothing is filtered, which is how the sentence knows
+   * to count rather than to compare. `changed` is already what the filters
+   * left — it describes the column — so this is the other half of "12 of 40".
+   */
+  filteredFrom?: number | null;
+  /** Open the filter menu, from the sentence that says a filter is on. */
+  onOpenFilters?: () => void;
 }
 
 /**
@@ -142,9 +152,15 @@ export function ScopeBar({
   onOpenPicker,
   onSinceReview,
   onShowAll,
+  filteredFrom = null,
+  onOpenFilters,
 }: ScopeBarProps) {
   const failed = requestError !== null;
   const narrowing = showing(scope, busy, failed);
+  const filtered = filteredFrom !== null;
+  const counted = `${changed.files} ${changed.files === 1 ? 'file' : 'files'} changed`;
+  const whole = filteredFrom ?? changed.files;
+  const shownOf = `Showing ${changed.files} of ${whole} ${whole === 1 ? 'file' : 'files'}`;
 
   const items: MenuItem[] = [
     {
@@ -179,7 +195,17 @@ export function ScopeBar({
           shifts the tabs right and costs nothing; growing between them would
           move the numbers under the reviewer's pointer. */}
       <p className="scope-status">
-        {`${changed.files} ${changed.files === 1 ? 'file' : 'files'} changed`}
+        {filtered ? (
+          // In place of the count rather than beside it: "12 files changed"
+          // while forty did would be the one false sentence on this row. A
+          // button for the reason the scope's is — the sentence names what the
+          // filters are doing, and pressing it goes to where they are set.
+          <button type="button" className="scope-showing" onClick={onOpenFilters}>
+            {shownOf}
+          </button>
+        ) : (
+          counted
+        )}
         <span className="scope-counts">
           <span className="additions">{`+${changed.additions}`}</span>
           {SEPARATOR}

@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type HunkStop,
+  carryCursor,
   fileRun,
   positionInFile,
   remainingInFile,
@@ -105,5 +106,26 @@ describe('remainingInFile', () => {
 
   it('never goes negative, and knows nothing of a file with no stops', () => {
     expect(remainingInFile(STOPS, 'never.ts', 0)).toBe(0);
+  });
+});
+
+describe('carryCursor', () => {
+  it('finds the same section when a file ahead of it leaves the list', () => {
+    const without = STOPS.filter((stop) => stop.path !== 'a.ts');
+    expect(carryCursor(STOPS, without, 3)).toBe(0);
+  });
+
+  it('finds the same section when a file ahead of it comes back', () => {
+    const without = STOPS.filter((stop) => stop.path !== 'a.ts');
+    expect(carryCursor(without, STOPS, 0)).toBe(3);
+  });
+
+  it('knows nothing when the section itself left', () => {
+    const without = STOPS.filter((stop) => stop.path !== 'a.ts');
+    expect(carryCursor(STOPS, without, 1)).toBe(-1);
+  });
+
+  it('knows nothing when it knew nothing', () => {
+    expect(carryCursor(STOPS, STOPS, -1)).toBe(-1);
   });
 });

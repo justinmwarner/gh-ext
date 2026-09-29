@@ -90,7 +90,33 @@ export interface FindPanelProps {
   onGoTo: (target: FindTarget) => void;
   /** Escape on an already-empty query. Hands the rail back to the file tree. */
   onClose: () => void;
+  /**
+   * Paths the file filters are keeping out of the review, and so out of the
+   * search.
+   *
+   * A set beside the whole list rather than a shorter list, for the reason the
+   * column takes one: the patches are walked once, against `files`, and a list
+   * that changed every time a filter did — which under "Hide viewed files" is
+   * every time the reviewer moves — would re-walk every patch in the pull
+   * request to search fewer of them. Said on screen whenever it is not empty:
+   * a search that came back with nothing in a narrowed review has not looked
+   * everywhere, and "No results" standing alone would claim that it had.
+   */
+  hidden?: ReadonlySet<string>;
   ref?: React.Ref<FindPanelHandle>;
+}
+
+/** Nothing hidden, shared so an unfiltered panel builds no set per render. */
+const NOTHING_HIDDEN: ReadonlySet<string> = new Set();
+
+/**
+ * The files a search is not looking at, in words, or nothing.
+ *
+ * Shared with the file jump, so the two searches say it the same way.
+ */
+export function unsearchedNote(count: number): string {
+  if (count <= 0) return '';
+  return `Not searching ${count} ${count === 1 ? 'file' : 'files'} your filters hide`;
 }
 
 /** No folds, shared so a new result list does not allocate one per keystroke. */
@@ -135,9 +161,11 @@ export function FindPanel({
   onState,
   onGoTo,
   onClose,
+  hidden = NOTHING_HIDDEN,
   ref,
 }: FindPanelProps) {
   const [folded, setFolded] = useState<ReadonlySet<string>>(NOTHING_FOLDED);
+  const skipped = unsearchedNote(hidden.size);
   const input = useRef<HTMLInputElement>(null);
   const tree = useRef<SearchTreeHandle>(null);
 
@@ -185,9 +213,16 @@ export function FindPanel({
     [state.query, state.caseSensitive, state.wholeWord, state.regex],
   );
 
+  // The walk above is kept whole; only what is searched is narrowed, and that
+  // is a filter over files already parsed.
+  const searched = useMemo(
+    () => (hidden.size === 0 ? parsed : parsed.filter((file) => !hidden.has(file.path))),
+    [parsed, hidden],
+  );
+
   const matches = useMemo(
-    () => searchParsed(parsed, matcher, { includeContext: true, limit: LIMIT }),
-    [parsed, matcher],
+    () => searchParsed(searched, matcher, { includeContext: true, limit: LIMIT }),
+    [searched, matcher],
   );
 
   const rows = useMemo(() => searchRows(matches, folded), [matches, folded]);
@@ -299,6 +334,13 @@ export function FindPanel({
           <p className="filetree-count" role="status">
             {said}
           </p>
+        )}
+
+        {skipped !== '' && (
+          // Not a live region. It moves when the filters do, not as the
+          // reviewer types, and announcing it on every keystroke beside the
+          // count above would be two voices talking over each other.
+          <p className="filetree-count">{skipped}</p>
         )}
       </div>
 

@@ -132,6 +132,44 @@ describe('what it says is on screen', () => {
     expect(props.onOpenPicker).toHaveBeenCalledOnce();
   });
 
+  it('says how many files are showing while a filter hides some', () => {
+    // "12 files changed" would be false while forty did: the filter decided
+    // what is on screen, and the sentence has to say so rather than count it.
+    mount({ changed: { files: 12, additions: 40, deletions: 9 }, filteredFrom: 40 });
+
+    expect(status()).toContain('Showing 12 of 40 files');
+    expect(status()).not.toContain('files changed');
+    expect(status()).toContain('+40');
+  });
+
+  it('opens the filters when that sentence is pressed', async () => {
+    const onOpenFilters = vi.fn();
+    mount({ changed: { files: 12, additions: 40, deletions: 9 }, filteredFrom: 40, onOpenFilters });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Showing 12 of 40 files' }));
+
+    expect(onOpenFilters).toHaveBeenCalledOnce();
+  });
+
+  it('counts the whole in the singular when there is one file', () => {
+    mount({ changed: { files: 1, additions: 1, deletions: 0 }, filteredFrom: 1 });
+
+    expect(status()).toContain('Showing 1 of 1 file');
+    expect(status()).not.toContain('1 files');
+  });
+
+  it('says both when a filter and a commit are narrowing the column', () => {
+    mount({
+      scope: NARROWED,
+      chosen: { kind: 'commits', from: COMMITS[0]!.oid, to: COMMITS[0]!.oid },
+      changed: { files: 2, additions: 4, deletions: 1 },
+      filteredFrom: 3,
+    });
+
+    expect(status()).toContain('Showing 2 of 3 files');
+    expect(status()).toContain('commit 1111111');
+  });
+
   it('leaves the busy line as text, since there is nothing yet to list', async () => {
     mount({ busy: true, scope: NARROWED });
 

@@ -440,3 +440,38 @@ export const CONTRIBUTED_REPOS_QUERY = `query ContributedRepos {
   }
 }
 `;
+
+/**
+ * Which of the repository owner's teams the reviewer is on, for reading
+ * CODEOWNERS.
+ *
+ * `userLogins`, which lists the teams those users are members of, and the
+ * login comes from `VIEWER_QUERY` first. It used to be one request, filtered
+ * by `role` — "whether the viewer is an admin or member on team" — and that
+ * was two mistakes waiting. An organization owner has admin rights on every
+ * team, so `role: ADMIN` plausibly lists all of them, and "only files you own"
+ * would quietly include every team's files for exactly the people most likely
+ * to be owners in a small organization. And with the login in the same
+ * document, a token GitHub refuses teams to outright — `data: null` — lost the
+ * login as well, so the page could not even fall back to matching it.
+ *
+ * Each team's ancestors too. A member of a child team counts as a member of
+ * its parent for ownership, and CODEOWNERS files routinely name the parent.
+ * `totalCount` so that a reviewer on more than a hundred teams is told the
+ * list was cut short rather than matched against part of it in silence.
+ *
+ * A person's repository has no organization, and GitHub says so with
+ * `organization: null` and a NOT_FOUND at that path rather than an empty list —
+ * which is an answer ("there are no teams to be on"), not a refusal. Executed
+ * live on 2026-09-28 against an organization and against a user; see section 10
+ * of `docs/reference/github-review-api.md`.
+ */
+export const VIEWER_TEAMS_QUERY = `query ViewerTeams($owner: String!, $login: String!) {
+  organization(login: $owner) {
+    teams(first: 100, userLogins: [$login]) {
+      totalCount
+      nodes { slug ancestors(first: 10) { nodes { slug } } }
+    }
+  }
+}
+`;

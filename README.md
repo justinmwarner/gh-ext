@@ -104,6 +104,17 @@ complete list. Missing either one is not fatal — GitHub refuses those nodes
 individually and the review page renders, with the top bar naming what it could
 not show — but the checks will be incomplete or absent until it is granted.
 
+One more is optional, and only one filter reads it:
+
+| Permission | Access | Why |
+|---|---|---|
+| Members (organization) | Read | "Show only files you own" counts the CODEOWNERS teams you are on |
+
+Without it, that filter matches CODEOWNERS lines naming you by login and says
+so on its row ("Matching @you only"); files your team owns are not counted. The
+permission is an organization one, so it can only be granted on a token whose
+resource owner is that organization.
+
 **The token is stored per machine and is not synced.** That is deliberate —
 `chrome.storage.sync` would replicate a credential across every browser signed
 into your Google account. Set a token once per machine.
@@ -291,4 +302,10 @@ and in [the privacy policy](store/PRIVACY.md).
   is built out of whole blocks so that a comment can be anchored to one, and
   reaching inside a block to place a picture within it is the DOM surgery that
   arrangement exists to avoid.
+- "Show only files you own" reads CODEOWNERS at the pull request's base commit
+  and matches its lines against your login and your teams. An owner written as
+  an email address is never matched, because nothing the token can see says
+  which addresses are yours. A CODEOWNERS file over a megabyte is not read at
+  all — GitHub's own limit is three — and the filter says so rather than
+  guessing.
 - github.com only. GitHub Enterprise is a base-URL abstraction away.

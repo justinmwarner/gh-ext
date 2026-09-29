@@ -415,6 +415,45 @@ export function orderedThreads(
 }
 
 /**
+ * Where `n` (`1`) or `p` (`-1`) goes from the focused thread.
+ *
+ * The walk starts from the focused thread's place in the whole order, and only
+ * then passes over what `eligible` refuses. The other way round — filter, then
+ * look the focused thread up — loses its place the moment the focused thread
+ * stops qualifying: resolved while `N` is walking unresolved ones, or in a file
+ * the filters have since hidden. It is not in the filtered list, the lookup
+ * finds nothing, and the next press starts again from the top of the pull
+ * request.
+ *
+ * Stops at the ends rather than wrapping, as the file keys do: with nothing
+ * further that way, the answer is the nearest stop the other way, which is the
+ * focused thread itself whenever it still qualifies.
+ */
+export function threadStep<T extends { thread: ReviewThread }>(
+  ordered: readonly T[],
+  focus: string | null,
+  direction: 1 | -1,
+  eligible: (entry: T) => boolean,
+): T | undefined {
+  const at = focus === null ? -1 : ordered.findIndex(({ thread }) => thread.id === focus);
+
+  if (at === -1) {
+    const stops = ordered.filter(eligible);
+    return direction > 0 ? stops[0] : stops[stops.length - 1];
+  }
+
+  for (let next = at + direction; next >= 0 && next < ordered.length; next += direction) {
+    const entry = ordered[next];
+    if (entry !== undefined && eligible(entry)) return entry;
+  }
+  for (let back = at; back >= 0 && back < ordered.length; back -= direction) {
+    const entry = ordered[back];
+    if (entry !== undefined && eligible(entry)) return entry;
+  }
+  return undefined;
+}
+
+/**
  * One thread as the Conversations view lists it.
  *
  * The opening comment in full rather than a clipped line: the view has the

@@ -855,3 +855,86 @@ attempting to fetch`, `Load failed`). It is indistinguishable by type from an
 ordinary programming `TypeError`, so both the type *and* the message are
 checked before calling it a network problem. Getting this wrong tells someone
 their network is down over a bug in the extension.
+
+## 10. Who the viewer is, for CODEOWNERS
+
+"Show only files you own" needs two things GitHub will not put together for it.
+`PullRequestChangedFile` carries no owner, and a review request's `asCodeOwner`
+says the viewer was asked, not for which files. So the page reads CODEOWNERS
+itself (through `get-blob`, at `baseRefOid`, in GitHub's order: `.github/`, the
+root, `docs/`, first found) and asks GitHub only who the viewer is.
+
+That is two requests in the worker's `getViewerTeams`: the login through the
+existing `query { viewer { login } }`, then `VIEWER_TEAMS_QUERY` in
+`lib/github/queries.ts`. Executed live on 2026-09-28:
+
+```graphql
+query ViewerTeams($owner: String!, $login: String!) {
+  organization(login: $owner) {
+    teams(first: 100, userLogins: [$login]) {
+      totalCount
+      nodes { slug ancestors(first: 10) { nodes { slug } } }
+    }
+  }
+}
+```
+
+### Why two requests, and why `userLogins` rather than `role`
+
+`Organization.teams` also takes `role: TeamRole` (`ADMIN | MEMBER`), described
+as "filters teams according to whether the viewer is an admin or member on
+team". That filters by the *viewer*, so it needs no login and the whole lookup
+could be one request — and the first version was exactly that. It was dropped
+for two reasons:
+
+- An organization owner has admin rights on every team, so `role: ADMIN`
+  plausibly lists all of them. Ownership would then quietly include every
+  team's files for the people most likely to be owners of a small
+  organization. Neither role's behaviour could be observed here (the only
+  organization available has no teams), so the ambiguity was removed rather
+  than guessed at. `userLogins` — "user logins to filter by" — is membership.
+- With the login in the same document as the teams, a token GitHub refuses the
+  teams to outright can come back with `data: null`, and the login is lost with
+  it. Asked separately, a failed teams request is caught in the worker
+  (`GraphQLError`) and read as `teams: null` — "matching your login only" —
+  while a rate limit or a rejected token still fails the whole lookup.
+
+`ancestors` is asked for because a member of a child team inherits the parent's
+access, and a CODEOWNERS file names whichever team its author thought of — often
+the parent. `totalCount` is asked for so that a list cut at a hundred says so:
+`truncated` on the reply, and "from the first 100 GitHub listed" on the row.
+
+### A person's repository is `NOT_FOUND` at `organization`, not an empty list
+
+Against an organization the account belongs to:
+
+```json
+{"data":{"organization":{"teams":{"totalCount":0,"nodes":[]}}}}
+```
+
+Against a user login:
+
+```json
+{"data":{"organization":null},
+ "errors":[{"type":"NOT_FOUND","path":["organization"],
+            "message":"Could not resolve to an Organization with the login of '…'."}]}
+```
+
+So the teams request is made with `onPartial`, and `readViewerTeams` in
+`lib/github/teams.ts` tells three answers apart: `NOT_FOUND` at `organization`
+is "no teams to be on" (`teams: []`); any other refusal under `organization`, or
+a reply without the list, is "GitHub would not say" (`teams: null`); anything
+else is the list. The page says which it is on the menu row, including
+"Matching @login only" when the teams could not be read.
+
+### Not verified here: a fine-grained token without Members access
+
+The queries above were run with an OAuth token carrying `read:org`. A
+fine-grained token needs **Organization → Members: Read** to list teams, and
+this reference has not captured what GitHub answers when the grant is missing.
+Every refusal shape reads as `teams: null` — a `FORBIDDEN` beside the data, or
+`data: null` altogether — so the one case that would slip through is GitHub
+answering with an empty list and no error. Then the row would say "Matching
+@login" rather than "Matching @login only", and ownership through a team would
+be missed without the sentence saying why. Capture the real response the first
+time it is available, and update this.

@@ -7,10 +7,11 @@
  * somewhere else, and a keyboard that can walk the items without a pointer.
  */
 
-import { render, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { MenuButton, type MenuItem } from './MenuButton';
+import { MenuButton, type MenuGroup, type MenuItem } from './MenuButton';
 
 const trigger = () => screen.getByRole('button', { name: 'Commit options' });
 const open = () => userEvent.click(trigger());
@@ -192,5 +193,170 @@ describe('the keyboard', () => {
     expect(
       screen.getAllByRole('menuitem').map((item) => item.getAttribute('tabindex')),
     ).toEqual(['0', '-1']);
+  });
+
+  it('shuts when Tab takes the keyboard out of it', async () => {
+    // Escape is read on the menu, so once focus has left, nothing but a click
+    // could close it — and it would sit over whatever the reviewer went to.
+    render(
+      <>
+        <MenuButton label="Commit options" items={[{ id: 'a', label: 'Choose commits…', onSelect: chose() }]} />
+        <button type="button">Next thing</button>
+      </>,
+    );
+
+    await open();
+    await userEvent.tab();
+
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+});
+
+describe('telling the caller', () => {
+  it('says when it opens and when it shuts', async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <MenuButton
+        label="Commit options"
+        items={[{ id: 'a', label: 'Choose commits…', onSelect: chose() }]}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    await open();
+    await userEvent.keyboard('{Escape}');
+
+    expect(onOpenChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('says it has shut if it goes away while open', async () => {
+    const onOpenChange = vi.fn();
+    const view = render(
+      <MenuButton
+        label="Commit options"
+        items={[{ id: 'a', label: 'Choose commits…', onSelect: chose() }]}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    await open();
+    view.unmount();
+
+    expect(onOpenChange.mock.calls).toEqual([[true], [false]]);
+  });
+});
+
+/**
+ * A menu of several toggles: the file filters.
+ *
+ * The commit menu is a handful of commands, each of which is the whole reason
+ * for opening it. A filter menu is the opposite — a reviewer opens it to set
+ * three things — so what it needs is sections a reader can find their way
+ * around, a count on each row that decides whether to untick it, and boxes that
+ * do not throw the menu away on every press.
+ */
+describe('a menu of sections', () => {
+  const filters = () => screen.getByRole('button', { name: 'File filters' });
+
+  function mountGroups(groups: readonly MenuGroup[], icon?: ReactElement) {
+    return render(<MenuButton label="File filters" groups={groups} icon={icon} />);
+  }
+
+  const GROUPS: readonly MenuGroup[] = [
+    {
+      id: 'kind',
+      label: 'Change type',
+      items: [
+        { id: 'added', label: 'Added', detail: '4', checked: true, keepOpen: true, onSelect: chose() },
+        { id: 'deleted', label: 'Deleted', detail: '12', checked: true, keepOpen: true, onSelect: chose() },
+      ],
+    },
+    {
+      id: 'type',
+      label: 'File type',
+      items: [{ id: '.ts', label: '.ts', detail: '30', checked: true, keepOpen: true, onSelect: chose() }],
+    },
+  ];
+
+  it('names each section by its heading', async () => {
+    mountGroups(GROUPS);
+    await userEvent.click(filters());
+
+    const kinds = screen.getByRole('group', { name: 'Change type' });
+    expect(within(kinds).getAllByRole('menuitemcheckbox')).toHaveLength(2);
+    expect(screen.getByRole('group', { name: 'File type' })).toBeDefined();
+  });
+
+  it('walks from one section into the next with the arrow keys', async () => {
+    mountGroups(GROUPS);
+    await userEvent.click(filters());
+
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}');
+
+    expect(document.activeElement?.textContent).toContain('.ts');
+  });
+
+  it('keeps the menu open, and the keyboard where it was, for a box that asks to', async () => {
+    const onSelect = vi.fn();
+    mountGroups([
+      {
+        id: 'kind',
+        items: [
+          { id: 'added', label: 'Added', checked: true, keepOpen: true, onSelect: chose() },
+          { id: 'deleted', label: 'Deleted', checked: true, keepOpen: true, onSelect },
+        ],
+      },
+    ]);
+    await userEvent.click(filters());
+    await userEvent.keyboard('{ArrowDown}');
+
+    await userEvent.keyboard('{Enter}');
+
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).not.toBeNull();
+    expect(document.activeElement?.textContent).toContain('Deleted');
+  });
+
+  it('says how many files a row stands for beside its name', async () => {
+    mountGroups(GROUPS);
+    await userEvent.click(filters());
+
+    const deleted = screen.getByRole('menuitemcheckbox', { name: /Deleted/ });
+    expect(deleted.textContent).toContain('12');
+  });
+
+  it('puts a row’s note under it, and describes the row by it', async () => {
+    // Why a row is off, or what it could not check, in words on the row
+    // itself — a title is a tooltip, and a tooltip is not on screen until the
+    // pointer finds it.
+    mountGroups([
+      {
+        id: 'owners',
+        items: [
+          {
+            id: 'owned',
+            label: 'Show only files you own',
+            checked: false,
+            disabled: true,
+            note: 'This repository has no CODEOWNERS file.',
+            onSelect: chose(),
+          },
+        ],
+      },
+    ]);
+    await userEvent.click(filters());
+
+    const owned = screen.getByRole('menuitemcheckbox', { name: /Show only files you own/ });
+    const describedBy = owned.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(document.getElementById(describedBy ?? '')?.textContent).toBe(
+      'This repository has no CODEOWNERS file.',
+    );
+  });
+
+  it('draws the icon it is given where the kebab would be', async () => {
+    mountGroups(GROUPS, <svg data-testid="funnel" />);
+
+    expect(within(filters()).getByTestId('funnel')).toBeDefined();
   });
 });

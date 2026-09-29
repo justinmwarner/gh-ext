@@ -23,7 +23,7 @@
  * is `lib/keymap.ts`; this is only what happens next.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ShortcutAction } from '@/lib/keymap';
 import { DASHBOARD_HASH } from '@/lib/github/pr-url';
 import type { PrPayload } from '@/lib/messages';
@@ -33,6 +33,7 @@ import {
   WHOLE_DIFF,
   resolveScope,
 } from '@/lib/review/diffScope';
+import { type FileFilters, NO_FILTERS } from '@/lib/review/fileFilters';
 import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
 import type { DiffColumnHandle, DiffStyle, LineJump, ThreadJump } from './DiffColumn';
@@ -58,11 +59,13 @@ import type { BlobRefs } from './blobLoader';
 import { prBaseSha, prPermalink, prViewerIsAuthor, prViewerReviewedAt } from './prNode';
 import { type ReviewFile, changeTotals, reviewFiles } from './reviewFiles';
 import { ReviewSessionProvider, useReviewSession } from './reviewSession';
-import { orderedThreads } from './reviewThreads';
+import { orderedThreads, threadStep } from './reviewThreads';
 import { ShortcutTargetsProvider, useShortcutTargets } from './shortcutTargets';
 import { DiffSkeleton } from './DiffSkeleton';
 import { useCompareDiff } from './useCompareDiff';
 import { useHeadMoved } from './useHeadMoved';
+import { ownershipNote, ownershipRefused, useCodeOwners } from './useCodeOwners';
+import { useFileFilter } from './useFileFilter';
 import { useKeymap } from './useKeymap';
 import { useGitAttributes } from './useGitAttributes';
 import { useSettings } from './useSettings';
@@ -163,18 +166,69 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const diffStyle: DiffStyle = settings.splitView ? 'split' : 'unified';
 
   /**
+   * The file filters: what the reviewer asked this review to leave out.
+   *
+   * Here rather than in `FilesView`, for two reasons. Everything that walks the
+   * files reads them — the column, the tree, `j`/`k`, `n`/`p`, `Mod+K`, the bar
+   * above the diff — and `FilesView` is unmounted while a commit comparison
+   * loads, which would throw them away on every press of a commit tab. Never
+   * stored: see `FileFilters`.
+   */
+  const [filters, setFilters] = useState<FileFilters>(NO_FILTERS);
+
+  /**
    * What the repository declares about its own generated files.
    *
-   * Only fetched while the setting that consults it is on — a reviewer who has
-   * not asked for generated files to be folded should not have this extension
-   * reading extra files out of their repositories. `useGitAttributes` says why
-   * it is the root file and no other.
+   * Only fetched while something that consults it is on — the setting that
+   * folds generated files, or the filter that hides them. A reviewer who has
+   * asked for neither should not have this extension reading extra files out
+   * of their repositories. `useGitAttributes` says why it is the root file and
+   * no other.
    */
   const gitAttributes = useGitAttributes(
     payload.ref,
     payload.headSha,
-    settings.hideGenerated,
+    settings.hideGenerated || filters.hideGenerated,
   );
+
+  /**
+   * Who owns what, for "Show only files you own".
+   *
+   * At the pull request's own base rather than a narrowed comparison's, because
+   * that is the file GitHub applies to the pull request. Asked only once the
+   * filter is turned on; `useCodeOwners` says why, and why it then keeps the
+   * answer.
+   */
+  const owners = useCodeOwners(payload.ref, prBaseSha(payload.pullRequest), filters.onlyOwned);
+  const ownership = useMemo(
+    () => ownershipNote({ ownership: owners.ownership }),
+    [owners.ownership],
+  );
+
+  /**
+   * A filter asked for something the repository does not have, or that could
+   * not be read this time.
+   *
+   * Left on, "only files you own" would hide every file on the strength of
+   * nothing and call that the answer. Turned off, the row it lives on keeps
+   * the sentence saying why — the hook keeps its answer after the filter goes
+   * — so the box unticking itself is explained where the reviewer is looking.
+   *
+   * Twice, and both are needed. `effective` is what every surface reads, and
+   * it is derived during render so that no frame draws the funnel on over a
+   * "Showing 40 of 40 files" the filter was never going to change; the effect
+   * then puts the stored choice in step, so that turning the filter on again
+   * is a press on an unticked box — which is what asks again after a failure.
+   */
+  const refused = ownershipRefused(owners.state);
+  const effective = useMemo(
+    () => (refused && filters.onlyOwned ? { ...filters, onlyOwned: false } : filters),
+    [refused, filters],
+  );
+  useEffect(() => {
+    if (!filters.onlyOwned || !refused) return;
+    setFilters((current) => ({ ...current, onlyOwned: false }));
+  }, [filters.onlyOwned, refused]);
 
   const column = useRef<DiffColumnHandle>(null);
   const filesView = useRef<FilesViewHandle>(null);
@@ -266,6 +320,45 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   }, []);
 
   /**
+   * Where a filter sends the review when it hides the file being read.
+   *
+   * A command, because it is one: the column has to scroll to the file it is
+   * given, which is what `fromCommand` asks of it. Nowhere at all when the
+   * filters hide every file — a current file would be kept on screen by the
+   * very rule that keeps the reviewer's file in view, and the column would be
+   * showing one file under a sentence saying it was showing none.
+   */
+  /** The file a composer is open on, which no filter may take out. */
+  const [composing, setComposing] = useState<string | null>(null);
+
+  const moveTo = useCallback((path: string | null) => {
+    if (path === null) setCurrent(NO_FILE);
+    else setCurrent((state) => fromCommand(state, path));
+  }, []);
+
+  const filter = useFileFilter({
+    files,
+    filters: effective,
+    setFilters,
+    current,
+    moveTo,
+    gitAttributes,
+    generatedPatterns: settings.generatedPatterns,
+    owned: owners.owned,
+    composing,
+  });
+  /**
+   * The files the review is walking: `files` less what the filters hide.
+   *
+   * What `j`/`k`, `Mod+K` and the bar above the diff all read. The column, the
+   * tree and the find panel are handed the whole list and `filter.hidden`
+   * beside it instead — see `FilesView` for why each needs the whole one — and
+   * `n`/`p` walk every thread in order and pass over the hidden ones by name,
+   * so they still know where the focused one was.
+   */
+  const shownFiles = filter.shown;
+
+  /**
    * Jumping to a thread, in two steps.
    *
    * The file first, through the same reducer the tree uses, so the column
@@ -284,6 +377,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     setJump((previous) => ({ threadId, token: (previous?.token ?? 0) + 1 }));
   }, []);
 
+  // Every file, hidden ones included. What orders the threads — `n`/`p` skip
+  // those in hidden files by name, and the Conversations view keeps them, in
+  // their place, saying why the column has no card for them.
   const paths = useMemo(() => files.map((file) => file.path), [files]);
 
   /**
@@ -309,8 +405,22 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
 
   // Read inside the keyboard handlers, which are rebuilt every render but are
   // installed once. Everything they need is here rather than closed over.
-  const latest = useRef({ files, paths, current, focusedThread, session });
-  latest.current = { files, paths, current, focusedThread, session };
+  const latest = useRef({
+    files: shownFiles,
+    paths,
+    current,
+    focusedThread,
+    session,
+    hidden: filter.hidden,
+  });
+  latest.current = {
+    files: shownFiles,
+    paths,
+    current,
+    focusedThread,
+    session,
+    hidden: filter.hidden,
+  };
 
   const moveFile = useCallback((direction: 1 | -1) => {
     const { files: list, current: at } = latest.current;
@@ -321,12 +431,18 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
 
   const moveThread = useCallback(
     (direction: 1 | -1, unresolvedOnly: boolean) => {
-      const { session: live, paths: order, focusedThread: focus } = latest.current;
-      const stops = orderedThreads(live.threads, order).filter(
-        ({ thread }) => !unresolvedOnly || !thread.isResolved,
+      const { session: live, paths: order, focusedThread: focus, hidden } = latest.current;
+      // Threads in a file the filters hide are skipped, as the file is by `j`:
+      // the review is walking what it is showing. The Conversations view still
+      // lists them, and following one from there is what brings the file back.
+      // From the focused thread's place in the whole order, so a focused thread
+      // that has since stopped qualifying is still where the walk starts.
+      const next = threadStep(
+        orderedThreads(live.threads, order),
+        focus,
+        direction,
+        ({ thread }) => (!unresolvedOnly || !thread.isResolved) && !hidden.has(thread.path),
       );
-      const from = stops.findIndex(({ thread }) => thread.id === focus);
-      const next = step(stops, from, direction);
       if (next === undefined) return;
       jumpToThread(next.thread.id, next.thread.path);
     },
@@ -498,8 +614,8 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
 
   // What the bar above the diff counts: the list the column is drawing, which
   // while a comparison is showing is that comparison rather than the pull
-  // request.
-  const changed = useMemo(() => changeTotals(files), [files]);
+  // request, and while a filter is on is what the filter left.
+  const changed = useMemo(() => changeTotals(shownFiles), [shownFiles]);
 
   return (
     <div className="shell" data-current-file={current.path ?? ''} data-view={view}>
@@ -555,6 +671,11 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
                 );
               }}
               onShowAll={() => setScope(WHOLE_DIFF)}
+              // Against the list on screen before the filters, which is the
+              // comparison's when one is showing: "2 of 3" means two of the
+              // three files in that commit, not two of the pull request's forty.
+              filteredFrom={filter.filtering ? files.length : null}
+              onOpenFilters={() => filesView.current?.openFilters()}
             />
 
             {awaitingDiff ? (
@@ -589,6 +710,14 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               generatedPatterns={settings.generatedPatterns}
               collapseTree={settings.collapseTree}
               gitAttributes={gitAttributes}
+              hidden={filter.hidden}
+              filters={effective}
+              facets={filter.facets}
+              onFilters={filter.change}
+              filtering={filter.filtering}
+              ownership={ownership}
+              onFiltersOpen={filter.menuOpen}
+              onComposing={setComposing}
               columnRef={column}
               ref={filesView}
               onFindResult={goToFindResult}
@@ -604,7 +733,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
             tabIndex={0}
             style={{ visibility: view === 'conversations' ? 'visible' : 'hidden' }}
           >
-            <ConversationsView paths={paths} onGoTo={jumpToThread} />
+            <ConversationsView paths={paths} hidden={filter.hidden} onGoTo={jumpToThread} />
           </div>
 
           <div
@@ -634,7 +763,8 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
       {overlay.kind === 'help' && <ShortcutHelp onClose={() => setOverlay(NO_OVERLAY)} />}
       {overlay.kind === 'file-jump' && (
         <SearchPanel
-          files={files}
+          files={shownFiles}
+          unsearched={filter.hidden.size}
           onChoose={goToResult}
           onClose={() => setOverlay(NO_OVERLAY)}
         />

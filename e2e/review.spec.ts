@@ -705,6 +705,105 @@ test('the tree filter narrows the rail and stays put while it scrolls', async ({
 });
 
 /**
+ * The filter menu narrows the column, and the line being read does not move.
+ *
+ * The one question jsdom cannot ask about filtering. A hidden file is taken out
+ * of the column's items — its card, its height, its sections — and every card
+ * below it would slide up by that much if the viewer did nothing about it.
+ * `CodeView` does do something about it: it anchors on the first element on
+ * screen that survives, before it reconciles, and puts that element back where
+ * it was. But only a viewer that is not torn down can, and only a layout engine
+ * can say whether the anchoring holds the reviewer's line to the pixel.
+ *
+ * `docs/` sorts above `src/`, so hiding Markdown takes two cards out from above
+ * the one being read, and ticking it back puts them there again.
+ */
+test('the filter menu narrows the column without moving the line being read', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const reading = 'src/app.ts';
+  await goToFile(page, reading);
+  const line = additionLineIn(page, reading);
+  await expect(line).toBeVisible();
+  // Past the arrival, so the journey that brought the card here is not still
+  // correcting it when the position is read.
+  await page.waitForTimeout(400);
+  const before = (await line.boundingBox())?.y;
+  expect(before).toBeDefined();
+
+  const funnel = page.getByRole('button', { name: 'File filters' });
+  const markdown = page.getByRole('menuitemcheckbox', { name: /^\.md/ });
+
+  await funnel.click();
+  await markdown.click();
+  await page.keyboard.press('Escape');
+
+  await expect(page.locator(`[data-file-card="${MARKDOWN_FILE}"]`)).toHaveCount(0);
+  await expect(page.locator(`.filetree-rows [data-path="${MARKDOWN_FILE}"]`)).toHaveCount(0);
+  await page.waitForTimeout(400);
+  expect(Math.abs(((await line.boundingBox())?.y ?? Number.NaN) - (before ?? 0))).toBeLessThan(2);
+  expect(await currentFile(page)).toBe(reading);
+
+  // And back, which puts two cards' height *above* the reader rather than
+  // taking it away.
+  await funnel.click();
+  await markdown.click();
+  await page.keyboard.press('Escape');
+
+  await expect(page.locator(`.filetree-rows [data-path="${MARKDOWN_FILE}"]`)).toHaveCount(1);
+  await page.waitForTimeout(400);
+  expect(Math.abs(((await line.boundingBox())?.y ?? Number.NaN) - (before ?? 0))).toBeLessThan(2);
+  expect(await currentFile(page)).toBe(reading);
+});
+
+/**
+ * Deleted files go away: from the tree, from the column, and from `j`.
+ *
+ * The case the feature was asked for by name, walked end to end in the build a
+ * reviewer runs — including the sentence above the diff, which is what stops a
+ * narrowed review being mistaken for the whole one.
+ */
+test('hiding deleted files takes them out of the tree, the column and the j walk', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  await page.getByRole('button', { name: 'File filters' }).click();
+  await page.getByRole('menuitemcheckbox', { name: /^Deleted/ }).click();
+  await page.keyboard.press('Escape');
+
+  await expect(page.locator(`.filetree-rows [data-path="${DELETED_FILE}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-file-card="${DELETED_FILE}"]`)).toHaveCount(0);
+  await expect(filesView(page).locator('.scope-status')).toContainText(
+    `Showing ${COLUMN_ORDER.length - 1} of ${COLUMN_ORDER.length} files`,
+  );
+
+  // `j` from the file before it lands on the file after it.
+  const at = COLUMN_ORDER.indexOf(DELETED_FILE);
+  await goToFile(page, columnAt(at - 1));
+  await page.locator('body').press('j');
+  await expect(page.locator('.shell')).toHaveAttribute('data-current-file', columnAt(at + 1));
+
+  // And the menu's own way back puts it everywhere again.
+  await page.getByRole('button', { name: 'File filters' }).click();
+  await page.getByRole('menuitem', { name: 'Show all files' }).click();
+  await expect(page.locator(`.filetree-rows [data-path="${DELETED_FILE}"]`)).toHaveCount(1);
+  await expect(filesView(page).locator('.scope-status')).toContainText(
+    `${COLUMN_ORDER.length} files changed`,
+  );
+});
+
+/**
  * What the page cannot vouch for, in the bar rather than under it.
  *
  * A fine-grained token that grants the repository but not `Checks` gets the

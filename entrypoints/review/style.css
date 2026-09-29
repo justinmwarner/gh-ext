@@ -680,8 +680,14 @@ button.scope-showing:hover {
   text-align: center;
 }
 
+/* Drawn, and not read: `aria-checked` already says the row is on, and without
+   the empty alternative after the slash Chrome puts the glyph into the row's
+   accessible name — a filter row announced itself as "check mark .md 2". The
+   first declaration is for an engine that does not parse the second, which
+   drops it as invalid and keeps drawing the tick. */
 .menu-item[aria-checked='true']::before {
   content: '\2713';
+  content: '\2713' / '';
 }
 
 .menu-item:hover,
@@ -696,6 +702,91 @@ button.scope-showing:hover {
 
 .menu-item[aria-disabled='true']:hover {
   background: none;
+}
+
+/* The name and, when there is one, the count after it. The count is pushed to
+   the far edge so a column of them reads as a column of figures. */
+.menu-item-label {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.menu-item-detail {
+  margin-left: auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+
+/* Under the name, in the label's column rather than under the tick, and
+   allowed to wrap: this is a sentence, and the row's `nowrap` is for names. */
+.menu-item-note {
+  grid-column: 2;
+  max-width: 260px;
+  font-size: 12px;
+  white-space: normal;
+  color: var(--fg-muted);
+}
+
+/* One hairline between sections, the grouping DESIGN.md prefers to any box. */
+.menu-group + .menu-group,
+.menu-item + .menu-group,
+.menu-group + .menu-item {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-default);
+}
+
+.menu-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A heading in the weight-first hierarchy, not an eyebrow: sentence case,
+   no tracking, muted, and aligned with the labels rather than the ticks. */
+.menu-heading {
+  padding: 6px 10px 2px 28px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/* On, as opposed to open or hovered. The rail tab's own treatment — a tint and
+   a border — so a pressed control in the rail looks like the other pressed
+   control in the rail, and the glyph inside turns solid, so the state is a
+   change of shape as well as of colour. */
+.menu-trigger[data-active='true'] {
+  color: var(--fg-default);
+  border-color: var(--border-default);
+  background: var(--canvas-subtle);
+}
+
+/* Still answering the pointer while on. The rule above outranks the plain
+   hover and open states, which left an on funnel looking the same whether it
+   was under the pointer, open, or neither. */
+.menu-trigger[data-active='true']:hover,
+.menu-trigger[data-active='true'][aria-expanded='true'] {
+  background: var(--neutral-hover);
+}
+
+/* Fixed to the window rather than hung under the host: `MenuButton` measures
+   where the trigger is and writes `top`, `left` and `max-height` before the
+   first paint. What is left for here is not having the anchored rule's `right`
+   stretch it, and scrolling when a long type list outgrows the window. */
+.menu[data-placement='escape'] {
+  position: fixed;
+  right: auto;
+  overflow-y: auto;
+}
+
+/* In the rail's filter row, beside the box, rather than in the scope bar's
+   grid — whose area and padding the base rule is written for. */
+.filter-menu-host {
+  grid-area: auto;
+  flex: 0 0 auto;
+  padding: 0;
 }
 
 /* --------------------------------------------------------- commit picker */
@@ -1116,6 +1207,18 @@ button.scope-showing:hover {
   padding-bottom: 6px;
 }
 
+/* The box and the funnel on one line: the two ways to narrow the tree, side by
+   side, with the box taking whatever the funnel leaves. */
+.filetree-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filetree-filter-row .filetree-search {
+  flex: 1 1 auto;
+}
+
 .filetree-search {
   min-width: 0;
   padding: 3px 8px;
@@ -1483,6 +1586,22 @@ button.scope-showing:hover {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* Every file filtered out. The sentence and the way back, stacked where the
+   first card would have been, and nothing else: an illustrated empty state is
+   exactly the genre PRODUCT.md rules out. */
+.column-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 16px;
+}
+
+.column-empty p {
+  margin: 0;
 }
 
 /* ------------------------------------------------- where the changes are */
@@ -3256,6 +3375,16 @@ button.scope-showing:hover {
   margin: 0;
   padding: 16px;
   color: var(--fg-muted);
+}
+
+/* The footnote to the file jump's results: what the filters kept out of it. A
+   hairline above, so it reads as about the list rather than as one more row. */
+.search-unsearched {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border-default);
 }
 
 /* ------------------------------------------- not posted yet

@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useModalFocus } from './useModalFocus';
 import { filterPaths } from '@/lib/review/search';
+import { unsearchedNote } from './FindPanel';
 import type { ReviewFile } from './reviewFiles';
 
 /** Where a chosen result sends the reviewer. */
@@ -37,6 +38,8 @@ export interface SearchPanelProps {
   files: readonly ReviewFile[];
   onChoose: (target: SearchTarget) => void;
   onClose: () => void;
+  /** How many files the file filters keep out of `files`. Said when not zero. */
+  unsearched?: number;
 }
 
 const TITLE = 'Jump to a file';
@@ -73,7 +76,8 @@ interface Row {
   end: number;
 }
 
-export function SearchPanel({ files, onChoose, onClose }: SearchPanelProps) {
+export function SearchPanel({ files, onChoose, onClose, unsearched = 0 }: SearchPanelProps) {
+  const skipped = unsearchedNote(unsearched);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -178,6 +182,10 @@ export function SearchPanel({ files, onChoose, onClose }: SearchPanelProps) {
             ))}
           </ul>
         )}
+
+        {/* Under the results rather than above them: the list is what the
+            reviewer came for, and this is the footnote that qualifies it. */}
+        {skipped !== '' && <p className="search-unsearched">{skipped}</p>}
       </div>
     </div>
   );

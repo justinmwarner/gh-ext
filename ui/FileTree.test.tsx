@@ -614,6 +614,127 @@ describe('filtering the tree', () => {
 });
 
 /**
+ * The tree under the filter menu.
+ *
+ * The menu's choices arrive as a set of hidden paths; which paths is
+ * `lib/review/fileFilters.ts`'s business and is tested there. What the tree
+ * owes them is to leave those rows out, to say so in the same line the box
+ * uses, and to count against the whole pull request rather than against what
+ * is left — "9 of 12" after hiding twenty-eight files would hide the fact that
+ * anything was hidden.
+ */
+describe('filtered by the menu', () => {
+  const filter = (): HTMLElement => screen.getByRole('searchbox', { name: /filter files/i });
+  const paths = (): (string | null)[] => rows().map((r) => r.getAttribute('data-path'));
+  const HIDING_BETA = new Set(['src/beta.ts']);
+
+  it('leaves out the files the filters hide, and a folder left holding none', () => {
+    mount({ hidden: new Set(['docs/readme.md']), menuFiltering: true });
+
+    expect(paths()).toEqual(['src/', 'src/app.ts', 'src/beta.ts', 'top.ts']);
+  });
+
+  it('counts what is left against every file in the pull request', () => {
+    mount({ hidden: HIDING_BETA, menuFiltering: true });
+
+    expect(screen.getByRole('status').textContent).toBe('3 of 4 files');
+  });
+
+  it('says so while a filter is on even if it happens to hide nothing', () => {
+    // The line is how a filter cannot be forgotten, and a filter that matched
+    // nothing on this pull request is still switched on.
+    mount({ hidden: new Set(), menuFiltering: true });
+
+    expect(screen.getByRole('status').textContent).toBe('4 of 4 files');
+  });
+
+  it('says the filters hide everything, rather than that nothing matched', () => {
+    mount({ hidden: new Set(FILES.map((f) => f.path)), menuFiltering: true });
+
+    expect(screen.queryAllByRole('treeitem')).toHaveLength(0);
+    expect(screen.getByRole('status').textContent).toBe('Your filters hide all 4 files');
+  });
+
+  it('narrows the box’s matches to what the filters left', async () => {
+    mount({ hidden: HIDING_BETA, menuFiltering: true });
+
+    await userEvent.type(filter(), 'src/');
+
+    expect(paths()).toEqual(['src/', 'src/app.ts']);
+    expect(screen.getByRole('status').textContent).toBe('1 of 4 files');
+  });
+
+  it('ticks a folder’s showing files and none of its hidden ones', async () => {
+    // A hidden file is one the reviewer has not been shown. Ticking its folder
+    // off is not a claim to have read it.
+    const { onSetViewed } = mount({ hidden: HIDING_BETA, menuFiltering: true });
+
+    await userEvent.click(check('src'));
+
+    expect(onSetViewed).toHaveBeenCalledWith(['src/app.ts'], true);
+  });
+
+  it('hands the keyboard to the next row when the one that has it leaves', async () => {
+    // A row the filters take away while it has focus takes the focus with it,
+    // to <body>, where the tree's own keys no longer reach. The next row down
+    // is where a reviewer walking the list would have gone anyway.
+    const onSelect = vi.fn();
+    const view = render(
+      <FileTree files={FILES} current={NO_FILE} onSelect={onSelect} menuFiltering />,
+    );
+    act(() => row('beta').focus());
+    expect(document.activeElement).toBe(row('beta'));
+
+    view.rerender(
+      <FileTree
+        files={FILES}
+        current={NO_FILE}
+        onSelect={onSelect}
+        hidden={new Set(['src/beta.ts'])}
+        menuFiltering
+      />,
+    );
+
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-path')).toBe('top.ts'));
+  });
+
+  it('leaves the keyboard alone when it had already gone elsewhere', () => {
+    const onSelect = vi.fn();
+    const view = render(
+      <>
+        <FileTree files={FILES} current={NO_FILE} onSelect={onSelect} menuFiltering />
+        <button type="button">Elsewhere</button>
+      </>,
+    );
+    act(() => row('beta').focus());
+    act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
+
+    view.rerender(
+      <>
+        <FileTree
+          files={FILES}
+          current={NO_FILE}
+          onSelect={onSelect}
+          hidden={new Set(['src/beta.ts'])}
+          menuFiltering
+        />
+        <button type="button">Elsewhere</button>
+      </>,
+    );
+
+    expect(document.activeElement?.textContent).toBe('Elsewhere');
+  });
+
+  it('draws the menu it is handed beside the box', () => {
+    mount({ filterMenu: <button type="button">File filters</button> });
+
+    expect(
+      within(filter().parentElement as HTMLElement).getByRole('button', { name: 'File filters' }),
+    ).toBeDefined();
+  });
+});
+
+/**
  * Opening the tree shut.
  *
  * For the monorepo case, where a hundred and fifty files across a deep tree

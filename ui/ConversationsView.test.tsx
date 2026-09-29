@@ -32,7 +32,11 @@ beforeEach(() => {
 
 function mount(
   threads: ReviewThread[],
-  options: { paths?: readonly string[]; onGoTo?: (id: string, path: string) => void } = {},
+  options: {
+    paths?: readonly string[];
+    hidden?: ReadonlySet<string>;
+    onGoTo?: (id: string, path: string) => void;
+  } = {},
 ) {
   const payload = prPayload({ threads });
   const onGoTo = options.onGoTo ?? vi.fn();
@@ -43,7 +47,11 @@ function mount(
       threads={payload.threads}
       drafts={new DraftStore(memoryStore())}
     >
-      <ConversationsView paths={options.paths ?? ['src/app.ts']} onGoTo={onGoTo} />
+      <ConversationsView
+        paths={options.paths ?? ['src/app.ts']}
+        hidden={options.hidden}
+        onGoTo={onGoTo}
+      />
     </ReviewSessionProvider>,
   );
   return { ...view, onGoTo };
@@ -190,6 +198,22 @@ describe('ConversationsView', () => {
     });
 
     expect(screen.getByText(/not in this diff/i)).toBeDefined();
+  });
+
+  it('says a file the filters hide is hidden, not missing, and still goes to it', async () => {
+    // "Not in this diff" would be false: the file is in it, and the reviewer
+    // took it out of view. Going to the thread is how it comes back — the
+    // review shows the file it is on whatever the filters say.
+    const { onGoTo } = mount([reviewThread({ id: 'T_hidden', path: 'lib/old.ts', line: 3 })], {
+      paths: ['lib/old.ts', 'src/app.ts'],
+      hidden: new Set(['lib/old.ts']),
+    });
+
+    expect(screen.getByText('In a file your filters hide')).toBeDefined();
+    expect(screen.queryByText(/not in this diff/i)).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: /go to/i }));
+    expect(onGoTo).toHaveBeenCalledWith('T_hidden', 'lib/old.ts');
   });
 
   it('renders a thread GitHub returned with no comments in it', () => {
