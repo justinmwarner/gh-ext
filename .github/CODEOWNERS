@@ -1,0 +1,13 @@
+# Who owns what, for the review page's "Show only files you own" filter.
+#
+# On the base branch because that is where GitHub reads it for a pull request,
+# and the review page reads it there too. Only the pull request's own author is
+# named, so nobody else is ever asked to review this branch.
+# diff-fixtures/README.md, "Filters", says what each line is for.
+
+/diff-fixtures/code/ @justinmwarner
+/diff-fixtures/filters/ @justinmwarner
+
+# The last line that matches a path wins, and a line that names nobody takes
+# its paths back from whoever an earlier line gave them to.
+/diff-fixtures/filters/moved/
