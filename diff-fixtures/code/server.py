@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class Review:
     id: str
     state: str
+    commit: str | None = None
 
 
 def submit(review: Review) -> bool:

@@ -1,4 +1,4 @@
-import { plural } from './strings';
+import { plural } from '../strings';
 
 export interface Route {
   path: string;

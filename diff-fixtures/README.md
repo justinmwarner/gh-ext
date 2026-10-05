@@ -44,6 +44,20 @@ useful and neither is a substitute for the other. `icon-tiny.svg` is added.
 | `array.json` | An element inserted mid-array, which shifts every index after it. |
 | `package-lock.json` | Long, generated, and not worth a reviewer's attention. Marked `linguist-generated`. |
 
+## Config — `config/`
+
+The formats that suffer a line diff worst, because in all of them the text and
+the meaning come apart. Each file is here for one specific disagreement between
+the two readings.
+
+| File | What it is there for |
+| --- | --- |
+| `deploy.yaml` | Reindented from two spaces to four throughout, and `replicas` goes 2 to 3. A line diff calls all 26 lines changed. The structural view has exactly one row to show, and the gap between those two answers is the whole argument for the mode. |
+| `workflow.yml` | A step inserted at the *head* of a list, which shifts every entry after it. Aligned rather than indexed, that is one insertion rather than a rewrite of the job. |
+| `Cargo.toml` | Two inline tables promoted to `[dependencies.serde]` and `[dependencies.tokio]` sections, plus one version bump. Nothing about the dependency graph moved except `tokio`, and every line says otherwise. It is also the file that explains why TOML has no formatted mode: those `#` lines do not survive a round trip through any TOML serializer worth depending on. |
+| `tsconfig.json` | Comments and a trailing comma — JSONC wearing a `.json` extension, which is what half the `.json` files in a TypeScript repository are. `JSON.parse` refuses it outright. |
+| `unparseable.yaml` | Valid on one side, broken on the other, on purpose. The question is whether the page names the syntax and the line or just shrugs. |
+
 ## Notebooks — `notebooks/`
 
 `analysis.ipynb` edits one cell, adds another, and changes the recorded
@@ -52,8 +66,17 @@ outputs can be shown as cells and outputs.
 
 ## Docs — `docs/`
 
-`guide.md` and `table.md`, for the rendered-versus-source question. Markdown is
-drawn as plain text everywhere in the review page today.
+`guide.md` and `table.md`, for the rendered-versus-source question.
+
+`guide.md` carries two Mermaid diagrams, and having two is the point. A drawn
+diagram carries no `<ins>` or `<del>`, and the version it replaced is not on
+screen beside it — so the rendered mode keeps the marked-up source under a
+diagram whose source moved and hides it under one that did not, and a file with
+only the second kind never exercises that decision. The flow under "Getting
+started" moves: one node is relabelled and two edges are added, deliberately
+rather than replacing the diagram outright, so the marks land *inside* the fence
+where the reconstruction has to strip them. The one under "Where a comment goes"
+is identical on both sides.
 
 ## Generated — `generated/`
 
@@ -63,9 +86,20 @@ drawn as plain text everywhere in the review page today.
 
 ## Binary — `binary/`
 
-`report.pdf` is a genuinely valid one-page PDF. `archive.zip` is a real
-archive. `font.woff2` is added and is deliberately *not* a real font — what
-matters is that it is recognised as binary and not rendered.
+`report.pdf` is a genuinely valid one-page PDF. `font.woff2` is added and is
+deliberately *not* a real font — what matters is that it is recognised as
+binary and not rendered.
+
+`archive.zip` is a real archive, and its two sides differ in every way a
+listing can report: `notes/added.md` arrives, `notes/removed.md` goes,
+`data/rows.csv` changes length, and `data/values.csv` and `docs/guide.txt` hold
+still. Two of the entries are traps. `readme.txt` changes without changing
+length, so anything comparing sizes calls it unchanged; and every entry is
+stamped with a different date on each side — which is what a rebuilt archive
+does — so anything comparing stored bytes calls `data/values.csv` changed when
+nothing in it moved. Only the CRC-32 in the central directory answers both.
+`docs/` is an explicit directory record, which has a name and no content and
+should not be listed as a file at all.
 
 ## Edges — `edges/`
 
@@ -88,6 +122,32 @@ The cases that break renderers rather than the ones that exercise them.
 
 `app.js`, `server.py`, `main.go` — ordinary diffs in three languages, for
 syntax highlighting and for a baseline to compare the smart renderers against.
+
+## Filters — `filters/`
+
+Something for each row of the review page's file filter menu — the funnel at
+the end of the file tree's box — that the rest of this directory does not
+already give it. The change types and most file types are everywhere above,
+and `generated/` and `data/package-lock.json` match the paths the page treats
+as generated without being told.
+
+| Filter | What to try it on |
+| --- | --- |
+| Hide files that were only moved | `moved/from/` → `moved/to/`: `strings.ts`, `colours.css` and `pixel.png` move unchanged and go. `router.ts` moves a level deeper *and* has its import fixed, so it stays. `edges/renamed-to.txt` is a pure rename as well. |
+| Hide generated files | `declared/client.ts` is generated only because the root `.gitattributes` says so; no path rule matches it. `exempt.pb.go` matches the `*.pb.go` rule and stays, because that same file marks it `-linguist-generated`. The page reads the root `.gitattributes` only, so `diff-fixtures/.gitattributes` decides nothing there. |
+| Show only files you own | `.github/CODEOWNERS` on the base branch gives `code/` and `filters/` to this pull request's author, and takes `filters/moved/` back with a line that names nobody. Turned on, it leaves `code/` and `filters/` without `filters/moved/`. |
+| Show only files with unresolved conversations | `README.md` and `generated/api.pb.go` have open threads. `code/main.go` has one thread, resolved, so it goes. |
+| Change type | Added, Modified, Renamed and Deleted are all here; `edges/` alone has every one. |
+| File type | `.editorconfig` and the root `.gitattributes` are the Dotfiles row; `Makefile` is the No extension row. |
+| Hide viewed files | Whatever you tick. |
+
+## Regenerating
+
+`tools/generate.py <before|after> diff-fixtures` writes every text and binary
+fixture; `tools/generate-images.ps1 -Variant <before|after> -Out
+diff-fixtures/images` writes the images through `System.Drawing`. Both states
+live in one script each, on purpose — kept apart, the two sides of a fixture
+drift and stop testing what they claim to.
 
 ## Commits
 

@@ -2,4 +2,4 @@
 // file -linguist-generated, and that outranks the *.pb.go rule.
 package filters
 
-const Version = 1
+const Version = 2

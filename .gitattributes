@@ -1,0 +1,10 @@
+# For the review page's "Hide generated files" filter, which reads this root
+# file and no other. diff-fixtures/.gitattributes makes its own claims for
+# GitHub, which reads every level; the review page does not.
+# diff-fixtures/README.md, "Filters", says what each line is for.
+
+# Generated only because this line says so: no path rule would catch it.
+diff-fixtures/filters/declared/** linguist-generated=true
+
+# Matches the *.pb.go rule, and is shown anyway, because this outranks it.
+diff-fixtures/filters/exempt.pb.go -linguist-generated
