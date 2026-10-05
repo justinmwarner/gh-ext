@@ -55,6 +55,7 @@ WHAT IT DOES
 • Multi-line comments and suggestion authoring
 • Noise filtering and diff search
 • A file tree you can filter as well as jump through, with an icon per file type
+• A filter menu like GitHub's: hide viewed files, generated files, or files that were only moved; pick which change types and file types to show; or show only the files with unresolved conversations, or only the files CODEOWNERS says are yours
 • Expand unchanged context around a hunk
 • Scope the diff to one commit, a range of commits, or "changes since my last review"
 • A notice when new commits land on the branch while you are reading
@@ -93,7 +94,7 @@ To be plain about the limit of that: encryption protects the token against anyth
 
 PRIVACY
 
-No analytics. No telemetry. No third-party servers. The extension makes network requests to github.com and api.github.com and to nowhere else, and the developer receives no data of any kind from it. Google reports aggregate statistics about this listing page, as it does for every item in the store; that is Google measuring its own page and says nothing about you or about your use of the extension. The privacy policy spells this out.
+No analytics. No telemetry. No third-party servers. The extension makes network requests to GitHub and to nowhere else — github.com and api.github.com, plus GitHub's avatar server for the profile pictures it shows — and the developer receives no data of any kind from it. Google reports aggregate statistics about this listing page, as it does for every item in the store; that is Google measuring its own page and says nothing about you or about your use of the extension. The privacy policy spells this out.
 
 OPEN SOURCE
 
@@ -110,6 +111,7 @@ LIMITS WORTH KNOWING BEFORE YOU INSTALL
 • github.com only. GitHub Enterprise is not supported.
 • Applying a suggestion is not supported, because GitHub exposes no public endpoint for it. Authoring and rendering suggestions both work.
 • The pull request description renders as plain text. The overview panel links to GitHub for the formatted version.
+• "Show only files you own" counts the CODEOWNERS teams you are on only if your token has the optional Members (organization): Read permission. Without it, only lines that name you directly count.
 ```
 
 ---
@@ -135,7 +137,7 @@ Stores the user's GitHub personal access token so they do not have to re-enter i
 **Host permission — `https://api.github.com/*`**
 
 ```
-This is GitHub's API, and it is the sole data source for the extension. It is used to read the pull request, its diff, its review threads and its status checks, and to post the review actions the user takes: comments, replies, thread resolutions, approvals and change requests. Requests are authenticated with the user's own personal access token.
+This is GitHub's API, and it is the sole data source for the extension. It is used to read the pull request, its diff, its review threads and its status checks, and to post the review actions the user takes: comments, replies, thread resolutions, approvals and change requests. When the user asks to see only the files they own, it is also used to read the repository's CODEOWNERS file and which of the organization's teams the user is on; that answer is kept in memory for the review and never stored. Requests are authenticated with the user's own personal access token.
 ```
 
 **Host permission — `https://github.com/*`**

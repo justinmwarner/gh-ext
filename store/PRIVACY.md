@@ -1,6 +1,6 @@
 # Privacy Policy — A Better Reviewer
 
-**Last updated: 14 September 2026**
+**Last updated: 5 October 2026**
 **Published by: PoodlePop LLC**
 
 A Better Reviewer is a browser extension that shows a faster review interface
@@ -63,15 +63,25 @@ extension that holds a credential, and no client-side design changes it.
 
 ## What is transmitted
 
-Network requests are made to exactly two hosts, both of them GitHub:
+Network requests are made to three hosts, all of them GitHub's:
 
 - `https://api.github.com` — reading pull requests, diffs, comments and status
   checks, and posting the review actions you take
 - `https://github.com` — fetching file contents and diffs that are not
   available through the API
+- `https://avatars.githubusercontent.com` — the profile pictures of the people
+  on a pull request, which the review page shows the way GitHub's own pages do
 
-These requests carry your GitHub token, because that is what authenticates them
-to GitHub. They go to GitHub and nowhere else.
+The first two carry your GitHub token, because that is what authenticates them
+to GitHub. The avatar requests carry no token and nothing about your review:
+they are your browser loading a picture to display it. All of it goes to GitHub
+and nowhere else.
+
+One reading is made only when you ask for it. Turning on "Show only files you
+own" reads the repository's CODEOWNERS file and asks GitHub which of the
+organization's teams you are on, so that a line naming one of your teams counts
+as yours. Both are held in memory while you review and never written to
+storage.
 
 The extension contacts no other server. There is no analytics, no telemetry, no
 crash reporting, no advertising, and no third-party service of any kind inside
@@ -118,7 +128,9 @@ creditworthiness or for lending purposes.
   local.
 - **`https://github.com/*` and `https://api.github.com/*`** — to read pull
   requests and post the review actions you take. These are the only hosts the
-  extension can reach.
+  extension itself can send a request to. The avatar pictures above need no
+  permission of their own: they are images the page displays, which the
+  browser loads the way it loads any picture on a page.
 
 The extension requests no other permissions and cannot see your browsing
 history.

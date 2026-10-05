@@ -162,5 +162,6 @@ Target: **WCAG 2.2 AA**.
   a second monitor.
 
 The extension collects nothing, sends nothing to its developer, and talks to
-github.com and api.github.com and nowhere else. Privacy is treated as part of
+GitHub and nowhere else: github.com, api.github.com, and GitHub's avatar
+server for the faces on a pull request. Privacy is treated as part of
 inclusion, not as a separate compliance exercise.

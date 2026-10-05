@@ -110,8 +110,11 @@ One more is optional, and only one filter reads it:
 |---|---|---|
 | Members (organization) | Read | "Show only files you own" counts the CODEOWNERS teams you are on |
 
-Without it, that filter matches CODEOWNERS lines naming you by login and says
-so on its row ("Matching @you only"); files your team owns are not counted. The
+Without it, that filter matches CODEOWNERS lines naming you by login, and
+files your team owns are not counted. When GitHub refuses the team lookup the
+row says so ("Matching @you only"); what GitHub answers a fine-grained token
+without this permission has not been captured yet — see
+`docs/reference/github-review-api.md`. The
 permission is an organization one, so it can only be granted on a token whose
 resource owner is that organization.
 
