@@ -36,17 +36,19 @@ the bottom.
 The dashboard will not let you submit without a **publicly reachable URL** for a
 privacy policy. Pick one of these.
 
-**Option A — GitHub Pages.** Settings → Pages → deploy from `master`, then the
+**Option A — GitHub Pages.** Settings → Pages → deploy from `main`, then the
 policy is at
 `https://justinmwarner.github.io/gh-ext/store/PRIVACY.html`. Needs the Markdown
 rendered, so this only works if Pages is set up with a theme or the file is
-converted to HTML.
+converted to HTML. Building the whole branch does not work as it stands: tried
+in September, every build failed, because Jekyll reads the `{{` in the JSX
+samples under `docs/` as template tags.
 
 **Option B — the rendered file on github.com (simplest).** GitHub renders
 Markdown at a stable public URL with no setup at all:
 
 ```
-https://github.com/justinmwarner/gh-ext/blob/master/store/PRIVACY.md
+https://github.com/justinmwarner/gh-ext/blob/main/store/PRIVACY.md
 ```
 
 This is a real, public, permanent URL and is accepted. Use it unless you want
