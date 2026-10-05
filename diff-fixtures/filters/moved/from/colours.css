@@ -1,0 +1,9 @@
+.badge {
+  color: navy;
+  border: 1px solid lightsteelblue;
+  border-radius: 2em;
+}
+
+.badge-muted {
+  color: slategray;
+}
