@@ -2,4 +2,5 @@
 export const ENDPOINTS = [
   '/pulls',
   '/reviews',
+  '/threads',
 ] as const;

@@ -467,4 +467,120 @@ if A:
     # wOF2, calls it binary, and does not try to render it.
     wb('binary/font.woff2', b'wOF2' + bytes(range(256)) * 3)
 
+# ----------------------------------------------------------------- filters
+#
+# Something for each row of the review page's file filter menu that nothing
+# above already gives it. The change types and file types are spread across
+# every directory here, and `generated/` and the lockfile match the paths the
+# page treats as generated; what follows covers the rest. Two of the rows also
+# need a file outside this directory — `.github/CODEOWNERS` on the base branch
+# and `.gitattributes` at the root of the head branch — which this script does
+# not write. README.md, "Filters", says what each file is for.
+
+
+def png(width, height, rgb):
+    """A small, valid PNG of one colour, the same bytes on every run."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        body = kind + data
+        return (struct.pack('>I', len(data)) + body
+                + struct.pack('>I', zlib.crc32(body) & 0xffffffff))
+
+    rows = b''.join(b'\x00' + bytes(rgb) * width for _ in range(height))
+    return (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows, 9))
+            + chunk(b'IEND', b''))
+
+
+# "Hide files that were only moved". Three moves that change nothing, one of
+# them binary: a rename whose bytes held still has no `Binary files … differ`
+# line, which is how the page tells it from one whose bytes moved too.
+MOVED_FROM = 'filters/moved/from/'
+MOVED_TO = 'filters/moved/to/'
+
+STRINGS = r'''export const plural = (count: number, noun: string): string =>
+  `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+export const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .map((part) => part.charAt(0))
+    .join('')
+    .toUpperCase();
+'''
+
+COLOURS = '''.badge {
+  color: navy;
+  border: 1px solid lightsteelblue;
+  border-radius: 2em;
+}
+
+.badge-muted {
+  color: slategray;
+}
+'''
+
+for name, text in (('strings.ts', STRINGS), ('colours.css', COLOURS)):
+    w((MOVED_TO if A else MOVED_FROM) + name, text)
+    if A:
+        rm(MOVED_FROM + name)
+
+wb((MOVED_TO if A else MOVED_FROM) + 'pixel.png', png(8, 8, (9, 105, 218)))
+if A:
+    rm(MOVED_FROM + 'pixel.png')
+
+# And a move that is not only a move: one level deeper, with the import fixed
+# to match. The filter has to leave this one showing, edit and all.
+w('filters/moved/to/routing/router.ts' if A else 'filters/moved/from/router.ts',
+  '''import {{ plural }} from '{strings}';
+
+export interface Route {{
+  path: string;
+  title: string;
+}}
+
+export function describe(routes: readonly Route[]): string {{
+  return `${{plural(routes.length, 'route')}} registered`;
+}}
+
+export function find(routes: readonly Route[], path: string): Route | undefined {{
+  return routes.find((route) => route.path === path);
+}}
+'''.format(strings='../strings' if A else './strings'))
+if A:
+    rm('filters/moved/from/router.ts')
+
+# "Hide generated files", decided by the repository rather than by a path
+# rule. Nothing about `declared/client.ts` looks generated; the root
+# `.gitattributes` on the head branch says it is. `exempt.pb.go` matches the
+# `*.pb.go` rule, and that same file says `-linguist-generated` for it, which
+# outranks the rule.
+w('filters/declared/client.ts', '''// Written by the API client generator. Do not edit by hand.
+export const ENDPOINTS = [
+  '/pulls',
+  '/reviews',{extra}
+] as const;
+'''.format(extra="\n  '/threads'," if A else ''))
+
+w('filters/exempt.pb.go', '''// Hand-written, whatever the name says: the root .gitattributes marks this
+// file -linguist-generated, and that outranks the *.pb.go rule.
+package filters
+
+const Version = {version}
+'''.format(version=2 if A else 1))
+
+# File type: a dotfile, and a name with no extension at all.
+w('filters/.editorconfig', '''root = true
+
+[*]
+indent_style = space
+indent_size = {size}
+'''.format(size=4 if A else 2))
+
+w('filters/Makefile', 'test:\n' + TAB + 'npm test\n' + (
+    '\ntypecheck:\n' + TAB + 'npm run typecheck\n' if A else ''))
+
 print('wrote', variant)

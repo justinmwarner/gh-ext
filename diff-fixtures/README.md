@@ -123,6 +123,24 @@ The cases that break renderers rather than the ones that exercise them.
 `app.js`, `server.py`, `main.go` — ordinary diffs in three languages, for
 syntax highlighting and for a baseline to compare the smart renderers against.
 
+## Filters — `filters/`
+
+Something for each row of the review page's file filter menu — the funnel at
+the end of the file tree's box — that the rest of this directory does not
+already give it. The change types and most file types are everywhere above,
+and `generated/` and `data/package-lock.json` match the paths the page treats
+as generated without being told.
+
+| Filter | What to try it on |
+| --- | --- |
+| Hide files that were only moved | `moved/from/` → `moved/to/`: `strings.ts`, `colours.css` and `pixel.png` move unchanged and go. `router.ts` moves a level deeper *and* has its import fixed, so it stays. `edges/renamed-to.txt` is a pure rename as well. |
+| Hide generated files | `declared/client.ts` is generated only because the root `.gitattributes` says so; no path rule matches it. `exempt.pb.go` matches the `*.pb.go` rule and stays, because that same file marks it `-linguist-generated`. The page reads the root `.gitattributes` only, so `diff-fixtures/.gitattributes` decides nothing there. |
+| Show only files you own | `.github/CODEOWNERS` on the base branch gives `code/` and `filters/` to this pull request's author, and takes `filters/moved/` back with a line that names nobody. Turned on, it leaves `code/` and `filters/` without `filters/moved/`. |
+| Show only files with unresolved conversations | `README.md` and `generated/api.pb.go` have open threads. `code/main.go` has one thread, resolved, so it goes. |
+| Change type | Added, Modified, Renamed and Deleted are all here; `edges/` alone has every one. |
+| File type | `.editorconfig` and the root `.gitattributes` are the Dotfiles row; `Makefile` is the No extension row. |
+| Hide viewed files | Whatever you tick. |
+
 ## Regenerating
 
 `tools/generate.py <before|after> diff-fixtures` writes every text and binary
