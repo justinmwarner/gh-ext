@@ -13,7 +13,8 @@ Comments with reply and resolve. The pending-review flow. Status checks.
 Approve and request changes. Plus keyboard navigation, viewed state, drafts that
 survive a failed post, multi-line comments, suggestion authoring, noise
 filtering, diff search, a filter on the file tree, file filters like GitHub's,
-a most-changed-first order for the whole review, expand-unchanged-context, and
+a most-changed-first order for the whole review, file types sent to the end of
+it (`.spec.tsx`, `.snap`, `.png`), expand-unchanged-context, and
 scoping the diff to one commit, a range of commits, or "changes since my last
 review".
 

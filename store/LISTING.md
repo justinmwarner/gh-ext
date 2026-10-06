@@ -55,7 +55,8 @@ WHAT IT DOES
 • Multi-line comments and suggestion authoring
 • Noise filtering and diff search
 • A file tree you can filter as well as jump through, with an icon per file type
-• A filter menu like GitHub's: hide viewed files, generated files, or files that were only moved; pick which change types and file types to show; or show only the files with unresolved conversations, or only the files CODEOWNERS says are yours
+• A filter menu like GitHub's: hide viewed files, generated files, or files that were only moved; pick which change types and file types to show, down to .spec.tsx or .test.ts on their own; or show only the files with unresolved conversations, or only the files CODEOWNERS says are yours
+• Read the biggest changes first, or send whole file types to the end of the review — snapshots, images, specs — without hiding them
 • Expand unchanged context around a hunk
 • Scope the diff to one commit, a range of commits, or "changes since my last review"
 • A notice when new commits land on the branch while you are reading

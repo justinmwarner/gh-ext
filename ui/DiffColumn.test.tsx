@@ -1962,6 +1962,30 @@ describe('DiffColumn, read most changed first', () => {
     expect(document.querySelector('.diff-view')).toBe(viewer);
   });
 
+  it('leaves no card drawn that a reorder took out of view', async () => {
+    // Pierre 1.4.1, after a reorder, releases the cards it had drawn by walking
+    // its old range of positions over the new order. A drawn card that moved
+    // past that range is never released: its element stays in the column with
+    // no header, and the column outgrows the height it laid itself out for.
+    // `releaseStrandedCards` is the repair.
+    const MANY = Array.from({ length: 40 }, (_, at) => file({ path: `f${String(at).padStart(2, '0')}.ts` }));
+    const many = (props: Record<string, unknown>) => (
+      <ReviewSessionProvider pullRequest={pullRequestNode()} prRef={PR_REF} threads={[]} drafts={drafts}>
+        <DiffColumn files={MANY} diff={UNIFIED} sides={BOTH_SIDES} current={NO_FILE} onScrollTo={() => {}} {...props} />
+      </ReviewSessionProvider>
+    );
+    const drawn = () => document.querySelectorAll('diffs-container').length;
+    const view = render(many({}));
+    await waitFor(() => expect(cardOrder()).toContain('f00.ts'));
+    expect(drawn()).toBe(cardOrder().length);
+
+    // The first card drawn, sent to the very end.
+    view.rerender(many({ rank: new Map(MANY.map((each, at) => [each.path, at === 0 ? MANY.length : at])) }));
+    await waitFor(() => expect(cardOrder()).not.toContain('f00.ts'));
+
+    expect(drawn()).toBe(cardOrder().length);
+  });
+
   it('walks J and K through the sections in the order the cards are drawn', async () => {
     const scrolls = vi.spyOn(CodeViewCore.prototype, 'scrollTo');
     const landed = (): string | undefined =>

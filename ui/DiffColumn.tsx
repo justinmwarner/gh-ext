@@ -40,6 +40,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -98,6 +99,7 @@ import { carryCursor } from '@/lib/review/hunkNav';
 import { inReadingOrder } from '@/lib/review/readingOrder';
 import { readCursor, rowFor, rowTop, shadowFor } from './hunkPosition';
 import { MoreBelow } from './MoreBelow';
+import { releaseStrandedCards } from './strandedCards';
 import type { ReviewFile } from './reviewFiles';
 import { useReviewSession } from './reviewSession';
 import {
@@ -1249,6 +1251,18 @@ export function DiffColumn({
   );
 
   const viewer = useRef<CodeViewHandle<AnnotationMetadata, undefined>>(null);
+
+  /**
+   * Release any card `CodeView` left drawn out of view after a new item list.
+   *
+   * A reorder can strand one, and a stranded card moves every card on screen
+   * up by its height; `strandedCards.ts` has the library bug in full. A layout
+   * effect, so it runs after the wrapper's own layout effect, which has already
+   * drawn the new list, and before the browser paints it.
+   */
+  useLayoutEffect(() => {
+    releaseStrandedCards(viewer.current?.getInstance());
+  }, [items]);
   const scroller = useRef<HTMLDivElement>(null);
   /** The column itself, so `focusColumn` has something to hand the keyboard to. */
   const column = useRef<HTMLElement>(null);

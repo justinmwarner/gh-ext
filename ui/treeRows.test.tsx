@@ -14,6 +14,8 @@ import {
   directoryPaths,
   fileOrder,
   flatRows,
+  groupKey,
+  lastGroupRows,
   treeRows,
 } from './treeRows';
 
@@ -125,6 +127,54 @@ describe('flatRows', () => {
     const rows = flatRows(['src/a.ts', 'src/b.ts']);
 
     expect(rows.every((row) => row.kind === 'file' && row.files.length === 0)).toBe(true);
+  });
+});
+
+/**
+ * The groups read last, at the bottom of the tree.
+ *
+ * Each is a row of its own, like a folder: it folds, and its box ticks every
+ * file in it. Its files are listed flat underneath, with no folders, because
+ * they come from all over the tree.
+ */
+describe('lastGroupRows', () => {
+  const GROUPS = [
+    { type: '.spec.tsx', paths: ['src/a.spec.tsx', 'lib/b.spec.tsx'] },
+    { type: '.png', paths: ['assets/logo.png'] },
+  ];
+
+  it('draws each group as a row, with its files one step in beneath it', () => {
+    expect(shape(lastGroupRows(GROUPS, OPEN))).toEqual([
+      '.spec.tsx/',
+      '  a.spec.tsx',
+      '  b.spec.tsx',
+      '.png/',
+      '  logo.png',
+    ]);
+  });
+
+  it('gives a group row every file in it, for its box to tick', () => {
+    const [group] = lastGroupRows(GROUPS, OPEN);
+
+    expect(group?.files).toEqual(['src/a.spec.tsx', 'lib/b.spec.tsx']);
+    expect(group?.group).toBe('.spec.tsx');
+  });
+
+  it('folds a group the way it folds a folder', () => {
+    expect(shape(lastGroupRows(GROUPS, new Set([groupKey('.spec.tsx')])))).toEqual([
+      '.spec.tsx/',
+      '.png/',
+      '  logo.png',
+    ]);
+  });
+
+  it('leaves out a group with nothing in it', () => {
+    expect(lastGroupRows([{ type: '.md', paths: [] }], OPEN)).toEqual([]);
+  });
+
+  it('keys a group so it can never be taken for a folder', () => {
+    // No path in a diff starts with a slash.
+    expect(groupKey('.png').startsWith('/')).toBe(true);
   });
 });
 

@@ -105,6 +105,19 @@ describe('resolveTreeKey', () => {
 
     expect(resolveTreeKey(deep, 2, 'ArrowLeft')).toEqual({ kind: 'move', index: 1 });
   });
+
+  it('walks out to the row it sits under even when that row is not its folder', () => {
+    // A group of files read last: `assets/logo.png` sits under the group row,
+    // and there is no `assets/` row anywhere for its path to lead to.
+    const grouped: readonly KeyRow[] = [
+      { path: 'src/', depth: 0, kind: 'directory', expanded: true },
+      { path: 'src/a.ts', depth: 1, kind: 'file', expanded: false },
+      { path: '/last/.png/', depth: 0, kind: 'directory', expanded: true },
+      { path: 'assets/logo.png', depth: 1, kind: 'file', expanded: false },
+    ];
+
+    expect(resolveTreeKey(grouped, 3, 'ArrowLeft')).toEqual({ kind: 'move', index: 2 });
+  });
 });
 
 /**

@@ -105,8 +105,8 @@ export interface FindPanelProps {
    */
   hidden?: ReadonlySet<string>;
   /**
-   * Each file's place while the review is read most changed first, or null
-   * in folder order.
+   * Each file's place in the order the review is read, or null while that
+   * is folder order.
    *
    * A rank beside `files` rather than a re-sorted `files`, for the reason
    * `hidden` is a set: the patches are walked once, against `files`. The

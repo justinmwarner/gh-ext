@@ -68,7 +68,15 @@ export interface UseFileFilterArgs {
   owned: ((path: string) => boolean) | null;
   /** The file a composer is open on, if one is. Kept, for the reason a posting comment is. */
   composing?: string | null;
+  /**
+   * File types the reviewer has chosen outside the filters, the ones read
+   * last. Listed in the menu for as long as any file has them, like a type
+   * the filters hide; see `fileFacets`.
+   */
+  chosenTypes?: readonly string[];
 }
+
+const NO_TYPES: readonly string[] = [];
 
 export interface FileFilterResult {
   facets: FileFacets;
@@ -106,6 +114,7 @@ export function useFileFilter({
   generatedPatterns,
   owned,
   composing = null,
+  chosenTypes = NO_TYPES,
 }: UseFileFilterArgs): FileFilterResult {
   const session = useReviewSession();
 
@@ -126,7 +135,13 @@ export function useFileFilter({
     [viewedNow, talk, gitAttributes, generatedPatterns, owned],
   );
 
-  const facets = useMemo(() => fileFacets(files), [files]);
+  // The types already chosen stay listed while any file has them, so a choice
+  // made on the whole pull request is never left acting on a commit's single
+  // spec file with no row to undo it from.
+  const facets = useMemo(
+    () => fileFacets(files, [...filters.hiddenTypes, ...chosenTypes]),
+    [files, filters.hiddenTypes, chosenTypes],
+  );
   const filtering = isFiltering(filters, facets);
 
   /**

@@ -695,6 +695,12 @@ button.scope-showing:hover {
   background: var(--neutral-hover);
 }
 
+/* A longer file type under its extension, `.spec.tsx` under `.tsx`: one
+   tree step in, the same 14px a folder's contents sit in by. */
+.menu-item[data-indent='true'] {
+  padding-left: 20px;
+}
+
 .menu-item[aria-disabled='true'] {
   color: var(--fg-subtle);
   cursor: default;
@@ -1495,6 +1501,22 @@ button.scope-showing:hover {
   margin-left: 6px;
   font-size: 12px;
   color: var(--fg-muted);
+}
+
+/* How many files a group read last holds, after its type. Quieter than the
+   type, and not in the bold a folder's name is drawn in. */
+.tree-group-size {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+/* Where the review proper ends and the groups read last begin: one hairline,
+   the grouping DESIGN.md prefers to a box or a heading. */
+.tree-groups-rule {
+  margin: 6px 4px;
+  border-top: 1px solid var(--border-muted);
 }
 
 /* Present, reachable, and out of the way: a lockfile has to stay clickable

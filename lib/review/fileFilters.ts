@@ -70,10 +70,9 @@ export const NO_EXTENSION = 'none';
  * A file's type, as the menu lists it: its last extension, lowercased.
  *
  * The *last* one, so `app.test.ts` is TypeScript and `archive.tar.gz` is a
- * gzip. That is what the file is to the tools that read it, and a reviewer
- * hiding tests has the text box for that; a type list that grew a row per
- * compound suffix would bury the real types under `.test.ts`, `.spec.ts`,
- * `.stories.tsx` and the rest.
+ * gzip. That is what the file is to the tools that read it. The word before
+ * the extension is {@link compoundType}, which the menu lists underneath this
+ * one, and only where it picks out a real group of files.
  *
  * Lowercased, so `Logo.PNG` and `icon.png` are one row. A pull request that
  * mixes the two is one that somebody's camera and somebody's editor disagreed
@@ -93,6 +92,56 @@ export function fileType(path: string): string {
   // "." would be a row in the menu with nothing to read in it.
   if (dot === -1 || dot === name.length - 1) return NO_EXTENSION;
   return name.slice(dot).toLowerCase();
+}
+
+/**
+ * A file's longer type: the word before its extension, and the extension.
+ *
+ * `Button.spec.tsx` is a `.spec.tsx` file as well as a `.tsx` one, and that is
+ * the difference a reviewer means when they ask for the specs after the code,
+ * or for no snapshots at all. A `.ts` row alone cannot say it.
+ *
+ * Only a word counts: letters, nothing else. So `jquery-3.6.0.min.js` is
+ * `.min.js`, but `v1.2.3.txt` has a version number there and is just `.txt`.
+ * There has to be a name before the word as well, so a dotfile such as
+ * `.eslintrc.json` has no longer type: `eslintrc` is its name. Null whenever
+ * there is no such word. Lowercased, like {@link fileType}.
+ */
+export function compoundType(path: string): string | null {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const parts = (name.startsWith('.') ? name.slice(1) : name).split('.');
+  if (parts.length < 3) return null;
+  const extension = parts.at(-1) ?? '';
+  const word = parts.at(-2) ?? '';
+  if (extension === '' || !/^[a-z]+$/i.test(word)) return null;
+  return `.${word}.${extension}`.toLowerCase();
+}
+
+/**
+ * A type as words for the screen. The two types that are not an extension
+ * get names; an extension, longer or not, is its own name.
+ */
+export function typeLabel(type: string): string {
+  return type === DOTFILE ? 'Dotfiles' : type === NO_EXTENSION ? 'No extension' : type;
+}
+
+/**
+ * The extension a longer type sits under, or null for a type that is not a
+ * longer one. `.spec.tsx` sits under `.tsx`.
+ */
+export function parentType(type: string): string | null {
+  const last = type.lastIndexOf('.');
+  return last <= 0 ? null : type.slice(last);
+}
+
+/**
+ * Whether a file is of a type, by its extension or by its longer type.
+ *
+ * The one test every type row means: `.tsx` takes in every `.tsx` file,
+ * specs included, and `.spec.tsx` only the specs.
+ */
+export function typeMatches(path: string, type: string): boolean {
+  return fileType(path) === type || compoundType(path) === type;
 }
 
 /** A changed file, as far as these rules read it. `ReviewFile` satisfies it. */
@@ -191,6 +240,8 @@ export interface FileFacts {
 export function passes(file: FilterableFile, filters: FileFilters, facts: FileFacts): boolean {
   if (filters.hiddenKinds.has(changeKind(file.changeType))) return false;
   if (filters.hiddenTypes.has(fileType(file.path))) return false;
+  const longer = compoundType(file.path);
+  if (longer !== null && filters.hiddenTypes.has(longer)) return false;
   if (filters.hideMoved && isMoved(file)) return false;
   if (filters.hideViewed && facts.isViewed(file.path)) return false;
   if (filters.hideGenerated && facts.isGenerated(file.path)) return false;
@@ -262,6 +313,10 @@ export interface FileFacets {
    * Alphabetical, with {@link DOTFILE} and {@link NO_EXTENSION} after every
    * extension — they are the two rows that are not a type, and in among the
    * extensions they would read as a pair of odd suffixes.
+   *
+   * Each extension is followed by the longer types under it, alphabetically,
+   * and its count takes them in: `.tsx` counts the specs too. See
+   * {@link fileFacets} for which longer types make the list.
    */
   types: ReadonlyMap<string, number>;
 }
@@ -280,16 +335,50 @@ const typeOrder = (a: string, b: string): number => {
  * menu move while the reviewer was reading it, and would answer a question
  * nobody asked. "This pull request has twelve deleted files" is the fact that
  * decides whether to hide them.
+ *
+ * A longer type is listed when it picks out a real group: at least two files
+ * share it, and not every file of its extension does, since then its row would
+ * say the same thing as the extension's. That keeps a one-off `my.notes.md`
+ * from becoming a row of its own. `chosen` names the types the reviewer has
+ * already set, unticked or sent to the end. Those stay listed for as long as
+ * any file here has them. Otherwise a choice made on the whole pull request
+ * could act on a single file in one commit with no row to see it on or undo
+ * it from.
  */
-export function fileFacets(files: readonly FilterableFile[]): FileFacets {
+export function fileFacets(
+  files: readonly FilterableFile[],
+  chosen: Iterable<string> = [],
+): FileFacets {
   const kinds = new Map<ChangeKind, number>();
   const types = new Map<string, number>();
+  const longer = new Map<string, number>();
 
   for (const file of files) {
     const kind = changeKind(file.changeType);
     kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
     const type = fileType(file.path);
     types.set(type, (types.get(type) ?? 0) + 1);
+    const compound = compoundType(file.path);
+    if (compound !== null) longer.set(compound, (longer.get(compound) ?? 0) + 1);
+  }
+
+  const kept = new Set(chosen);
+  const under = new Map<string, string[]>();
+  for (const [compound, count] of longer) {
+    const parent = parentType(compound);
+    if (parent === null) continue;
+    const real = count >= 2 && count < (types.get(parent) ?? 0);
+    if (!real && !kept.has(compound)) continue;
+    under.set(parent, [...(under.get(parent) ?? []), compound]);
+  }
+
+  const listed: [string, number][] = [];
+  for (const [type, count] of [...types].sort(([a], [b]) => typeOrder(a, b))) {
+    listed.push([type, count]);
+    const children = (under.get(type) ?? []).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true }),
+    );
+    for (const child of children) listed.push([child, longer.get(child) ?? 0]);
   }
 
   return {
@@ -299,7 +388,7 @@ export function fileFacets(files: readonly FilterableFile[]): FileFacets {
         return count === undefined ? [] : [[kind, count]];
       }),
     ),
-    types: new Map([...types].sort(([a], [b]) => typeOrder(a, b))),
+    types: new Map(listed),
   };
 }
 

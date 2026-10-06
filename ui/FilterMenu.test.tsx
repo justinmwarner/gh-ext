@@ -8,7 +8,7 @@
  * what its label says.
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { type FileFilters, NO_FILTERS, fileFacets } from '@/lib/review/fileFilters';
@@ -199,3 +199,114 @@ describe('the filter menu', () => {
     expect(trigger().querySelector('.filter-dot')).toBeNull();
   });
 });
+
+/**
+ * Longer types, and reading types last.
+ *
+ * `.spec.tsx` sits one step in under `.tsx`, because hiding `.tsx` hides the
+ * specs too: the row underneath cannot be shown while the one above it is
+ * hidden, so it says so rather than pretending. The same types are listed a
+ * second time to be read last, and each tick there sends its type to the very
+ * end, after any already there.
+ */
+describe('the filter menu, with longer types', () => {
+  const at = (path: string) => ({
+    path,
+    changeType: 'MODIFIED' as const,
+    additions: 1,
+    deletions: 1,
+    isBinary: false,
+  });
+  const NESTED = fileFacets([
+    at('src/a.spec.tsx'),
+    at('src/b.spec.tsx'),
+    at('src/c.tsx'),
+    at('assets/logo.png'),
+  ]);
+
+  function mountNested(
+    props: { filters?: FileFilters; last?: readonly string[] } = {},
+  ) {
+    const onChange = vi.fn<(next: FileFilters) => void>();
+    const onLast = vi.fn<(next: readonly string[]) => void>();
+    render(
+      <FilterMenu
+        filters={props.filters ?? NO_FILTERS}
+        facets={NESTED}
+        onChange={onChange}
+        active={props.filters !== undefined}
+        last={props.last ?? []}
+        onLast={onLast}
+      />,
+    );
+    return { onChange, onLast };
+  }
+
+  it('lists a longer type one step in, under its extension', async () => {
+    mountNested();
+    await userEvent.click(trigger());
+
+    const types = within(screen.getByRole('group', { name: 'File type' }))
+      .getAllByRole('menuitemcheckbox')
+      .map((item) => [item.textContent, item.getAttribute('data-indent')]);
+    expect(types).toEqual([
+      ['.png1', null],
+      ['.tsx3', null],
+      ['.spec.tsx2', 'true'],
+    ]);
+  });
+
+  it('shows a longer type as hidden, and will not take it, while its extension is hidden', async () => {
+    const { onChange } = mountNested({ filters: { ...NO_FILTERS, hiddenTypes: new Set(['.tsx']) } });
+    await userEvent.click(trigger());
+
+    const spec = within(screen.getByRole('group', { name: 'File type' })).getByRole(
+      'menuitemcheckbox',
+      { name: /^\.spec\.tsx/ },
+    );
+    expect(spec.getAttribute('aria-checked')).toBe('false');
+    expect(spec.getAttribute('aria-disabled')).toBe('true');
+    await userEvent.click(spec);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('lists the same types to read last, ticked for the ones already at the end', async () => {
+    mountNested({ last: ['.png'] });
+    await userEvent.click(trigger());
+
+    const last = screen.getByRole('group', { name: 'Read last' });
+    expect(within(last).getByRole('menuitemcheckbox', { name: 'Read .png last' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(
+      within(last).getByRole('menuitemcheckbox', { name: 'Read .spec.tsx last' }).getAttribute('aria-checked'),
+    ).toBe('false');
+  });
+
+  it('sends a type to the very end, after any already there, and stays open', async () => {
+    const { onLast } = mountNested({ last: ['.png'] });
+    await userEvent.click(trigger());
+
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Read .spec.tsx last' }));
+
+    expect(onLast).toHaveBeenLastCalledWith(['.png', '.spec.tsx']);
+    expect(screen.queryByRole('menu')).not.toBeNull();
+  });
+
+  it('takes a type back from the end', async () => {
+    const { onLast } = mountNested({ last: ['.png', '.spec.tsx'] });
+    await userEvent.click(trigger());
+
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Read .png last' }));
+
+    expect(onLast).toHaveBeenLastCalledWith(['.spec.tsx']);
+  });
+
+  it('offers nothing to read last without somewhere to send it', async () => {
+    render(<FilterMenu filters={NO_FILTERS} facets={NESTED} onChange={vi.fn()} active={false} />);
+    await userEvent.click(trigger());
+
+    expect(screen.queryByRole('group', { name: 'Read last' })).toBeNull();
+  });
+});
+

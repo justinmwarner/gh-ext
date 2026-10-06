@@ -48,17 +48,22 @@ ours" is the wrong instinct here.
   `treeRows`' `fileOrder`: directories first, then files, counting the way a
   person does. `reviewFiles` sorts by it, so the whole diff and a narrowed one
   are laid out by the same rule without either caller knowing there is one.
-  The funnel menu can switch the review to most changed first. That rule is
-  `lib/review/readingOrder.ts`, and `Shell` applies it once. Do not re-sort at
-  a surface: they disagreed once, and a root-level `README.md` came first in
-  the column and last in the tree. Every surface takes the shell's order. The
-  walkers (`j`/`k`, `n`/`p`, `Mod+K`, Conversations) get the sorted list. The
-  column and the find panel get a `rank` beside the folder-ordered list and
-  lay themselves out with `inReadingOrder`, for the reason the file filters
-  rule below gives for `hidden`. There are **two** trees, the checklist and
-  the find panel's results, and `ui/searchRows.ts` defers to `treeRows` (to
-  `flatRows` while sorted) rather than laying its own files out. Their shared
-  keyboard is `ui/treeKeys.ts`, for the same reason twice over.
+  The funnel menu can switch the review to most changed first, and send file
+  types to the end of it ("Read last"). Both are one `Arrangement`, laid out
+  by `arrange` in `lib/review/readingOrder.ts`, which `Shell` calls once. Do
+  not re-sort at a surface: they disagreed once, and a root-level `README.md`
+  came first in the column and last in the tree. Every surface takes the
+  shell's order. The walkers (`j`/`k`, `n`/`p`, `Mod+K`, Conversations) get
+  the sorted list. The column and the find panel get a `rank` beside the
+  folder-ordered list and lay themselves out with `inReadingOrder`, for the
+  reason the file filters rule below gives for `hidden`. The tree gets the
+  sorted list and the groups read last, which `lastGroupRows` draws at its
+  foot. There are **two** trees, the checklist and the find panel's results,
+  and `ui/searchRows.ts` defers to `treeRows` (to `flatRows` while the order
+  is not the folders') rather than laying its own files out. Their shared
+  keyboard is `ui/treeKeys.ts`, for the same reason twice over. A file type is
+  `fileType` or a longer `compoundType` (`.spec.tsx`), and `typeMatches` is the
+  one test for both, in the filters and in "Read last".
 
 - **The rail's two panels must not declare `visibility: visible`.** `FilesView`
   stacks the file tree and the find panel in one grid cell and hides the
@@ -87,9 +92,12 @@ ours" is the wrong instinct here.
   take the whole list and `hidden` beside it; everything that only walks files
   (`j`/`k`, `Mod+K`, the scope bar) takes `useFileFilter`'s `shown`. The
   e2e test "narrows the column without moving the line being read" is the
-  check. The sort's `rank` reaches the column the same way, for the same
-  reason, and "sorting by most changed reorders the column without moving the
-  line being read" is its check. The filters' companion rule lives in
+  check. The order's `rank` reaches the column the same way, for the same
+  reason, and "sorting by most changed…" and "reading a type last…" are its
+  checks. A reorder also trips a bug in `CodeView` 1.4.1 that leaves a drawn
+  card stranded and pulls every card on screen up. `ui/strandedCards.ts` is
+  the repair, and `docs/reference/pierre-diffs-api.md` has the bug; rerun
+  those two e2e tests after any Pierre upgrade. The filters' companion rule lives in
   `ui/useFileFilter.ts`: what may leave the screen, and when. The file the
   reviewer is on, a file they have just ticked or resolved, and a file with
   unsent writing on it are never in `hidden` — thread links rely on the first

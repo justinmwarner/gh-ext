@@ -15,10 +15,15 @@
  * files go away — which is GitHub's own arrangement for the same list and the
  * one a reviewer arriving from there already knows.
  *
- * One section is not a filter. "Sort" has a single row, "Most changed first",
- * and it lives here because this is where a reviewer shapes the list. It hides
- * nothing, though, so it does not draw the funnel on, and "Show all files"
- * leaves it alone. `lib/review/readingOrder.ts` has the order itself.
+ * The types include the longer ones, `.spec.tsx` one step in under `.tsx`,
+ * wherever a group of files shares one; `fileFacets` decides which.
+ *
+ * Two sections are not filters. "Sort" has a single row, "Most changed first",
+ * and "Read last" lists the types again, to send to the end of the review
+ * rather than out of it. They live here because this is where a reviewer
+ * shapes the list. Neither hides anything, though, so neither draws the funnel
+ * on, and "Show all files" leaves both alone. `lib/review/readingOrder.ts` has
+ * the order itself.
  */
 
 import type { Ref } from 'react';
@@ -29,6 +34,8 @@ import {
   type FileFilters,
   NO_EXTENSION,
   NO_FILTERS,
+  parentType,
+  typeLabel,
 } from '@/lib/review/fileFilters';
 import type { ReadingOrder } from '@/lib/review/readingOrder';
 import { MenuButton, type MenuButtonHandle, type MenuGroup, type MenuItem } from './MenuButton';
@@ -51,9 +58,19 @@ const KIND_LABELS: Record<ChangeKind, string> = {
   deleted: 'Deleted',
 };
 
-/** The two types that are not an extension get words; an extension is its own name. */
-const typeLabel = (type: string): string =>
-  type === DOTFILE ? 'Dotfiles' : type === NO_EXTENSION ? 'No extension' : type;
+/**
+ * What a screen reader calls a type's row in "Read last".
+ *
+ * The row draws the same `.png` as the one in "File type" above it, and the
+ * heading is what tells a sighted reviewer which list they are in. The name
+ * has to carry that on its own.
+ */
+const lastName = (type: string): string =>
+  type === DOTFILE
+    ? 'Read dotfiles last'
+    : type === NO_EXTENSION
+      ? 'Read files with no extension last'
+      : `Read ${type} last`;
 
 /** One more or one fewer, without touching the set the caller holds. */
 function flipped<T>(set: ReadonlySet<T>, value: T): Set<T> {
@@ -99,8 +116,14 @@ export interface FilterMenuProps {
    * state of a component test that mounts the menu on its own.
    */
   onOrder?: (next: ReadingOrder) => void;
+  /** The types read last, in the order they were sent there. */
+  last?: readonly string[];
+  /** Change them. No "Read last" section is drawn without it. */
+  onLast?: (next: readonly string[]) => void;
   ref?: Ref<MenuButtonHandle>;
 }
+
+const NOTHING_LAST: readonly string[] = [];
 
 export function FilterMenu({
   filters,
@@ -111,6 +134,8 @@ export function FilterMenu({
   onOpenChange,
   order = 'folders',
   onOrder,
+  last = NOTHING_LAST,
+  onLast,
   ref,
 }: FilterMenuProps) {
   const toggle = (
@@ -182,17 +207,48 @@ export function FilterMenu({
     {
       id: 'types',
       label: 'File type',
-      items: [...facets.types].map(
-        ([type, count]): MenuItem => ({
+      items: [...facets.types].map(([type, count]): MenuItem => {
+        const parent = parentType(type);
+        // Hiding `.tsx` hides the specs too, so `.spec.tsx` cannot be shown
+        // while it is. Drawn unticked and refused rather than left ticked over
+        // files that are not on screen, with the reason in its title.
+        const hiddenAbove = parent !== null && filters.hiddenTypes.has(parent);
+        return {
           id: `type:${type}`,
           label: typeLabel(type),
           detail: `${count}`,
-          checked: !filters.hiddenTypes.has(type),
+          checked: !hiddenAbove && !filters.hiddenTypes.has(type),
+          indent: parent !== null,
           keepOpen: true,
+          ...(hiddenAbove ? { disabled: true, title: `Hidden along with ${parent}.` } : {}),
           onSelect: () => onChange({ ...filters, hiddenTypes: flipped(filters.hiddenTypes, type) }),
-        }),
-      ),
+        };
+      }),
     },
+    // The same types again, to send to the end of the review rather than out
+    // of it. Each tick puts its type after every type already there, so the
+    // order they were ticked in is the order they are read in.
+    ...(onLast === undefined
+      ? []
+      : [
+          {
+            id: 'last',
+            label: 'Read last',
+            items: [...facets.types].map(
+              ([type, count]): MenuItem => ({
+                id: `last:${type}`,
+                label: typeLabel(type),
+                ariaLabel: lastName(type),
+                detail: `${count}`,
+                checked: last.includes(type),
+                indent: parentType(type) !== null,
+                keepOpen: true,
+                onSelect: () =>
+                  onLast(last.includes(type) ? last.filter((each) => each !== type) : [...last, type]),
+              }),
+            ),
+          } satisfies MenuGroup,
+        ]),
     {
       id: 'reset',
       items: [

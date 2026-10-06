@@ -57,11 +57,21 @@ export function claimsTreeKey(key: string): boolean {
   return NAVIGATION.has(key);
 }
 
-/** The directory a path sits in, or null at the top level. */
-function parentOf(path: string): string | null {
-  const body = path.endsWith('/') ? path.slice(0, -1) : path;
-  const cut = body.lastIndexOf('/');
-  return cut === -1 ? null : body.slice(0, cut + 1);
+/**
+ * The row a row sits under: the nearest one above it at a shallower depth.
+ *
+ * Read off the layout rather than the path. In a tree the two agree, because
+ * every row between a folder and its contents is deeper than the folder. They
+ * stop agreeing when a row's parent is not its folder: a file in a group read
+ * last sits under the group, and its path names a folder that may be
+ * elsewhere in the tree or nowhere at all.
+ */
+function parentIndex(rows: readonly KeyRow[], index: number): number {
+  const depth = rows[index]?.depth ?? 0;
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if ((rows[at]?.depth ?? 0) < depth) return at;
+  }
+  return -1;
 }
 
 /** A move to `index`, or nothing when there is no row there. */
@@ -104,9 +114,7 @@ export function resolveTreeKey(
       if (row.kind === 'directory' && row.expanded) {
         return { kind: 'fold', path: row.path, shut: true };
       }
-      const parent = parentOf(row.path);
-      if (parent === null) return null;
-      const at = rows.findIndex((candidate) => candidate.path === parent);
+      const at = parentIndex(rows, index);
       return at === -1 ? null : { kind: 'move', index: at };
     }
     default:

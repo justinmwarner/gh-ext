@@ -111,10 +111,11 @@ function byFile(matches: readonly DiffMatch[]): Map<string, FileMatches> {
  * hiding the matches must not make the number disagree with them, or the panel
  * reads as broken rather than as folded.
  *
- * `rank` is the shell's order while the review is read most changed first.
- * The results then go flat, one file row each in that order with its matches
- * under it, for the reason the file tree does: walking the results should walk
- * down the column in the order it is drawn. Null is folder order and a tree.
+ * `rank` is the shell's order whenever it is not folder order: sorted by size,
+ * or with types read last. The results then go flat, one file row each in
+ * that order with its matches under it, for the reason the file tree does:
+ * walking the results should walk down the column in the order it is drawn.
+ * Null is folder order and a tree.
  */
 export function searchRows(
   matches: readonly DiffMatch[],

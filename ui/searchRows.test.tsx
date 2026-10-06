@@ -5,7 +5,7 @@
  * CLAUDE.md is explicit about why: the rail and the diff column disagreed about
  * where a root-level `README.md` sat, once, and the fix was to give one walk
  * authority over both. A second tree that sorted its own files would put that
- * bug back in a new place. While the review is read most changed first, the
+ * bug back in a new place. While the review is not in folder order, the
  * order comes from the shell's rank instead, and the results go flat, but the
  * panel still works out no order of its own.
  */

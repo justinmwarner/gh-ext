@@ -550,16 +550,33 @@ Foreground Muted to divide its sections (never an eyebrow), a muted count after
 each row, and ticks that stay open under the pointer, because the reviewer is
 there to set several things at once.
 
-The same menu holds the one choice that is not a filter: a **Sort** section
-with one row, "Most changed first". It hides nothing, so it does not draw the
-funnel on and "Show all files" leaves it alone. While it is on, the tree goes
-flat. Each file is one row: tick, icon, name, and then its directory in
-Foreground Muted at 12px, inside the name's box so a narrow rail cuts the
-directory before the name. There is no fold arrow, because there is nothing
-to fold. Under the box, a line says "Sorted by most changed." in the count
-line's size and colour and ends in "Show as tree" in Accent Foreground. The
-whole line is one button, and pressing it brings back the tree with the folds
-the reviewer had.
+The File type section lists longer types one step in under their extension,
+`.spec.tsx` under `.tsx`, where at least two files share one. While the
+extension is hidden, a longer type under it is drawn unticked and refused,
+because hiding `.tsx` already hides the specs.
+
+The same menu holds the two choices that are not filters, because they move
+files without hiding any. A **Sort** section has one row, "Most changed
+first", and a **Read last** section lists the file types again. Neither draws
+the funnel on, and "Show all files" leaves both alone.
+
+While the review is sorted, the tree goes flat. Each file is one row: tick,
+icon, name, and then its directory in Foreground Muted at 12px, inside the
+name's box so a narrow rail cuts the directory before the name. There is no
+fold arrow, because there is nothing to fold. Generated files sort after
+everything a person wrote.
+
+Each type read last becomes a group at the foot of the tree, below a single
+Border Muted hairline. A group row looks like a folder row: tick, fold arrow,
+the type's own file icon, the type in the folder's weight, then its file count
+in Foreground Muted. Its files sit flat beneath it, each with its directory
+after its name.
+
+Under the box, one line says what has moved, in the count line's size and
+colour: "Sorted by most changed.", "Sorted by most changed, .png last." or
+".png read last.". It ends in Accent Foreground with "Show as tree" or "Put
+them back". The whole line is one button, and pressing it puts the review back
+in folder order with nothing read last, keeping the folds the reviewer had.
 
 ### The injected card (signature component)
 

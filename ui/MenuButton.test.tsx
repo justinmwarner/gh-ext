@@ -359,4 +359,38 @@ describe('a menu of sections', () => {
 
     expect(within(filters()).getByTestId('funnel')).toBeDefined();
   });
+
+  it('can name a row in words of its own, for a label that means something else elsewhere', async () => {
+    // The same `.png` is a type to show in one section and a type to read last
+    // in another. Read out as ".png" twice, the two would be indistinguishable.
+    mountGroups([
+      {
+        id: 'last',
+        label: 'Read last',
+        items: [
+          { id: 'last:.png', label: '.png', ariaLabel: 'Read .png last', checked: false, keepOpen: true, onSelect: chose() },
+        ],
+      },
+    ]);
+    await userEvent.click(filters());
+
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Read .png last' }).textContent).toContain('.png');
+  });
+
+  it('marks a row that sits under the one above it', async () => {
+    mountGroups([
+      {
+        id: 'type',
+        label: 'File type',
+        items: [
+          { id: '.tsx', label: '.tsx', checked: true, keepOpen: true, onSelect: chose() },
+          { id: '.spec.tsx', label: '.spec.tsx', indent: true, checked: true, keepOpen: true, onSelect: chose() },
+        ],
+      },
+    ]);
+    await userEvent.click(filters());
+
+    expect(screen.getByRole('menuitemcheckbox', { name: /^\.spec\.tsx/ }).getAttribute('data-indent')).toBe('true');
+    expect(screen.getByRole('menuitemcheckbox', { name: /^\.tsx/ }).getAttribute('data-indent')).toBeNull();
+  });
 });

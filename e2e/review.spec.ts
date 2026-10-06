@@ -861,6 +861,50 @@ test('sorting by most changed reorders the column without moving the line being 
 });
 
 /**
+ * Reading a type last moves its cards to the end, and the line being read stays.
+ *
+ * `docs/` sorts above `lib/`, so sending `.md` to the end takes two cards from
+ * above the reader and puts them below everything. The same rank reaches the
+ * column as the sort's does, and the same anchoring has to hold.
+ */
+test('reading a type last moves it to the foot of the review without moving the line being read', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  const reading = 'lib/cache.ts';
+  await goToFile(page, reading);
+  const line = additionLineIn(page, reading);
+  await expect(line).toBeVisible();
+  await page.waitForTimeout(400);
+  const before = (await line.boundingBox())?.y;
+  expect(before).toBeDefined();
+
+  const tree = page.locator('#rail-panel-files .filetree-rows');
+  await page.getByRole('button', { name: 'File filters' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Read .md last' }).click();
+  await page.keyboard.press('Escape');
+
+  // A group at the foot of the tree, holding both Markdown files.
+  await expect(tree.locator('[data-group=".md"]')).toBeVisible();
+  await expect(tree.locator('[data-path]').last()).toHaveAttribute('data-path', MARKDOWN_FILE);
+  await page.waitForTimeout(400);
+  expect(Math.abs(((await line.boundingBox())?.y ?? Number.NaN) - (before ?? 0))).toBeLessThan(2);
+  expect(await currentFile(page)).toBe(reading);
+
+  await page.getByRole('button', { name: '.md read last. Put them back' }).click();
+
+  await expect(tree.locator('[data-group]')).toHaveCount(0);
+  await page.waitForTimeout(400);
+  expect(Math.abs(((await line.boundingBox())?.y ?? Number.NaN) - (before ?? 0))).toBeLessThan(2);
+  expect(await currentFile(page)).toBe(reading);
+});
+
+/**
  * What the page cannot vouch for, in the bar rather than under it.
  *
  * A fine-grained token that grants the repository but not `Checks` gets the

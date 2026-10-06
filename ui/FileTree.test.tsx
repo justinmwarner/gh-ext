@@ -780,16 +780,16 @@ describe('laid out flat', () => {
   });
 
   it('says so under the box, and the line asks for the tree back', async () => {
-    const onShowTree = vi.fn();
-    mount({ files: SIZED, flat: true, onShowTree });
+    const onResetOrder = vi.fn();
+    mount({ files: SIZED, flat: true, onResetOrder });
 
     await userEvent.click(screen.getByRole('button', { name: BACK_TO_TREE }));
 
-    expect(onShowTree).toHaveBeenCalledTimes(1);
+    expect(onResetOrder).toHaveBeenCalledTimes(1);
   });
 
   it('says nothing about an order while it is a tree', () => {
-    mount({ onShowTree: vi.fn() });
+    mount({ onResetOrder: vi.fn() });
 
     expect(screen.queryByRole('button', { name: BACK_TO_TREE })).toBeNull();
   });
@@ -822,6 +822,111 @@ describe('laid out flat', () => {
     view.rerender(<FileTree files={FILES} current={NO_FILE} onSelect={onSelect} />);
 
     expect(row('src').getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+/**
+ * Types read last, at the bottom of the tree.
+ *
+ * The shell hands the tree its files in reading order and the groups beside
+ * them. Everything not in a group keeps its layout; each group is a row at the
+ * bottom that folds and ticks like a folder, with its files flat beneath it.
+ */
+describe('reading types last', () => {
+  // Reading order with `.md` sent to the end.
+  const ORDERED: ReviewFile[] = [
+    file('src/app.ts'),
+    file('src/beta.ts'),
+    file('top.ts'),
+    file('docs/readme.md'),
+  ];
+  const MD_LAST = [{ type: '.md', paths: ['docs/readme.md'] }];
+  const paths = (): (string | null)[] => rows().map((r) => r.getAttribute('data-path'));
+  const groupRow = () => document.querySelector('[role="treeitem"][data-group=".md"]') as HTMLElement;
+
+  it('keeps the rest as a tree, and puts each group at the bottom', () => {
+    mount({ files: ORDERED, groups: MD_LAST });
+
+    expect(paths()).toEqual([
+      'src/',
+      'src/app.ts',
+      'src/beta.ts',
+      'top.ts',
+      '/last/.md/',
+      'docs/readme.md',
+    ]);
+  });
+
+  it('names a group by its type and how many files it holds', () => {
+    mount({ files: ORDERED, groups: MD_LAST });
+
+    expect(groupRow().textContent).toContain('.md');
+    expect(groupRow().textContent).toContain('1 file');
+  });
+
+  it('ticks every file in a group from its box', async () => {
+    const { onSetViewed } = mount({ files: ORDERED, groups: MD_LAST });
+
+    await userEvent.click(groupRow().querySelector('[data-check]') as HTMLElement);
+
+    expect(onSetViewed).toHaveBeenCalledWith(['docs/readme.md'], true);
+  });
+
+  it('folds a group when it is pressed', async () => {
+    mount({ files: ORDERED, groups: MD_LAST });
+
+    await userEvent.click(groupRow());
+
+    expect(groupRow().getAttribute('aria-expanded')).toBe('false');
+    expect(paths()).not.toContain('docs/readme.md');
+  });
+
+  it('opens a folded group when the column moves to a file in it', async () => {
+    const onSelect = vi.fn();
+    const view = render(<FileTree files={ORDERED} groups={MD_LAST} current={NO_FILE} onSelect={onSelect} />);
+    await userEvent.click(groupRow());
+    expect(groupRow().getAttribute('aria-expanded')).toBe('false');
+
+    view.rerender(
+      <FileTree
+        files={ORDERED}
+        groups={MD_LAST}
+        current={{ path: 'docs/readme.md', origin: 'scroll' }}
+        onSelect={onSelect}
+      />,
+    );
+
+    await waitFor(() => expect(groupRow().getAttribute('aria-expanded')).toBe('true'));
+  });
+
+  it('says under the box which types are read last, and the line puts them back', async () => {
+    const onResetOrder = vi.fn();
+    mount({ files: ORDERED, groups: MD_LAST, onResetOrder });
+
+    await userEvent.click(screen.getByRole('button', { name: '.md read last. Put them back' }));
+
+    expect(onResetOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the sort and the groups in one line while the review is sorted', () => {
+    mount({ files: ORDERED, groups: MD_LAST, flat: true, onResetOrder: vi.fn() });
+
+    expect(
+      screen.getByRole('button', { name: 'Sorted by most changed, .md last. Show as tree' }),
+    ).toBeDefined();
+  });
+
+  it('leaves a group out, and out of the line, when the filters hide all of it', () => {
+    mount({
+      files: ORDERED,
+      groups: MD_LAST,
+      hidden: new Set(['docs/readme.md']),
+      menuFiltering: true,
+      onResetOrder: vi.fn(),
+    });
+
+    expect(groupRow()).toBeNull();
+    expect(screen.queryByRole('button', { name: /read last/ })).toBeNull();
   });
 });
 

@@ -2,12 +2,17 @@
  * The order a review is read in, when it is not folder order.
  *
  * Folder order is `ui/treeRows.ts`'s, and it is still the default: a review
- * opens laid out the way the repository is. This is the other one a reviewer
- * can ask for: most changed first. It is for a pull request that is mostly
- * small edits. Moving a directory, for example, leaves dozens of `+1 −1`
- * import fixes around the handful of files that changed for real. Sorted by
- * size, the real changes come first and the one-line edits gather at the end,
- * still there to tick off but no longer in the way.
+ * opens laid out the way the repository is. A reviewer can change it in two
+ * ways, separately or together.
+ *
+ * - **Most changed first.** For a pull request that is mostly small edits.
+ *   Moving a directory, for example, leaves dozens of `+1 −1` import fixes
+ *   around the handful of files that changed for real. Sorted by size, the
+ *   real changes come first and the one-line edits gather at the end, still
+ *   there to tick off but no longer in the way.
+ * - **Types read last.** For the files a team reads after the code, or not
+ *   closely: specs, snapshots, images. Sent to the end in groups, in the order
+ *   they were sent, rather than hidden.
  *
  * One rule decides the order, and every surface takes it from the shell: the
  * diff column, the tree, `j`/`k`, `n`/`p`, the Conversations list and the find
@@ -22,14 +27,88 @@
  * Pure by contract: no DOM, no `chrome.*`, no transport.
  */
 
+import { typeMatches } from './fileFilters';
+
 /** Which of the two orders the review is in. Never stored, like the filters. */
 export type ReadingOrder = 'folders' | 'changes';
+
+/**
+ * How the review is laid out: an order, and the file types sent to the end.
+ *
+ * `last` is in the order the types were sent there. The first one sent comes
+ * first after the rest of the review, and the last one ends it. The types are
+ * the filter menu's own (`fileType`, or a longer `compoundType`), so reading
+ * the specs last and hiding them speak the same language.
+ */
+export interface Arrangement {
+  sort: ReadingOrder;
+  last: readonly string[];
+}
+
+/** Folder order, nothing sent to the end: how every review opens. */
+export const AS_IS: Arrangement = Object.freeze({ sort: 'folders', last: [] });
+
+/** The files of one type read last, in reading order. */
+export interface LastGroup<T> {
+  type: string;
+  files: readonly T[];
+}
+
+export interface Arranged<T> {
+  /** Every file, in the order the review is read: the rest, then each group. */
+  files: readonly T[];
+  /** The groups at the end, in the order they are read. Empty ones left out. */
+  groups: readonly LastGroup<T>[];
+}
+
+/**
+ * The review in reading order, and the groups sent to its end.
+ *
+ * The rest of the review comes first, in the chosen order, then each type read
+ * last as a group, each also in the chosen order. A file goes in the group of
+ * the most recent type it matches. Sending `.tsx` to the end after `.spec.tsx`
+ * takes the specs along with it, because that is what was just asked for.
+ *
+ * The list it was handed comes back as the same list when nothing moves, so a
+ * caller that keys anything on identity sees no change.
+ */
+export function arrange<T extends CountedFile>(
+  files: readonly T[],
+  arrangement: Arrangement,
+): Arranged<T> {
+  const sorted = arrangement.sort === 'changes' ? mostChangedFirst(files) : files;
+  if (arrangement.last.length === 0) return { files: sorted, groups: [] };
+
+  const rest: T[] = [];
+  const grouped = arrangement.last.map((type): { type: string; files: T[] } => ({
+    type,
+    files: [],
+  }));
+  for (const file of sorted) {
+    let home: { type: string; files: T[] } | undefined;
+    for (const group of grouped) {
+      if (typeMatches(file.path, group.type)) home = group;
+    }
+    if (home === undefined) rest.push(file);
+    else home.files.push(file);
+  }
+
+  const groups = grouped.filter((group) => group.files.length > 0);
+  if (groups.length === 0) return { files: sorted, groups: [] };
+  return { files: [...rest, ...groups.flatMap((group) => group.files)], groups };
+}
 
 /** A file as far as its size goes. `ReviewFile` satisfies it. */
 export interface CountedFile {
   path: string;
   additions: number;
   deletions: number;
+  /**
+   * A lockfile, a vendored or built tree, generated output: the files the tree
+   * dims. `ReviewFile.noise`, from a fixed list of paths, so it is known for
+   * every file without asking the repository anything.
+   */
+  noise?: boolean;
 }
 
 /**
@@ -45,7 +124,7 @@ export function changedLines(file: CountedFile): number {
 }
 
 /**
- * Most changed first.
+ * Most changed first, with generated files after everything else.
  *
  * Stable, and that is half the rule. Files of the same size keep the order
  * they were handed in, which is folder order everywhere this is called, so a
@@ -55,9 +134,16 @@ export function changedLines(file: CountedFile): number {
  * mode, has a size of zero and so sinks to the end. That is a fact about
  * what can be measured, not a judgement that it does not matter: it is still
  * in the review, last.
+ *
+ * Generated files go after all of that, biggest first among themselves. By
+ * size alone a regenerated lockfile would lead the review, and it is the one
+ * file this order exists to get past. They are still in the review.
  */
 export function mostChangedFirst<T extends CountedFile>(files: readonly T[]): T[] {
-  return [...files].sort((a, b) => changedLines(b) - changedLines(a));
+  const written = (file: CountedFile): number => (file.noise === true ? 1 : 0);
+  return [...files].sort(
+    (a, b) => written(a) - written(b) || changedLines(b) - changedLines(a),
+  );
 }
 
 /** Each path's place in a list, for a surface that lays out its own list by it. */

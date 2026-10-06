@@ -41,6 +41,20 @@ export interface TreeRow {
    * ticking a folder shut is still ticking every file in it.
    */
   files: readonly string[];
+  /**
+   * On a group of files read last, the type it holds. Absent everywhere else.
+   *
+   * A group row is a `directory` in every way the tree's keys and boxes care
+   * about: it folds, and its box ticks every file in it. This is what tells
+   * the drawing it is not one.
+   */
+  group?: string;
+}
+
+/** A type read last, and the files it holds in reading order. */
+export interface TreeGroup {
+  type: string;
+  paths: readonly string[];
 }
 
 interface Node {
@@ -171,6 +185,46 @@ export function flatRows(paths: readonly string[]): TreeRow[] {
     expanded: false,
     files: [],
   }));
+}
+
+/**
+ * What a group's row goes by, as a folder's row goes by its path.
+ *
+ * It starts with a slash, which no path in a diff does, so a group can never
+ * share its key with a real folder. Folding a group and folding a folder use
+ * the same set.
+ */
+export const groupKey = (type: string): string => `/last/${type}/`;
+
+/**
+ * The rows for the groups read last, which go at the bottom of the tree.
+ *
+ * One row for each group, which folds and ticks like a folder, then its files,
+ * flat and one step in. They are flat because they come from all over the
+ * tree, and a folder inside a group would repeat folders already above it.
+ * Empty groups are left out: the filters may have hidden every file in one.
+ */
+export function lastGroupRows(
+  groups: readonly TreeGroup[],
+  collapsed: ReadonlySet<string>,
+): TreeRow[] {
+  const rows: TreeRow[] = [];
+  for (const group of groups) {
+    if (group.paths.length === 0) continue;
+    const path = groupKey(group.type);
+    const expanded = !collapsed.has(path);
+    rows.push({
+      path,
+      name: group.type,
+      depth: 0,
+      kind: 'directory',
+      expanded,
+      files: group.paths,
+      group: group.type,
+    });
+    if (expanded) for (const row of flatRows(group.paths)) rows.push({ ...row, depth: 1 });
+  }
+  return rows;
 }
 
 /**

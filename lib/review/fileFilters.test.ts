@@ -16,6 +16,7 @@ import {
   type FilterableFile,
   NO_FILTERS,
   changeKind,
+  compoundType,
   fileFacets,
   fileType,
   hiddenPaths,
@@ -23,6 +24,7 @@ import {
   isMoved,
   nearestShown,
   passes,
+  typeMatches,
 } from './fileFilters';
 
 const file = (
@@ -80,6 +82,44 @@ describe('a file’s type', () => {
 
   it('calls a name that ends in a dot a file with no extension, not one called “.”', () => {
     expect(fileType('notes.')).toBe('none');
+  });
+});
+
+/**
+ * The longer type: the word before the extension, and the extension.
+ *
+ * What lets a reviewer say "the spec files" rather than "the TypeScript files".
+ * The word has to look like a kind of file rather than part of a name, which is
+ * why a number (a version) or a dotfile's own name does not count.
+ */
+describe('a file’s longer type', () => {
+  it.each([
+    ['src/Button.spec.tsx', '.spec.tsx'],
+    ['src/app.test.ts', '.test.ts'],
+    ['types/index.d.ts', '.d.ts'],
+    ['vendor/jquery-3.6.0.min.js', '.min.js'],
+    ['archive.tar.gz', '.tar.gz'],
+    ['__snapshots__/Card.test.tsx.snap', '.tsx.snap'],
+    ['src/Card.Stories.TSX', '.stories.tsx'],
+  ])('reads %s as %s', (path, type) => {
+    expect(compoundType(path)).toBe(type);
+  });
+
+  it.each([
+    ['src/app.ts', 'a single extension'],
+    ['notes/v1.2.3.txt', 'a version number before the extension'],
+    ['config/.eslintrc.json', 'a dotfile whose own name comes before the extension'],
+    ['draft.md.', 'a name that ends in a dot'],
+    ['a..ts', 'an empty word'],
+    ['Makefile', 'no extension at all'],
+  ])('gives %s none: %s', (path) => {
+    expect(compoundType(path)).toBeNull();
+  });
+
+  it('matches a file by its extension or by its longer type', () => {
+    expect(typeMatches('src/Button.spec.tsx', '.tsx')).toBe(true);
+    expect(typeMatches('src/Button.spec.tsx', '.spec.tsx')).toBe(true);
+    expect(typeMatches('src/Button.tsx', '.spec.tsx')).toBe(false);
   });
 });
 
@@ -154,6 +194,49 @@ describe('the counts the menu lists', () => {
   });
 });
 
+describe('the longer types the menu lists', () => {
+  it('lists one under its extension when at least two files share it', () => {
+    const facets = fileFacets([
+      file('src/a.spec.tsx'),
+      file('src/b.spec.tsx'),
+      file('src/c.stories.tsx'),
+      file('src/d.stories.tsx'),
+      file('src/e.tsx'),
+      file('src/f.ts'),
+    ]);
+
+    expect([...facets.types]).toEqual([
+      ['.ts', 1],
+      ['.tsx', 5],
+      ['.spec.tsx', 2],
+      ['.stories.tsx', 2],
+    ]);
+  });
+
+  it('leaves out one that only a single file has', () => {
+    expect([...fileFacets([file('src/a.spec.tsx'), file('src/b.tsx')]).types]).toEqual([
+      ['.tsx', 2],
+    ]);
+  });
+
+  it('leaves out one every file of its extension has, which would be the same row twice', () => {
+    expect([...fileFacets([file('a.spec.tsx'), file('b.spec.tsx')]).types]).toEqual([
+      ['.tsx', 2],
+    ]);
+  });
+
+  it('keeps listing one the reviewer chose, for as long as any file here has it', () => {
+    // Unticked on the whole pull request, then one commit opened that has a
+    // single spec file. Without its row it could be neither seen nor undone.
+    const facets = fileFacets([file('src/a.spec.tsx'), file('src/b.tsx')], ['.spec.tsx', '.d.ts']);
+
+    expect([...facets.types]).toEqual([
+      ['.tsx', 2],
+      ['.spec.tsx', 1],
+    ]);
+  });
+});
+
 describe('which files pass', () => {
   it('passes everything with no filter set', () => {
     expect(passes(file('src/app.ts'), NO_FILTERS, NO_FACTS)).toBe(true);
@@ -170,6 +253,17 @@ describe('which files pass', () => {
     expect(passes(file('yarn.lock'), set, NO_FACTS)).toBe(false);
     expect(passes(file('Makefile'), set, NO_FACTS)).toBe(false);
     expect(passes(file('src/app.ts'), set, NO_FACTS)).toBe(true);
+  });
+
+  it('hides a longer type without hiding the rest of its extension', () => {
+    const set = filters({ hiddenTypes: new Set(['.spec.tsx']) });
+    expect(passes(file('src/Button.spec.tsx'), set, NO_FACTS)).toBe(false);
+    expect(passes(file('src/Button.tsx'), set, NO_FACTS)).toBe(true);
+  });
+
+  it('hides the longer types along with their extension', () => {
+    const set = filters({ hiddenTypes: new Set(['.tsx']) });
+    expect(passes(file('src/Button.spec.tsx'), set, NO_FACTS)).toBe(false);
   });
 
   it('hides viewed files, and only those', () => {

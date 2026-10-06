@@ -1975,6 +1975,36 @@ so there is one pending target rather than two things pulling.
 `ui/DiffColumn.tsx`'s `reach` is the implementation, and `ui/currentFile.ts` holds the two
 measured constants it aims at.
 
+### A reorder can leave a drawn card behind, and it moves the whole column
+
+Verified against 1.4.1, in a browser, while building "Most changed first". When the
+controlled `items` change order, `reconcileItems` keeps every record by id and anchors the
+scroll correctly. The next `computeRenderRangeAndEmit` then releases the cards it had drawn,
+but it does so by walking the *previous* `renderState.firstIndex..lastIndex` over the *new*
+`this.items`. A card that was drawn, and that the reorder moved to a position outside that
+old range, is never visited. Its element stays in the sticky container, after the cards
+that belong there, with its header slot emptied.
+
+That is not merely a stray node. `applyStickyPositioning` sets the sticky container's `top`
+**and `bottom`** insets from the height the *model* expects the drawn cards to take. The
+stranded element makes the real container taller than that, the `bottom` inset binds, and
+every drawn card is pulled up by the excess. Undoing the sort in the e2e fixture moved the
+line being read up by 149px. The anchor had done its job: the model put the card's top
+exactly where it had been, and the DOM drew it 149px higher.
+
+It only happens when a drawn card lands outside the old range. That is why it showed up when
+`lib/trim.ts`, drawn directly above the file being read, went back to its folder sixteen
+places down. In jsdom it reproduces too: forty one-section files, the first drawn one sent to
+the end, leave one more `diffs-container` than there are headers.
+
+`ui/strandedCards.ts` is the repair. After the wrapper has drawn the new list, which it does
+synchronously in its own layout effect, it applies `CodeView`'s own keep-or-release test
+(`item.top > top - item.height && item.top <= bottom`, against `windowSpecs`) to every
+record and releases the rest through `releaseRenderedItem`. All of that is private, so it
+is feature-checked and does nothing against a `CodeView` laid out differently. The e2e tests
+"sorting by most changed…" and "reading a type last…" are the checks to rerun after an
+upgrade.
+
 ## G.3 Item ownership for very large PRs
 
 From the docs: **controlled** (`items`) when React state naturally owns a small list;

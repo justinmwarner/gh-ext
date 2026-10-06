@@ -34,7 +34,7 @@ import {
   resolveScope,
 } from '@/lib/review/diffScope';
 import { type FileFilters, NO_FILTERS } from '@/lib/review/fileFilters';
-import { type ReadingOrder, mostChangedFirst, rankOf } from '@/lib/review/readingOrder';
+import { AS_IS, type Arrangement, arrange, rankOf } from '@/lib/review/readingOrder';
 import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
 import type { DiffColumnHandle, DiffStyle, LineJump, ThreadJump } from './DiffColumn';
@@ -178,14 +178,15 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const [filters, setFilters] = useState<FileFilters>(NO_FILTERS);
 
   /**
-   * Which order the review is read in: folder order, or most changed first.
+   * How the review is laid out: folder order or most changed first, and the
+   * file types sent to the end.
    *
    * Here for the reason the filters are. Every surface that walks the files
    * reads it, and it has to outlast `FilesView`, which is unmounted while a
    * commit comparison loads. Never stored either: like a filter, it is an
    * answer to this pull request, so every review opens in folder order.
    */
-  const [order, setOrder] = useState<ReadingOrder>('folders');
+  const [arrangement, setArrangement] = useState<Arrangement>(AS_IS);
 
   /**
    * What the repository declares about its own generated files.
@@ -284,20 +285,28 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const files: readonly ReviewFile[] = narrowed ? compare.files : wholeDiff;
 
   /**
-   * `files` in the order the review is read, and each file's place in it.
+   * `files` in the order the review is read, each file's place in it, and the
+   * groups read last.
    *
    * The one decision about order, made once, here. The list is what walks:
    * `j`/`k`, `n`/`p`, `Mod+K` and the Conversations list all read it. The
    * rank goes to `FilesView` beside the folder-ordered `files`, for the column
    * and the find panel, which cannot be handed a re-sorted copy. `FilesView`
-   * says why. In folder order both are what they would be without this: the
-   * list is `files` itself, and there is no rank.
+   * says why. The groups go to the tree, which draws them at its foot. In
+   * folder order with nothing read last, all three are what they would be
+   * without this: the list is `files` itself, and there is no rank.
    */
-  const ordered = useMemo(
-    () => (order === 'changes' ? mostChangedFirst(files) : files),
-    [order, files],
+  const arranged = useMemo(() => arrange(files, arrangement), [files, arrangement]);
+  const ordered = arranged.files;
+  const rank = useMemo(() => (ordered === files ? null : rankOf(ordered)), [ordered, files]);
+  const groups = useMemo(
+    () =>
+      arranged.groups.map((group) => ({
+        type: group.type,
+        paths: group.files.map((file) => file.path),
+      })),
+    [arranged],
   );
-  const rank = useMemo(() => (order === 'changes' ? rankOf(ordered) : null), [order, ordered]);
 
   /**
    * The reviewer asked for a narrowed diff and it has not arrived.
@@ -375,6 +384,7 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     generatedPatterns: settings.generatedPatterns,
     owned: owners.owned,
     composing,
+    chosenTypes: arrangement.last,
   });
   /**
    * The files the review is walking: `files` less what the filters hide.
@@ -748,7 +758,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               ownership={ownership}
               onFiltersOpen={filter.menuOpen}
               rank={rank}
-              onOrder={setOrder}
+              arrangement={arrangement}
+              groups={groups}
+              onArrange={setArrangement}
               onComposing={setComposing}
               columnRef={column}
               ref={filesView}

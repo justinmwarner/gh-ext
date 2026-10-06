@@ -9,7 +9,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { changedLines, inReadingOrder, mostChangedFirst, rankOf } from './readingOrder';
+import {
+  AS_IS,
+  arrange,
+  changedLines,
+  inReadingOrder,
+  mostChangedFirst,
+  rankOf,
+} from './readingOrder';
 
 const file = (path: string, additions: number, deletions: number) => ({
   path,
@@ -63,6 +70,19 @@ describe('mostChangedFirst', () => {
     expect(paths(sorted)).toEqual(['a.ts', 'logo.png', 'moved.ts']);
   });
 
+  it('puts the files the tree dims as generated after the rest, however big they are', () => {
+    // A regenerated lockfile is the biggest change in most pull requests that
+    // have one, and the last thing a reviewer wants first.
+    const sorted = mostChangedFirst([
+      { ...file('package-lock.json', 4000, 3000), noise: true },
+      file('src/a.ts', 2, 1),
+      { ...file('dist/bundle.js', 900, 0), noise: true },
+      file('src/b.ts', 30, 0),
+    ]);
+
+    expect(paths(sorted)).toEqual(['src/b.ts', 'src/a.ts', 'package-lock.json', 'dist/bundle.js']);
+  });
+
   it('leaves the list it was given alone', () => {
     const given = [file('a.ts', 1, 0), file('b.ts', 9, 0)];
     mostChangedFirst(given);
@@ -97,3 +117,90 @@ describe('inReadingOrder', () => {
     ]);
   });
 });
+
+/**
+ * Types read last: sent to the end of the review, not out of it.
+ *
+ * Each type the reviewer sends there goes after every type already there, so
+ * the order they were sent in is the order they are read in. A file that
+ * matches two of them goes with the one sent most recently, which is what
+ * "send this to the end" means for a file that was already in another group.
+ */
+describe('arrange', () => {
+  // Folder order, as the shell hands it over.
+  const FILES = [
+    file('assets/logo.png', 0, 0),
+    file('src/a.spec.tsx', 5, 0),
+    file('src/a.tsx', 9, 1),
+    file('src/b.spec.tsx', 1, 1),
+    file('src/b.tsx', 2, 0),
+  ];
+  const groupsOf = (arranged: ReturnType<typeof arrange<(typeof FILES)[number]>>) =>
+    arranged.groups.map((group) => [group.type, paths(group.files)]);
+
+  it('hands back the very list it was given, with nothing to rearrange', () => {
+    const arranged = arrange(FILES, AS_IS);
+
+    expect(arranged.files).toBe(FILES);
+    expect(arranged.groups).toEqual([]);
+  });
+
+  it('moves a type read last to the end, and leaves the rest in their order', () => {
+    const arranged = arrange(FILES, { sort: 'folders', last: ['.png'] });
+
+    expect(paths(arranged.files)).toEqual([
+      'src/a.spec.tsx',
+      'src/a.tsx',
+      'src/b.spec.tsx',
+      'src/b.tsx',
+      'assets/logo.png',
+    ]);
+    expect(groupsOf(arranged)).toEqual([['.png', ['assets/logo.png']]]);
+  });
+
+  it('reads the types last in the order they were sent there', () => {
+    const arranged = arrange(FILES, { sort: 'folders', last: ['.spec.tsx', '.png'] });
+
+    expect(paths(arranged.files)).toEqual([
+      'src/a.tsx',
+      'src/b.tsx',
+      'src/a.spec.tsx',
+      'src/b.spec.tsx',
+      'assets/logo.png',
+    ]);
+    expect(groupsOf(arranged)).toEqual([
+      ['.spec.tsx', ['src/a.spec.tsx', 'src/b.spec.tsx']],
+      ['.png', ['assets/logo.png']],
+    ]);
+  });
+
+  it('puts a file that two of them take in with the one sent there most recently', () => {
+    const arranged = arrange(FILES, { sort: 'folders', last: ['.spec.tsx', '.tsx'] });
+
+    // Every `.tsx` file went to the end after the specs did, specs included,
+    // which leaves the specs' own group with nothing in it.
+    expect(groupsOf(arranged)).toEqual([
+      ['.tsx', ['src/a.spec.tsx', 'src/a.tsx', 'src/b.spec.tsx', 'src/b.tsx']],
+    ]);
+  });
+
+  it('sorts the rest and each group by size while the review is read most changed first', () => {
+    const arranged = arrange(FILES, { sort: 'changes', last: ['.spec.tsx'] });
+
+    expect(paths(arranged.files)).toEqual([
+      'src/a.tsx',
+      'src/b.tsx',
+      'assets/logo.png',
+      'src/a.spec.tsx',
+      'src/b.spec.tsx',
+    ]);
+  });
+
+  it('hands back the list it was given when no file here has a type read last', () => {
+    const arranged = arrange(FILES, { sort: 'folders', last: ['.md'] });
+
+    expect(arranged.files).toBe(FILES);
+    expect(arranged.groups).toEqual([]);
+  });
+});
+

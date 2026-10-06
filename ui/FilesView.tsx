@@ -46,7 +46,8 @@ import type { CurrentFile } from './currentFile';
 import { FilterMenu, type OwnershipNote } from './FilterMenu';
 import { fileComments } from './fileTreeData';
 import type { GeneratedRule } from '@/lib/review/generated';
-import { type ReadingOrder, inReadingOrder } from '@/lib/review/readingOrder';
+import { AS_IS, type Arrangement, inReadingOrder } from '@/lib/review/readingOrder';
+import type { TreeGroup } from './treeRows';
 import type { MenuButtonHandle } from './MenuButton';
 import type { ReviewFile } from './reviewFiles';
 import { useArchiveIndexes } from './useArchiveIndexes';
@@ -157,18 +158,23 @@ export interface FilesViewProps {
   /** The filter menu opened or shut. Passed straight through to it. */
   onFiltersOpen?: (open: boolean) => void;
   /**
-   * Each file's place while the review is read most changed first, or null in
+   * Each file's place in the order the review is read, or null while that is
    * folder order, which is the order `files` already has.
    *
    * The shell's order, which this view applies and does not decide. `files`
    * stays in folder order beside it, for two of the three readers `hidden`
    * gives: the column, whose viewer a re-sorted list would rebuild, and the
    * find panel, which would walk every patch again. The tree is handed the
-   * list already sorted, and draws it flat.
+   * list already in order, with `groups` saying where the types read last
+   * begin.
    */
   rank?: ReadonlyMap<string, number> | null;
-  /** Ask for the other order, from the menu or from the line under the box. */
-  onOrder?: (next: ReadingOrder) => void;
+  /** How the review is laid out: the sort, and the types read last. */
+  arrangement?: Arrangement;
+  /** The types read last, each with its files in reading order. */
+  groups?: readonly TreeGroup[];
+  /** Lay the review out differently, from the menu or the line under the box. */
+  onArrange?: (next: Arrangement) => void;
   /** Which file a composer is open on. Passed straight up from the column. */
   onComposing?: (path: string | null) => void;
   columnRef?: Ref<DiffColumnHandle>;
@@ -210,7 +216,9 @@ export function FilesView({
   ownership,
   onFiltersOpen,
   rank = null,
-  onOrder,
+  arrangement = AS_IS,
+  groups,
+  onArrange,
   onComposing,
   columnRef,
   ref,
@@ -417,8 +425,9 @@ export function FilesView({
                 collapseTree={collapseTree}
                 hidden={hidden}
                 menuFiltering={filtering}
-                flat={rank !== null}
-                onShowTree={onOrder === undefined ? undefined : () => onOrder('folders')}
+                flat={arrangement.sort === 'changes'}
+                groups={groups}
+                onResetOrder={onArrange === undefined ? undefined : () => onArrange(AS_IS)}
                 filterMenu={
                   onFilters === undefined ? undefined : (
                     <FilterMenu
@@ -429,8 +438,18 @@ export function FilesView({
                       active={filtering}
                       ownership={ownership}
                       onOpenChange={onFiltersOpen}
-                      order={rank === null ? 'folders' : 'changes'}
-                      onOrder={onOrder}
+                      order={arrangement.sort}
+                      onOrder={
+                        onArrange === undefined
+                          ? undefined
+                          : (sort) => onArrange({ ...arrangement, sort })
+                      }
+                      last={arrangement.last}
+                      onLast={
+                        onArrange === undefined
+                          ? undefined
+                          : (last) => onArrange({ ...arrangement, last })
+                      }
                     />
                   )
                 }

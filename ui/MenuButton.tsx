@@ -75,6 +75,21 @@ export interface MenuItem {
   /** A figure drawn after the label, muted: how many files a row stands for. */
   detail?: string;
   /**
+   * What the row is called, when its label alone would be ambiguous.
+   *
+   * The file filters list each type twice, once to hide and once to read last,
+   * and `.png` read out in both places is the same word for two different
+   * controls. The section heading draws the difference, but the item's name
+   * is what a screen reader says when it lands there. Keep the label's words
+   * in it, so someone speaking the visible label still reaches the row.
+   */
+  ariaLabel?: string;
+  /**
+   * Drawn one step in, under the row above it. For a longer file type sitting
+   * under its extension: `.spec.tsx` under `.tsx`.
+   */
+  indent?: boolean;
+  /**
    * A sentence under the label, drawn and read.
    *
    * On screen rather than in a `title`, because what goes here is the kind of
@@ -345,7 +360,9 @@ export function MenuButton({
         }}
         role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
         aria-checked={item.checked}
+        aria-label={item.ariaLabel}
         aria-describedby={described}
+        data-indent={item.indent === true ? 'true' : undefined}
         // Tab leaves a menu rather than moving inside one, so exactly one
         // item is in the sequence and the arrows do the rest.
         tabIndex={position === at ? 0 : -1}

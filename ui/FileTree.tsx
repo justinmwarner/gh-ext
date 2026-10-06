@@ -42,9 +42,12 @@
  * **Flat while the review is read most changed first.** A tree cannot show
  * that order, because a `+1 −1` file would only sink to the bottom of its own
  * folder. So the rows go flat, in the order `files` arrives in, each with its
- * directory after its name. The folds are kept and come back with the tree,
- * and the line under the box that says the list is sorted is also the button
- * that puts the tree back.
+ * directory after its name. The folds are kept and come back with the tree.
+ *
+ * **Types read last are groups at the foot.** Each is a row that folds and
+ * ticks like a folder, with its files flat beneath it, whatever the rest of
+ * the tree is doing. The line under the box names what has moved, the sort
+ * and the groups, and is also the button that puts all of it back.
  *
  * **The icons are Material Icon Theme's, and they arrive late.** A coloured
  * dot stood here for a while and was the wrong answer: a 7px square of
@@ -61,6 +64,7 @@
  */
 
 import {
+  Fragment,
   type KeyboardEvent,
   type ReactNode,
   useCallback,
@@ -71,13 +75,22 @@ import {
   useState,
 } from 'react';
 import type { FileViewedState } from '@/lib/github/types';
-import { changeKind } from '@/lib/review/fileFilters';
+import { changeKind, typeLabel } from '@/lib/review/fileFilters';
 import { pathMatches } from '@/lib/review/search';
 import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import type { FileComments } from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
 import { claimsTreeKey, resolveTreeKey } from './treeKeys';
-import { type TreeRow, checkState, directoryPaths, flatRows, treeRows } from './treeRows';
+import {
+  type TreeGroup,
+  type TreeRow,
+  checkState,
+  directoryPaths,
+  flatRows,
+  groupKey,
+  lastGroupRows,
+  treeRows,
+} from './treeRows';
 import { useFileIcons } from './useFileIcons';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
@@ -228,11 +241,38 @@ export interface FileTreeProps {
    */
   flat?: boolean;
   /**
-   * Put the tree back. Pressing the line under the box does this while `flat`
-   * is on, so the way back is right where the list says why it looks different.
+   * The types read last, each with its files in reading order. Drawn at the
+   * bottom as groups that fold and tick like folders. `files` already has
+   * them at its end; this says where each group starts and what to call it.
    */
-  onShowTree?: () => void;
+  groups?: readonly TreeGroup[];
+  /**
+   * Put the review back in folder order, with nothing read last. Pressing the
+   * line under the box does this, so the way back is right where the list
+   * says why it looks different.
+   */
+  onResetOrder?: () => void;
 }
+
+const NO_GROUPS: readonly TreeGroup[] = [];
+
+/**
+ * The line under the box while the order is not the folders', in words.
+ *
+ * One sentence for both things that can move a file: the sort, and the types
+ * read last. The way back is the same press either way, so it is one line.
+ */
+function orderSentence(flat: boolean, last: readonly string[]): string {
+  const types = new Intl.ListFormat('en', { type: 'conjunction' }).format(last);
+  if (!flat) return `${types} read last.`;
+  return last.length === 0 ? 'Sorted by most changed.' : `Sorted by most changed, ${types} last.`;
+}
+
+/**
+ * A file name for an icon lookup: what a group of one type looks like is
+ * what one of its files looks like.
+ */
+const sampleOf = (type: string): string => (type.startsWith('.') ? `file${type}` : 'file');
 
 export function FileTree({
   files,
@@ -246,7 +286,8 @@ export function FileTree({
   menuFiltering = false,
   filterMenu,
   flat = false,
-  onShowTree,
+  groups = NO_GROUPS,
+  onResetOrder,
 }: FileTreeProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NOTHING_COLLAPSED);
   const [focused, setFocused] = useState<string | null>(null);
@@ -308,13 +349,45 @@ export function FileTree({
     [filtering, kept, query],
   );
 
+  /**
+   * The groups read last, holding only what is showing, and everything else.
+   *
+   * A group the filters have emptied draws nothing and is not named under the
+   * box: there is nothing in it to read last.
+   */
+  const shownSet = useMemo(() => new Set(shown), [shown]);
+  const groupsShown = useMemo(
+    () => groups.map((group) => ({ type: group.type, paths: group.paths.filter((path) => shownSet.has(path)) })),
+    [groups, shownSet],
+  );
+  const main = useMemo(() => {
+    if (groups.length === 0) return shown;
+    const grouped = new Set(groups.flatMap((group) => group.paths));
+    return shown.filter((path) => !grouped.has(path));
+  }, [groups, shown]);
+  const lastTypes = useMemo(
+    () => groupsShown.filter((group) => group.paths.length > 0).map((group) => group.type),
+    [groupsShown],
+  );
+
   // Flat rows keep the order `files` arrived in, which is the shell's. The tree
   // lays out its own, and `collapsed` is left alone either way, so the folds
-  // are still there when the tree comes back.
-  const rows = useMemo(
-    () => (flat ? flatRows(shown) : treeRows(shown, filtering ? NOTHING_COLLAPSED : collapsed)),
-    [flat, shown, filtering, collapsed],
-  );
+  // are still there when the tree comes back. The groups go underneath both.
+  const rows = useMemo(() => {
+    const folds = filtering ? NOTHING_COLLAPSED : collapsed;
+    const top = flat ? flatRows(main) : treeRows(main, folds);
+    return groups.length === 0 ? top : [...top, ...lastGroupRows(groupsShown, folds)];
+  }, [flat, main, filtering, collapsed, groups.length, groupsShown]);
+
+  /** Where the groups read last begin, for the hairline drawn above them. */
+  const firstGroup = useMemo(() => rows.findIndex((row) => row.group !== undefined), [rows]);
+
+  /** Which group each file read last is in, by the key its row goes by. */
+  const groupOf = useMemo(() => {
+    const keys = new Map<string, string>();
+    for (const group of groups) for (const path of group.paths) keys.set(path, groupKey(group.type));
+    return keys;
+  }, [groups]);
   const byPath = useMemo(
     () => new Map(files.map((file) => [file.path, file])),
     [files],
@@ -349,9 +422,15 @@ export function FileTree({
           next.delete(prefix);
         }
       }
+      // A file read last sits in its group, not under its folders.
+      const group = groupOf.get(currentPath);
+      if (group !== undefined && open.has(group)) {
+        next ??= new Set(open);
+        next.delete(group);
+      }
       return next ?? open;
     });
-  }, [currentPath]);
+  }, [currentPath, groupOf]);
 
   /**
    * Follow the diff column, and only the diff column.
@@ -369,19 +448,20 @@ export function FileTree({
   /**
    * Bring the file being read back into view when the rows change layout.
    *
-   * Going flat, or back to the tree, moves every row, so the one the review is
-   * on can land anywhere in the rail. This runs whichever surface last moved
-   * the file, including the tree itself: the row the reviewer clicked is no
-   * longer where they clicked it. Scrolled to, not focused, for the reason
-   * given above.
+   * Going flat, going back to the tree, or sending a type to the end moves
+   * rows, so the one the review is on can land anywhere in the rail. This runs
+   * whichever surface last moved the file, including the tree itself: the row
+   * the reviewer clicked is no longer where they clicked it. Scrolled to, not
+   * focused, for the reason given above.
    */
-  const laidOut = useRef(flat);
+  const layout = `${flat}|${groups.map((group) => group.type).join('|')}`;
+  const laidOut = useRef(layout);
   useEffect(() => {
-    if (laidOut.current === flat) return;
-    laidOut.current = flat;
+    if (laidOut.current === layout) return;
+    laidOut.current = layout;
     if (currentPath === null) return;
     elements.current.get(currentPath)?.scrollIntoView({ block: 'nearest' });
-  }, [flat, currentPath]);
+  }, [layout, currentPath]);
 
   // Exactly one row is in the tab order. The focused one, unless it has been
   // folded away or the file list changed underneath it.
@@ -548,13 +628,14 @@ export function FileTree({
             {narrowed}
           </p>
         )}
-        {flat && onShowTree !== undefined && (
+        {(flat || lastTypes.length > 0) && onResetOrder !== undefined && (
           /* Why the list stopped looking like a tree, and the way back, as one
-             button. A reviewer who wonders where the folders went is reading
-             this line, so the line is what undoes it. */
-          <button type="button" className="filetree-order" onClick={onShowTree}>
-            Sorted by most changed.{' '}
-            <span className="filetree-order-action">Show as tree</span>
+             button. A reviewer who wonders where the folders went, or why the
+             specs are at the bottom, is reading this line, so the line is what
+             undoes it. */
+          <button type="button" className="filetree-order" onClick={onResetOrder}>
+            {orderSentence(flat, lastTypes.map(typeLabel))}{' '}
+            <span className="filetree-order-action">{flat ? 'Show as tree' : 'Put them back'}</span>
           </button>
         )}
       </div>
@@ -583,16 +664,26 @@ export function FileTree({
           });
         }}
       >
-      {rows.map((row) => {
+      {rows.map((row, at) => {
         const file = byPath.get(row.path);
-        const icon = icons.urlFor(row.path, row.kind, row.expanded);
+        const group = row.group;
+        // A group looks like one of its files, so `.png` reads as images
+        // before its name is read at all.
+        const icon =
+          group === undefined
+            ? icons.urlFor(row.path, row.kind, row.expanded)
+            : icons.urlFor(sampleOf(group), 'file', false);
         const state = checkState(row, states);
         const talk = row.kind === 'file' ? comments?.get(row.path) : undefined;
         const mark = talk === undefined || talk.total === 0 ? null : commentMark(talk);
 
         return (
+          <Fragment key={row.path}>
+          {/* One hairline where the review ends and what is read last begins,
+              the grouping DESIGN.md prefers to a box. Hidden from assistive
+              technology, for which the group rows say it themselves. */}
+          {at === firstGroup && <div className="tree-groups-rule" aria-hidden="true" />}
           <div
-            key={row.path}
             ref={(node) => {
               if (node === null) elements.current.delete(row.path);
               else elements.current.set(row.path, node);
@@ -600,11 +691,18 @@ export function FileTree({
             className="tree-row"
             role="treeitem"
             data-path={row.path}
+            data-group={group}
             data-status={file === undefined ? undefined : changeKind(file.changeType)}
             data-noise={file?.noise === true ? 'true' : undefined}
             // The name is the basename, which is all a narrow column fits. The
             // path is what says which of four `index.ts` this one is.
-            title={row.path.endsWith('/') ? row.path.slice(0, -1) : row.path}
+            title={
+              group !== undefined
+                ? `Read last: ${typeLabel(group)}`
+                : row.path.endsWith('/')
+                  ? row.path.slice(0, -1)
+                  : row.path
+            }
             aria-level={row.depth + 1}
             aria-selected={row.path === current.path}
             aria-checked={state === 'mixed' ? 'mixed' : state === 'checked'}
@@ -643,9 +741,12 @@ export function FileTree({
                 up. A root-level file beside a root-level folder is at the same
                 depth, and without the folder's twelve pixels its icon would sit
                 out to the left of every folder icon on the rail. */}
-            {/* Not on a flat list, which has no folders for it to line the
-                icons up with, and twelve pixels the name can use. */}
-            {!flat && <span className="tree-chevron" aria-hidden="true" />}
+            {/* Not on a flat list's files, which have no folders to line their
+                icons up with, and twelve pixels the name can use. A group row
+                keeps it either way: it folds. */}
+            {(!flat || row.kind === 'directory') && (
+              <span className="tree-chevron" aria-hidden="true" />
+            )}
 
             {/* The row holds the icon's width whether or not there is an icon
                 in it yet — `.tree-icon-slot` in the stylesheet — so the names
@@ -661,14 +762,19 @@ export function FileTree({
             </span>
 
             <span className="tree-name">
-              {row.name}
-              {/* Flat rows have no folder above them to say where a file is,
-                  so the directory follows the name. It is inside the name's
-                  box on purpose: that box is cut off at the end with an
-                  ellipsis, so a narrow rail shortens the directory and leaves
-                  the name whole. It is also read out with the name, which
-                  tells four `index.ts` rows apart. */}
-              {flat && row.path.includes('/') && (
+              {group === undefined ? row.name : typeLabel(group)}
+              {group !== undefined && (
+                <span className="tree-group-size">
+                  {`${row.files.length} ${row.files.length === 1 ? 'file' : 'files'}`}
+                </span>
+              )}
+              {/* Flat rows, and the files in a group, have no folder above them
+                  to say where a file is, so the directory follows the name. It
+                  is inside the name's box on purpose: that box is cut off at
+                  the end with an ellipsis, so a narrow rail shortens the
+                  directory and leaves the name whole. It is also read out with
+                  the name, which tells four `index.ts` rows apart. */}
+              {row.kind === 'file' && (flat || groupOf.has(row.path)) && row.path.includes('/') && (
                 <span className="tree-dir">{row.path.slice(0, row.path.lastIndexOf('/'))}</span>
               )}
             </span>
@@ -719,6 +825,7 @@ export function FileTree({
               </span>
             )}
           </div>
+          </Fragment>
         );
       })}
       </div>
