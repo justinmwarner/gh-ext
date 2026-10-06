@@ -789,6 +789,36 @@ button.scope-showing:hover {
   padding: 0;
 }
 
+/* The box the dot below is placed in. */
+.filter-menu-host .menu-trigger {
+  position: relative;
+}
+
+/* The filled funnel says a filter is on, but only to someone who knows what
+   it looks like when nothing is. The dot is the mark people already know from
+   GitHub: an Accent Emphasis dot on the corner, with a ring in the trigger's
+   own background so it reads as separate from the funnel. It sits inside the
+   button rather than over its edge, because the rail clips anything above the
+   filter row. */
+.filter-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-emphasis);
+  box-shadow: 0 0 0 2px var(--canvas-subtle);
+  pointer-events: none;
+}
+
+/* The ring follows the button's background when the pointer or the open menu
+   changes it. Otherwise it would show as a pale halo. */
+.menu-trigger[data-active='true']:hover .filter-dot,
+.menu-trigger[data-active='true'][aria-expanded='true'] .filter-dot {
+  box-shadow: 0 0 0 2px var(--neutral-hover);
+}
+
 /* --------------------------------------------------------- commit picker */
 
 .commit-picker-hint {
@@ -1245,6 +1275,34 @@ button.scope-showing:hover {
   color: var(--fg-muted);
 }
 
+/* While the list is sorted by size: what changed about it, and the way back
+   to the tree, as one button. The same size and colour as the count line, with
+   the action in the link colour so it reads as something to press. Only as
+   wide as its words, so the pointer has to be on the sentence to press it. */
+.filetree-order {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  color: var(--fg-muted);
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* Kept on one line: on a narrow rail the sentence wraps before the action
+   does, rather than leaving "tree" alone on a line of its own. */
+.filetree-order-action {
+  color: var(--accent-fg);
+  white-space: nowrap;
+}
+
+.filetree-order:hover .filetree-order-action {
+  text-decoration: underline;
+}
+
 .filetree-rows {
   flex: 1 1 auto;
   min-width: 0;
@@ -1428,6 +1486,15 @@ button.scope-showing:hover {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A flat row's directory, after its name and quieter than it. It sits inside
+   `.tree-name` so the ellipsis cuts the directory before it reaches the name.
+   The row's title gives the whole path. */
+.tree-dir {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
 }
 
 /* Present, reachable, and out of the way: a lockfile has to stay clickable

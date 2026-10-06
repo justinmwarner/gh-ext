@@ -5,7 +5,9 @@
  * CLAUDE.md is explicit about why: the rail and the diff column disagreed about
  * where a root-level `README.md` sat, once, and the fix was to give one walk
  * authority over both. A second tree that sorted its own files would put that
- * bug back in a new place.
+ * bug back in a new place. While the review is read most changed first, the
+ * order comes from the shell's rank instead, and the results go flat, but the
+ * panel still works out no order of its own.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -161,6 +163,43 @@ describe('searchRows', () => {
     const keys = rows.map((row) => row.key);
 
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('lays the files out flat in the order of a rank, while the review is sorted', () => {
+    // Most changed first, which the shell decided: the result list follows
+    // it, so walking the results walks down the column in the order it is drawn.
+    const rank = new Map([
+      ['src/mid.ts', 0],
+      ['docs/readme.md', 1],
+    ]);
+    const rows = searchRows(
+      [match('docs/readme.md', 2, 'x'), match('src/mid.ts', 5, 'x')],
+      NOTHING,
+      rank,
+    );
+
+    expect(kindsAndPaths(rows)).toEqual([
+      'file:src/mid.ts',
+      'match:src/mid.ts',
+      'file:docs/readme.md',
+      'match:docs/readme.md',
+    ]);
+    expect(rows.map((row) => row.depth)).toEqual([0, 1, 0, 1]);
+  });
+
+  it('gives a flat file row its directory to draw, and a tree’s file row none', () => {
+    const flat = searchRows([match('src/mid.ts', 5, 'x'), match('top.ts', 1, 'x')], NOTHING, new Map());
+    const tree = searchRows([match('src/mid.ts', 5, 'x')], NOTHING);
+
+    expect(holderAt(flat, 'src/mid.ts')).toMatchObject({ directory: 'src' });
+    expect(holderAt(flat, 'top.ts')).toMatchObject({ directory: null });
+    expect(holderAt(tree, 'src/mid.ts')).toMatchObject({ directory: null });
+  });
+
+  it('still folds a file in a flat list', () => {
+    const rows = searchRows([match('src/mid.ts', 5, 'x')], new Set(['src/mid.ts']), new Map());
+
+    expect(kindsAndPaths(rows)).toEqual(['file:src/mid.ts']);
   });
 
   it('is empty when nothing matched', () => {

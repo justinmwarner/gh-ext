@@ -44,14 +44,20 @@ ours" is the wrong instinct here.
   next load boots the previous choice. `App` calls `usePageTheme` once for every
   route; a new route needs nothing. The injected card is not part of this — it
   is handed an id at mount and calls `applyChromeTheme` directly.
-- **One order, and `treeRows` owns it.** The tree and the diff column both read
-  `fileOrder` — directories first, then files, counting the way a person does.
-  `reviewFiles` sorts by it, so the whole diff and a narrowed one are laid out
-  by the same rule without either caller knowing there is one. Do not re-sort
-  at a surface: they disagreed once, and a root-level `README.md` came first in
-  the column and last in the tree. There are **two** trees now — the checklist
-  and the find panel's results — and `ui/searchRows.ts` defers to `treeRows`
-  for exactly this reason rather than laying its own files out. Their shared
+- **One order at a time, and the shell picks it.** By default it is
+  `treeRows`' `fileOrder`: directories first, then files, counting the way a
+  person does. `reviewFiles` sorts by it, so the whole diff and a narrowed one
+  are laid out by the same rule without either caller knowing there is one.
+  The funnel menu can switch the review to most changed first. That rule is
+  `lib/review/readingOrder.ts`, and `Shell` applies it once. Do not re-sort at
+  a surface: they disagreed once, and a root-level `README.md` came first in
+  the column and last in the tree. Every surface takes the shell's order. The
+  walkers (`j`/`k`, `n`/`p`, `Mod+K`, Conversations) get the sorted list. The
+  column and the find panel get a `rank` beside the folder-ordered list and
+  lay themselves out with `inReadingOrder`, for the reason the file filters
+  rule below gives for `hidden`. There are **two** trees, the checklist and
+  the find panel's results, and `ui/searchRows.ts` defers to `treeRows` (to
+  `flatRows` while sorted) rather than laying its own files out. Their shared
   keyboard is `ui/treeKeys.ts`, for the same reason twice over.
 
 - **The rail's two panels must not declare `visibility: visible`.** `FilesView`
@@ -81,12 +87,15 @@ ours" is the wrong instinct here.
   take the whole list and `hidden` beside it; everything that only walks files
   (`j`/`k`, `Mod+K`, the scope bar) takes `useFileFilter`'s `shown`. The
   e2e test "narrows the column without moving the line being read" is the
-  check. Its companion rule lives in `ui/useFileFilter.ts`: what may leave the
-  screen, and when. The file the reviewer is on, a file they have just ticked or
-  resolved, and a file with unsent writing on it are never in `hidden` — thread
-  links rely on the first to bring a hidden file back — and a filter change
-  moves the reviewer only if it is what hides their file. Tests that pin each
-  half are in `ui/fileFilter.test.tsx`; change the rule there first.
+  check. The sort's `rank` reaches the column the same way, for the same
+  reason, and "sorting by most changed reorders the column without moving the
+  line being read" is its check. The filters' companion rule lives in
+  `ui/useFileFilter.ts`: what may leave the screen, and when. The file the
+  reviewer is on, a file they have just ticked or resolved, and a file with
+  unsent writing on it are never in `hidden` — thread links rely on the first
+  to bring a hidden file back — and a filter change moves the reviewer only if
+  it is what hides their file. Tests that pin each half are in
+  `ui/fileFilter.test.tsx`; change the rule there first.
 
 - **The file icons are generated, like the palettes.** `material-icon-theme` is
   a devDependency and nothing from it ships; `npm run file-icons` writes the

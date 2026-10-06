@@ -22,8 +22,9 @@
  * Pure, and no DOM: what a row looks like is `SearchTree`'s business.
  */
 
+import { inReadingOrder } from '@/lib/review/readingOrder';
 import type { DiffMatch, Span } from '@/lib/review/search';
-import { treeRows } from './treeRows';
+import { flatRows, treeRows } from './treeRows';
 
 /** One drawable row. Directory paths end in `/`; file paths do not. */
 export type SearchRow =
@@ -49,6 +50,12 @@ export type SearchRow =
       key: string;
       /** Where the query hit the path, when it did. Null when it did not. */
       nameMatch: Span | null;
+      /**
+       * The folder the file sits in, drawn after its name while the results
+       * are flat. Null in a tree, where the rows above already say it, and
+       * for a file at the root.
+       */
+      directory: string | null;
     }
   | {
       kind: 'match';
@@ -103,18 +110,28 @@ function byFile(matches: readonly DiffMatch[]): Map<string, FileMatches> {
  * is keyed by path and the two kinds share it. A collapsed row keeps its count:
  * hiding the matches must not make the number disagree with them, or the panel
  * reads as broken rather than as folded.
+ *
+ * `rank` is the shell's order while the review is read most changed first.
+ * The results then go flat, one file row each in that order with its matches
+ * under it, for the reason the file tree does: walking the results should walk
+ * down the column in the order it is drawn. Null is folder order and a tree.
  */
 export function searchRows(
   matches: readonly DiffMatch[],
   collapsed: ReadonlySet<string>,
+  rank: ReadonlyMap<string, number> | null = null,
 ): SearchRow[] {
   const grouped = byFile(matches);
   if (grouped.size === 0) return [];
 
   // The structure, from the one walk that is allowed to decide it. Directories
   // are folded here; files are folded below, because `treeRows` has no notion
-  // of a file with children.
-  const structure = treeRows([...grouped.keys()], collapsed);
+  // of a file with children. Flat, the order is the rank's and nothing else's.
+  const files = [...grouped.keys()];
+  const structure =
+    rank === null
+      ? treeRows(files, collapsed)
+      : flatRows(inReadingOrder(files.map((path) => ({ path })), rank).map(({ path }) => path));
   const rows: SearchRow[] = [];
 
   for (const row of structure) {
@@ -146,6 +163,10 @@ export function searchRows(
       matches: file.total,
       key: row.path,
       nameMatch: file.nameMatch,
+      directory:
+        rank === null || !row.path.includes('/')
+          ? null
+          : row.path.slice(0, row.path.lastIndexOf('/')),
     });
 
     if (!expanded) continue;

@@ -288,6 +288,12 @@ export function SearchTree({ rows, onFold, onReveal, onCommit, ref }: SearchTree
                   ) : (
                     row.name
                   )}
+                  {/* Flat results have no folder rows above them, so the
+                      directory follows the name, as it does in the file
+                      tree's flat rows. */}
+                  {row.kind === 'file' && row.directory !== null && (
+                    <span className="tree-dir">{row.directory}</span>
+                  )}
                 </span>
 
                 {/* The count, which a folded row keeps. Hiding the matches must

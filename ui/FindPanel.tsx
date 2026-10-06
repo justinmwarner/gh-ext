@@ -33,6 +33,7 @@ import {
   parseFiles,
   searchParsed,
 } from '@/lib/review/search';
+import { inReadingOrder } from '@/lib/review/readingOrder';
 import { SearchTree, type SearchTreeHandle } from './SearchTree';
 import type { ArchiveIndexes } from './useArchiveIndexes';
 import type { ReviewFile } from './reviewFiles';
@@ -103,6 +104,17 @@ export interface FindPanelProps {
    * everywhere, and "No results" standing alone would claim that it had.
    */
   hidden?: ReadonlySet<string>;
+  /**
+   * Each file's place while the review is read most changed first, or null
+   * in folder order.
+   *
+   * A rank beside `files` rather than a re-sorted `files`, for the reason
+   * `hidden` is a set: the patches are walked once, against `files`. The
+   * search runs through the files in this order, so the result cap keeps the
+   * first results in the order the reviewer is reading, and the results are
+   * drawn flat in it.
+   */
+  rank?: ReadonlyMap<string, number> | null;
   ref?: React.Ref<FindPanelHandle>;
 }
 
@@ -162,6 +174,7 @@ export function FindPanel({
   onGoTo,
   onClose,
   hidden = NOTHING_HIDDEN,
+  rank = null,
   ref,
 }: FindPanelProps) {
   const [folded, setFolded] = useState<ReadonlySet<string>>(NOTHING_FOLDED);
@@ -214,10 +227,16 @@ export function FindPanel({
   );
 
   // The walk above is kept whole; only what is searched is narrowed, and that
-  // is a filter over files already parsed.
+  // is a filter over files already parsed. Put in the review's order too, so
+  // that when the cap below cuts the results short, it keeps the first ones
+  // in the order the reviewer is reading.
   const searched = useMemo(
-    () => (hidden.size === 0 ? parsed : parsed.filter((file) => !hidden.has(file.path))),
-    [parsed, hidden],
+    () =>
+      inReadingOrder(
+        hidden.size === 0 ? parsed : parsed.filter((file) => !hidden.has(file.path)),
+        rank,
+      ),
+    [parsed, hidden, rank],
   );
 
   const matches = useMemo(
@@ -225,7 +244,7 @@ export function FindPanel({
     [searched, matcher],
   );
 
-  const rows = useMemo(() => searchRows(matches, folded), [matches, folded]);
+  const rows = useMemo(() => searchRows(matches, folded, rank), [matches, folded, rank]);
 
   const matchedFiles = useMemo(
     () => new Set(matches.map((match) => match.path)).size,

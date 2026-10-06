@@ -34,6 +34,7 @@ import {
   resolveScope,
 } from '@/lib/review/diffScope';
 import { type FileFilters, NO_FILTERS } from '@/lib/review/fileFilters';
+import { type ReadingOrder, mostChangedFirst, rankOf } from '@/lib/review/readingOrder';
 import { CommitPicker } from './CommitPicker';
 import { ConversationsView } from './ConversationsView';
 import type { DiffColumnHandle, DiffStyle, LineJump, ThreadJump } from './DiffColumn';
@@ -177,6 +178,16 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const [filters, setFilters] = useState<FileFilters>(NO_FILTERS);
 
   /**
+   * Which order the review is read in: folder order, or most changed first.
+   *
+   * Here for the reason the filters are. Every surface that walks the files
+   * reads it, and it has to outlast `FilesView`, which is unmounted while a
+   * commit comparison loads. Never stored either: like a filter, it is an
+   * answer to this pull request, so every review opens in folder order.
+   */
+  const [order, setOrder] = useState<ReadingOrder>('folders');
+
+  /**
    * What the repository declares about its own generated files.
    *
    * Only fetched while something that consults it is on — the setting that
@@ -273,6 +284,22 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   const files: readonly ReviewFile[] = narrowed ? compare.files : wholeDiff;
 
   /**
+   * `files` in the order the review is read, and each file's place in it.
+   *
+   * The one decision about order, made once, here. The list is what walks:
+   * `j`/`k`, `n`/`p`, `Mod+K` and the Conversations list all read it. The
+   * rank goes to `FilesView` beside the folder-ordered `files`, for the column
+   * and the find panel, which cannot be handed a re-sorted copy. `FilesView`
+   * says why. In folder order both are what they would be without this: the
+   * list is `files` itself, and there is no rank.
+   */
+  const ordered = useMemo(
+    () => (order === 'changes' ? mostChangedFirst(files) : files),
+    [order, files],
+  );
+  const rank = useMemo(() => (order === 'changes' ? rankOf(ordered) : null), [order, ordered]);
+
+  /**
    * The reviewer asked for a narrowed diff and it has not arrived.
    *
    * Distinguished from a *failed* one, which keeps the fallback above: an
@@ -337,7 +364,9 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
   }, []);
 
   const filter = useFileFilter({
-    files,
+    // In reading order, so a filter that hides the file being read moves the
+    // review on to the next file in that order.
+    files: ordered,
     filters: effective,
     setFilters,
     current,
@@ -377,10 +406,11 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
     setJump((previous) => ({ threadId, token: (previous?.token ?? 0) + 1 }));
   }, []);
 
-  // Every file, hidden ones included. What orders the threads — `n`/`p` skip
-  // those in hidden files by name, and the Conversations view keeps them, in
-  // their place, saying why the column has no card for them.
-  const paths = useMemo(() => files.map((file) => file.path), [files]);
+  // Every file, hidden ones included, in reading order. What orders the
+  // threads — `n`/`p` skip those in hidden files by name, and the
+  // Conversations view keeps them, in their place, saying why the column has
+  // no card for them.
+  const paths = useMemo(() => ordered.map((file) => file.path), [ordered]);
 
   /**
    * The two commits the column reads whole files from, for expanding context.
@@ -717,6 +747,8 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
               filtering={filter.filtering}
               ownership={ownership}
               onFiltersOpen={filter.menuOpen}
+              rank={rank}
+              onOrder={setOrder}
               onComposing={setComposing}
               columnRef={column}
               ref={filesView}

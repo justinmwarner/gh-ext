@@ -39,6 +39,13 @@
  * is against every file in the pull request either way, because a count
  * against what the menu left would hide that it had left anything out.
  *
+ * **Flat while the review is read most changed first.** A tree cannot show
+ * that order, because a `+1 −1` file would only sink to the bottom of its own
+ * folder. So the rows go flat, in the order `files` arrives in, each with its
+ * directory after its name. The folds are kept and come back with the tree,
+ * and the line under the box that says the list is sorted is also the button
+ * that puts the tree back.
+ *
  * **The icons are Material Icon Theme's, and they arrive late.** A coloured
  * dot stood here for a while and was the wrong answer: a 7px square of
  * Linguist blue can say a file has a type but not which, so a reviewer had to
@@ -70,7 +77,7 @@ import { type CurrentFile, shouldSelectInTree } from './currentFile';
 import type { FileComments } from './fileTreeData';
 import type { ReviewFile } from './reviewFiles';
 import { claimsTreeKey, resolveTreeKey } from './treeKeys';
-import { type TreeRow, checkState, directoryPaths, treeRows } from './treeRows';
+import { type TreeRow, checkState, directoryPaths, flatRows, treeRows } from './treeRows';
 import { useFileIcons } from './useFileIcons';
 
 /** U+2212 MINUS SIGN, which is what GitHub uses and what aligns with `+`. */
@@ -212,6 +219,19 @@ export interface FileTreeProps {
   menuFiltering?: boolean;
   /** Drawn at the end of the box's row. The funnel, in practice. */
   filterMenu?: ReactNode;
+  /**
+   * One row per file, in the order of `files`, with no folders.
+   *
+   * On while the review is read most changed first, an order a tree cannot
+   * show. The reviewer's folds are kept, not cleared, and come back with the
+   * tree.
+   */
+  flat?: boolean;
+  /**
+   * Put the tree back. Pressing the line under the box does this while `flat`
+   * is on, so the way back is right where the list says why it looks different.
+   */
+  onShowTree?: () => void;
 }
 
 export function FileTree({
@@ -225,6 +245,8 @@ export function FileTree({
   hidden = NOTHING_HIDDEN,
   menuFiltering = false,
   filterMenu,
+  flat = false,
+  onShowTree,
 }: FileTreeProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NOTHING_COLLAPSED);
   const [focused, setFocused] = useState<string | null>(null);
@@ -286,9 +308,12 @@ export function FileTree({
     [filtering, kept, query],
   );
 
+  // Flat rows keep the order `files` arrived in, which is the shell's. The tree
+  // lays out its own, and `collapsed` is left alone either way, so the folds
+  // are still there when the tree comes back.
   const rows = useMemo(
-    () => treeRows(shown, filtering ? NOTHING_COLLAPSED : collapsed),
-    [shown, filtering, collapsed],
+    () => (flat ? flatRows(shown) : treeRows(shown, filtering ? NOTHING_COLLAPSED : collapsed)),
+    [flat, shown, filtering, collapsed],
   );
   const byPath = useMemo(
     () => new Map(files.map((file) => [file.path, file])),
@@ -340,6 +365,23 @@ export function FileTree({
     setFocused(currentPath);
     elements.current.get(currentPath)?.scrollIntoView({ block: 'nearest' });
   }, [follows, currentPath]);
+
+  /**
+   * Bring the file being read back into view when the rows change layout.
+   *
+   * Going flat, or back to the tree, moves every row, so the one the review is
+   * on can land anywhere in the rail. This runs whichever surface last moved
+   * the file, including the tree itself: the row the reviewer clicked is no
+   * longer where they clicked it. Scrolled to, not focused, for the reason
+   * given above.
+   */
+  const laidOut = useRef(flat);
+  useEffect(() => {
+    if (laidOut.current === flat) return;
+    laidOut.current = flat;
+    if (currentPath === null) return;
+    elements.current.get(currentPath)?.scrollIntoView({ block: 'nearest' });
+  }, [flat, currentPath]);
 
   // Exactly one row is in the tab order. The focused one, unless it has been
   // folded away or the file list changed underneath it.
@@ -506,6 +548,15 @@ export function FileTree({
             {narrowed}
           </p>
         )}
+        {flat && onShowTree !== undefined && (
+          /* Why the list stopped looking like a tree, and the way back, as one
+             button. A reviewer who wonders where the folders went is reading
+             this line, so the line is what undoes it. */
+          <button type="button" className="filetree-order" onClick={onShowTree}>
+            Sorted by most changed.{' '}
+            <span className="filetree-order-action">Show as tree</span>
+          </button>
+        )}
       </div>
 
       <div
@@ -592,7 +643,9 @@ export function FileTree({
                 up. A root-level file beside a root-level folder is at the same
                 depth, and without the folder's twelve pixels its icon would sit
                 out to the left of every folder icon on the rail. */}
-            <span className="tree-chevron" aria-hidden="true" />
+            {/* Not on a flat list, which has no folders for it to line the
+                icons up with, and twelve pixels the name can use. */}
+            {!flat && <span className="tree-chevron" aria-hidden="true" />}
 
             {/* The row holds the icon's width whether or not there is an icon
                 in it yet — `.tree-icon-slot` in the stylesheet — so the names
@@ -607,7 +660,18 @@ export function FileTree({
               )}
             </span>
 
-            <span className="tree-name">{row.name}</span>
+            <span className="tree-name">
+              {row.name}
+              {/* Flat rows have no folder above them to say where a file is,
+                  so the directory follows the name. It is inside the name's
+                  box on purpose: that box is cut off at the end with an
+                  ellipsis, so a narrow rail shortens the directory and leaves
+                  the name whole. It is also read out with the name, which
+                  tells four `index.ts` rows apart. */}
+              {flat && row.path.includes('/') && (
+                <span className="tree-dir">{row.path.slice(0, row.path.lastIndexOf('/'))}</span>
+              )}
+            </span>
 
             {mark !== null && (
               /* `role="img"` carrying the sentence, where this used to be

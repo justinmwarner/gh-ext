@@ -1905,6 +1905,86 @@ describe('DiffColumn, narrowed by a filter', () => {
   });
 });
 
+/**
+ * A column read most changed first.
+ *
+ * The order arrives as a rank beside `files` rather than as a re-sorted
+ * `files`, for the reason `hidden` does: the viewer's `key` comes from the
+ * list's identity, and a sorted copy would be a new viewer. Held as the same
+ * viewer, `CodeView` reconciles the moved items by id and keeps the reader's
+ * line where it was, which `e2e/review.spec.ts` measures in a real layout.
+ */
+describe('DiffColumn, read most changed first', () => {
+  const FILES = [file({ path: 'a.ts' }), file({ path: 'b.ts' }), file({ path: 'c.ts' })];
+  const C_FIRST = new Map([
+    ['c.ts', 0],
+    ['a.ts', 1],
+    ['b.ts', 2],
+  ]);
+
+  const cardOrder = (): string[] =>
+    [...document.querySelectorAll('[data-file-card]')].map(
+      (card) => card.getAttribute('data-file-card') ?? '',
+    );
+
+  const drafts = new DraftStore(memoryStore());
+  const tree = (props: Record<string, unknown>) => (
+    <ReviewSessionProvider pullRequest={pullRequestNode()} prRef={PR_REF} threads={[]} drafts={drafts}>
+      <DiffColumn
+        files={FILES}
+        diff={UNIFIED}
+        sides={BOTH_SIDES}
+        current={NO_FILE}
+        onScrollTo={() => {}}
+        {...props}
+      />
+    </ReviewSessionProvider>
+  );
+
+  it('draws the cards in the order of the rank it is handed', async () => {
+    mount(FILES, { rank: C_FIRST });
+
+    await waitFor(() => expect(cardOrder()).toEqual(['c.ts', 'a.ts', 'b.ts']));
+  });
+
+  it('keeps the same viewer when the order changes, and when it changes back', async () => {
+    const view = render(tree({}));
+    await waitFor(() => expect(cardOrder()).toEqual(['a.ts', 'b.ts', 'c.ts']));
+    const viewer = document.querySelector('.diff-view');
+    expect(viewer).not.toBeNull();
+
+    view.rerender(tree({ rank: C_FIRST }));
+    await waitFor(() => expect(cardOrder()).toEqual(['c.ts', 'a.ts', 'b.ts']));
+    expect(document.querySelector('.diff-view')).toBe(viewer);
+
+    view.rerender(tree({ rank: null }));
+    await waitFor(() => expect(cardOrder()).toEqual(['a.ts', 'b.ts', 'c.ts']));
+    expect(document.querySelector('.diff-view')).toBe(viewer);
+  });
+
+  it('walks J and K through the sections in the order the cards are drawn', async () => {
+    const scrolls = vi.spyOn(CodeViewCore.prototype, 'scrollTo');
+    const landed = (): string | undefined =>
+      scrolls.mock.calls.flatMap(([target]) => (target.type === 'line' ? [target.id] : [])).at(-1);
+    try {
+      const handle = { current: null as DiffColumnHandle | null };
+      mount(FILES, { rank: C_FIRST, ref: handle });
+      await waitFor(() => expect(cardOrder()).toContain('c.ts'));
+
+      // Where the walk starts depends on a layout jsdom does not do, so the
+      // ends are what is asked: run off the bottom, then off the top. In folder
+      // order those would be `c.ts` and `a.ts`.
+      for (let press = 0; press < 4; press += 1) act(() => handle.current?.goToHunk(1));
+      expect(landed()).toBe('b.ts');
+
+      for (let press = 0; press < 4; press += 1) act(() => handle.current?.goToHunk(-1));
+      expect(landed()).toBe('c.ts');
+    } finally {
+      scrolls.mockRestore();
+    }
+  });
+});
+
 describe('DiffColumn, folding generated files', () => {
   const HIDING = { hideGenerated: true };
 

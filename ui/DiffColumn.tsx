@@ -95,6 +95,7 @@ import {
 } from './diffItems';
 import { HunkNavContext, createHunkCursorStore } from './hunkCursor';
 import { carryCursor } from '@/lib/review/hunkNav';
+import { inReadingOrder } from '@/lib/review/readingOrder';
 import { readCursor, rowFor, rowTop, shadowFor } from './hunkPosition';
 import { MoreBelow } from './MoreBelow';
 import type { ReviewFile } from './reviewFiles';
@@ -304,6 +305,18 @@ export interface DiffColumnProps {
    * reason `drawnFiles` gives. Only what is *drawn* is narrowed.
    */
   hidden?: ReadonlySet<string>;
+  /**
+   * The order to draw the cards in, as each file's place, or null for the
+   * order `files` is already in.
+   *
+   * The shell's choice, applied here rather than made here: while the review
+   * is read most changed first, this is that order. A rank beside `files`
+   * rather than a re-sorted `files`, for the reason `hidden` gives. The viewer
+   * is keyed on the list's identity, so a sorted copy would be a new viewer.
+   * Kept as the same viewer, `CodeView` matches the moved items by id and keeps
+   * the reader's line where it was while the cards around it change places.
+   */
+  rank?: ReadonlyMap<string, number> | null;
   /**
    * Put every file back, from the column's own empty state.
    *
@@ -566,6 +579,7 @@ export function DiffColumn({
   generatedPatterns = DEFAULT_SETTINGS.generatedPatterns,
   gitAttributes = NO_ATTRIBUTES,
   hidden = NO_HIDDEN,
+  rank = null,
   onShowAllFiles,
   onComposing,
   diffStyle = 'unified',
@@ -864,16 +878,21 @@ export function DiffColumn({
   );
 
   /**
-   * The drawn list, less whatever the filters hide.
+   * The drawn list, less whatever the filters hide, in the order being read.
    *
    * Taken *after* `drawnFiles` and never folded into it, because `generation`
-   * below is derived from `drawnFiles` and must not move when a filter does.
-   * See {@link DiffColumnProps.hidden}.
+   * below is derived from `drawnFiles` and must not move when a filter or the
+   * order does. See {@link DiffColumnProps.hidden} and
+   * {@link DiffColumnProps.rank}. The cards and `J`'s stops are both built from
+   * this, so the walk goes down the column in the order it is drawn.
    */
   const visibleFiles = useMemo(
     () =>
-      hidden.size === 0 ? drawnFiles : drawnFiles.filter((file) => !hidden.has(file.path)),
-    [drawnFiles, hidden],
+      inReadingOrder(
+        hidden.size === 0 ? drawnFiles : drawnFiles.filter((file) => !hidden.has(file.path)),
+        rank,
+      ),
+    [drawnFiles, hidden, rank],
   );
 
   // Derived from the drawn list, so toggling whitespace on one file remounts

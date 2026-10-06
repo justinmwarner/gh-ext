@@ -46,6 +46,7 @@ import type { CurrentFile } from './currentFile';
 import { FilterMenu, type OwnershipNote } from './FilterMenu';
 import { fileComments } from './fileTreeData';
 import type { GeneratedRule } from '@/lib/review/generated';
+import { type ReadingOrder, inReadingOrder } from '@/lib/review/readingOrder';
 import type { MenuButtonHandle } from './MenuButton';
 import type { ReviewFile } from './reviewFiles';
 import { useArchiveIndexes } from './useArchiveIndexes';
@@ -155,6 +156,19 @@ export interface FilesViewProps {
   ownership?: OwnershipNote;
   /** The filter menu opened or shut. Passed straight through to it. */
   onFiltersOpen?: (open: boolean) => void;
+  /**
+   * Each file's place while the review is read most changed first, or null in
+   * folder order, which is the order `files` already has.
+   *
+   * The shell's order, which this view applies and does not decide. `files`
+   * stays in folder order beside it, for two of the three readers `hidden`
+   * gives: the column, whose viewer a re-sorted list would rebuild, and the
+   * find panel, which would walk every patch again. The tree is handed the
+   * list already sorted, and draws it flat.
+   */
+  rank?: ReadonlyMap<string, number> | null;
+  /** Ask for the other order, from the menu or from the line under the box. */
+  onOrder?: (next: ReadingOrder) => void;
   /** Which file a composer is open on. Passed straight up from the column. */
   onComposing?: (path: string | null) => void;
   columnRef?: Ref<DiffColumnHandle>;
@@ -195,6 +209,8 @@ export function FilesView({
   filtering = false,
   ownership,
   onFiltersOpen,
+  rank = null,
+  onOrder,
   onComposing,
   columnRef,
   ref,
@@ -202,6 +218,9 @@ export function FilesView({
 }: FilesViewProps) {
   const session = useReviewSession();
   const menu = useRef<MenuButtonHandle>(null);
+
+  /** What the tree draws: `files` itself in folder order, a sorted copy otherwise. */
+  const ordered = useMemo(() => inReadingOrder(files, rank), [files, rank]);
 
   // Worked out here only when the shell did not hand them over, which is a
   // test mounting this view by itself.
@@ -389,7 +408,7 @@ export function FilesView({
               style={{ visibility: tab === 'files' ? undefined : 'hidden' }}
             >
               <FileTree
-                files={files}
+                files={ordered}
                 comments={comments}
                 viewed={viewed}
                 current={current}
@@ -398,6 +417,8 @@ export function FilesView({
                 collapseTree={collapseTree}
                 hidden={hidden}
                 menuFiltering={filtering}
+                flat={rank !== null}
+                onShowTree={onOrder === undefined ? undefined : () => onOrder('folders')}
                 filterMenu={
                   onFilters === undefined ? undefined : (
                     <FilterMenu
@@ -408,6 +429,8 @@ export function FilesView({
                       active={filtering}
                       ownership={ownership}
                       onOpenChange={onFiltersOpen}
+                      order={rank === null ? 'folders' : 'changes'}
+                      onOrder={onOrder}
                     />
                   )
                 }
@@ -425,6 +448,7 @@ export function FilesView({
                 ref={panel}
                 files={files}
                 hidden={hidden}
+                rank={rank}
                 archives={archives}
                 state={find}
                 onState={setFind}
@@ -460,6 +484,7 @@ export function FilesView({
           generatedPatterns={generatedPatterns}
           gitAttributes={gitAttributes}
           hidden={hidden}
+          rank={rank}
           onShowAllFiles={onFilters === undefined ? undefined : () => onFilters(NO_FILTERS)}
           onComposing={onComposing}
           current={current}

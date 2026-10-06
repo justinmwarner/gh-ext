@@ -8,7 +8,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { type TreeRow, checkState, directoryPaths, fileOrder, treeRows } from './treeRows';
+import {
+  type TreeRow,
+  checkState,
+  directoryPaths,
+  fileOrder,
+  flatRows,
+  treeRows,
+} from './treeRows';
 
 const OPEN: ReadonlySet<string> = new Set();
 
@@ -102,6 +109,22 @@ describe('treeRows', () => {
 
   it('has nothing to draw for a pull request that changed nothing', () => {
     expect(treeRows([], OPEN)).toEqual([]);
+  });
+});
+
+describe('flatRows', () => {
+  it('is one row a file, in the order it is given, every one at the top level', () => {
+    expect(shape(flatRows(['src/big.ts', 'top.ts', 'docs/readme.md']))).toEqual([
+      'big.ts',
+      'top.ts',
+      'readme.md',
+    ]);
+  });
+
+  it('draws no folders, so there is nothing to fold and nothing a folder ticks', () => {
+    const rows = flatRows(['src/a.ts', 'src/b.ts']);
+
+    expect(rows.every((row) => row.kind === 'file' && row.files.length === 0)).toBe(true);
   });
 });
 

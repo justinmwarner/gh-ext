@@ -21,6 +21,10 @@
  * that unrepresentable: `useCompareDiff` rebuilds a narrowed diff through this
  * same function, so the whole diff and a two-commit slice of it are laid out by
  * one rule without either caller knowing there was a rule.
+ *
+ * Folder order is the default, not the only order. A reviewer can ask for most
+ * changed first, and `Shell` applies that on top of what this returns. See
+ * `lib/review/readingOrder.ts`.
  */
 
 import type { FallbackDiffFile } from '@/lib/github/files-fallback';

@@ -537,13 +537,29 @@ Above the rows sit the two ways to narrow the tree: the "Filter files…" box, a
 a funnel at the end of the same line. The box narrows the rail while the
 reviewer looks for something. The funnel's menu narrows the *review*, tree and
 column together, so it is held to a stricter rule: while anything is filtered,
-the funnel is drawn on (its outline fills, and it takes the active rail tab's
-tint and border, so the state is a change of shape before it is a change of
-colour), and it is said in words twice, in the line under the box and in the
-scope bar above the diff ("Showing 12 of 40 files"). The menu uses sentence-case
-headings in Foreground Muted to divide its sections (never an eyebrow), a muted
-count after each row, and ticks that stay open under the pointer, because the
-reviewer is there to set several things at once.
+the funnel is drawn on, and it is said in words twice, in the line under the
+box and in the scope bar above the diff ("Showing 12 of 40 files"). Drawn on
+means three things at once. The outline fills, the trigger takes the active
+rail tab's tint and border, and an Accent Emphasis dot sits on its top-right
+corner, ringed in the trigger's own background. The dot came last, and for a
+reason: the filled shape changes form before it changes colour, but only for
+someone who already knows the empty one. A reviewer asked for an indicator
+they could see at a glance, and a dot on the corner is the one GitHub already
+uses for "something here is on". The menu uses sentence-case headings in
+Foreground Muted to divide its sections (never an eyebrow), a muted count after
+each row, and ticks that stay open under the pointer, because the reviewer is
+there to set several things at once.
+
+The same menu holds the one choice that is not a filter: a **Sort** section
+with one row, "Most changed first". It hides nothing, so it does not draw the
+funnel on and "Show all files" leaves it alone. While it is on, the tree goes
+flat. Each file is one row: tick, icon, name, and then its directory in
+Foreground Muted at 12px, inside the name's box so a narrow rail cuts the
+directory before the name. There is no fold arrow, because there is nothing
+to fold. Under the box, a line says "Sorted by most changed." in the count
+line's size and colour and ends in "Show as tree" in Accent Foreground. The
+whole line is one button, and pressing it brings back the tree with the folds
+the reviewer had.
 
 ### The injected card (signature component)
 

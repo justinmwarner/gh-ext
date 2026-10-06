@@ -735,6 +735,97 @@ describe('filtered by the menu', () => {
 });
 
 /**
+ * Laid out flat, while the review is read most changed first.
+ *
+ * A tree cannot show that order: a `+1 −1` file would only sink to the bottom
+ * of its own folder. So the rows go flat, in the order the tree is handed,
+ * which is the shell's. Each keeps its directory, drawn after the name, so
+ * four files called `index.ts` are still four different files.
+ */
+describe('laid out flat', () => {
+  const SIZED: ReviewFile[] = [
+    file('src/components/Button.tsx'),
+    file('top.ts'),
+    file('docs/readme.md'),
+  ];
+  const BACK_TO_TREE = 'Sorted by most changed. Show as tree';
+  const paths = (): (string | null)[] => rows().map((r) => r.getAttribute('data-path'));
+
+  it('draws one row a file in the order it is handed, and no folders', () => {
+    mount({ files: SIZED, flat: true });
+
+    expect(paths()).toEqual(['src/components/Button.tsx', 'top.ts', 'docs/readme.md']);
+    for (const each of rows()) {
+      expect(each.getAttribute('aria-level')).toBe('1');
+      expect(each.hasAttribute('aria-expanded')).toBe(false);
+    }
+  });
+
+  it('puts the directory after the name, and names the whole path on hover', () => {
+    mount({ files: SIZED, flat: true });
+
+    const button = row('Button.tsx');
+    expect(button.querySelector('.tree-dir')?.textContent).toBe('src/components');
+    expect(button.getAttribute('title')).toBe('src/components/Button.tsx');
+    expect(row('top.ts').querySelector('.tree-dir')).toBeNull();
+  });
+
+  it('still narrows with the box, keeping the order', async () => {
+    mount({ files: SIZED, flat: true });
+
+    await userEvent.type(screen.getByRole('searchbox', { name: /filter files/i }), 'e');
+
+    // Folder order would put `docs/` first.
+    expect(paths()).toEqual(['src/components/Button.tsx', 'docs/readme.md']);
+  });
+
+  it('says so under the box, and the line asks for the tree back', async () => {
+    const onShowTree = vi.fn();
+    mount({ files: SIZED, flat: true, onShowTree });
+
+    await userEvent.click(screen.getByRole('button', { name: BACK_TO_TREE }));
+
+    expect(onShowTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing about an order while it is a tree', () => {
+    mount({ onShowTree: vi.fn() });
+
+    expect(screen.queryByRole('button', { name: BACK_TO_TREE })).toBeNull();
+  });
+
+  it('brings the file being read back into view when the rows are laid out the other way', () => {
+    // Picked in the tree, which the tree does not normally scroll to: it is
+    // already where the reviewer clicked. A change of layout moves every row,
+    // so the one being read could now be anywhere.
+    const current = { path: 'top.ts', origin: 'tree' } as const;
+    const onSelect = vi.fn();
+    const view = render(<FileTree files={FILES} current={current} onSelect={onSelect} />);
+    const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView');
+    try {
+      view.rerender(<FileTree files={FILES} current={current} onSelect={onSelect} flat />);
+
+      expect(scrolled.mock.contexts).toContain(row('top.ts'));
+    } finally {
+      scrolled.mockRestore();
+    }
+  });
+
+  it('keeps the folders the reviewer shut for when the tree comes back', async () => {
+    const onSelect = vi.fn();
+    const view = render(<FileTree files={FILES} current={NO_FILE} onSelect={onSelect} />);
+    await userEvent.click(row('src'));
+    expect(row('src').getAttribute('aria-expanded')).toBe('false');
+
+    view.rerender(<FileTree files={FILES} current={NO_FILE} onSelect={onSelect} flat />);
+    expect(paths()).not.toContain('src/');
+    view.rerender(<FileTree files={FILES} current={NO_FILE} onSelect={onSelect} />);
+
+    expect(row('src').getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+/**
  * Opening the tree shut.
  *
  * For the monorepo case, where a hundred and fifty files across a deep tree

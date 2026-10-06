@@ -139,4 +139,63 @@ describe('the filter menu', () => {
 
     expect(trigger().getAttribute('aria-describedby')).toBeNull();
   });
+
+  it('offers most changed first, and asks for folder order back when it is unticked', async () => {
+    const onOrder = vi.fn();
+    const menu = (order: 'folders' | 'changes') => (
+      <FilterMenu
+        filters={NO_FILTERS}
+        facets={FACETS}
+        onChange={vi.fn()}
+        active={false}
+        order={order}
+        onOrder={onOrder}
+      />
+    );
+    const view = render(menu('folders'));
+    await userEvent.click(trigger());
+    const sort = () => screen.getByRole('menuitemcheckbox', { name: 'Most changed first' });
+
+    expect(sort().getAttribute('aria-checked')).toBe('false');
+    await userEvent.click(sort());
+    expect(onOrder).toHaveBeenLastCalledWith('changes');
+
+    // Still open, like the filter rows, so the next press is one away.
+    view.rerender(menu('changes'));
+    expect(sort().getAttribute('aria-checked')).toBe('true');
+    await userEvent.click(sort());
+    expect(onOrder).toHaveBeenLastCalledWith('folders');
+  });
+
+  it('leaves the order out of "Show all files", which is about what is hidden', async () => {
+    const onOrder = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <FilterMenu
+        filters={{ ...NO_FILTERS, hideViewed: true }}
+        facets={FACETS}
+        onChange={onChange}
+        active
+        order="changes"
+        onOrder={onOrder}
+      />,
+    );
+    await userEvent.click(trigger());
+
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Show all files' }));
+
+    expect(onChange).toHaveBeenCalledWith(NO_FILTERS);
+    expect(onOrder).not.toHaveBeenCalled();
+  });
+
+  it('puts a dot on the funnel while anything is filtered, and takes it off after', () => {
+    const { unmount } = render(
+      <FilterMenu filters={{ ...NO_FILTERS, hideMoved: true }} facets={FACETS} onChange={vi.fn()} active />,
+    );
+    expect(trigger().querySelector('.filter-dot')).not.toBeNull();
+    unmount();
+
+    mount();
+    expect(trigger().querySelector('.filter-dot')).toBeNull();
+  });
 });

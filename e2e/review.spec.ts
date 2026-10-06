@@ -778,7 +778,8 @@ test('hiding deleted files takes them out of the tree, the column and the j walk
   const page = await context.newPage();
   await openReview(page, extensionId);
 
-  await page.getByRole('button', { name: 'File filters' }).click();
+  const funnel = page.getByRole('button', { name: 'File filters' });
+  await funnel.click();
   await page.getByRole('menuitemcheckbox', { name: /^Deleted/ }).click();
   await page.keyboard.press('Escape');
 
@@ -787,6 +788,9 @@ test('hiding deleted files takes them out of the tree, the column and the j walk
   await expect(filesView(page).locator('.scope-status')).toContainText(
     `Showing ${COLUMN_ORDER.length - 1} of ${COLUMN_ORDER.length} files`,
   );
+  // The dot on the funnel, drawn at a size someone can see: jsdom can say the
+  // element is there, and only a layout engine can say it is not zero by zero.
+  await expect(funnel.locator('.filter-dot')).toBeVisible();
 
   // `j` from the file before it lands on the file after it.
   const at = COLUMN_ORDER.indexOf(DELETED_FILE);
@@ -795,12 +799,65 @@ test('hiding deleted files takes them out of the tree, the column and the j walk
   await expect(page.locator('.shell')).toHaveAttribute('data-current-file', columnAt(at + 1));
 
   // And the menu's own way back puts it everywhere again.
-  await page.getByRole('button', { name: 'File filters' }).click();
+  await funnel.click();
   await page.getByRole('menuitem', { name: 'Show all files' }).click();
   await expect(page.locator(`.filetree-rows [data-path="${DELETED_FILE}"]`)).toHaveCount(1);
   await expect(filesView(page).locator('.scope-status')).toContainText(
     `${COLUMN_ORDER.length} files changed`,
   );
+  await expect(funnel.locator('.filter-dot')).toHaveCount(0);
+});
+
+/**
+ * Most changed first reorders the column, and the line being read does not move.
+ *
+ * The same question the filter test above asks, about a move rather than a
+ * removal. The column is handed a rank rather than a re-sorted list, so the
+ * viewer stays the same viewer and `CodeView` matches the moved items by id.
+ * Whether that holds the reader's line to the pixel while every card around it
+ * changes places is something only a layout engine can say.
+ */
+test('sorting by most changed reorders the column without moving the line being read', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  await openReview(page, extensionId);
+
+  // A file whose neighbours differ between the two orders. Most of this
+  // fixture is `+1 −1`, and a run of those keeps its folder order when sorted,
+  // so `src/app.ts` would have the same cards either side of it in both.
+  const reading = 'lib/cache.ts';
+  await goToFile(page, reading);
+  const line = additionLineIn(page, reading);
+  await expect(line).toBeVisible();
+  await page.waitForTimeout(400);
+  const before = (await line.boundingBox())?.y;
+  expect(before).toBeDefined();
+  const drawnBefore = (await cardTops(page)).map((card) => card.path);
+
+  const tree = page.locator('#rail-panel-files .filetree-rows');
+  await page.getByRole('button', { name: 'File filters' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Most changed first' }).click();
+  await page.keyboard.press('Escape');
+
+  // Flat: not one folder row, and the biggest change at the top.
+  await expect(tree.locator('[aria-expanded]')).toHaveCount(0);
+  await expect(tree.locator('[data-path]').first()).toHaveAttribute('data-path', 'lib/trim.ts');
+  await page.waitForTimeout(400);
+  expect((await cardTops(page)).map((card) => card.path)).not.toEqual(drawnBefore);
+  expect(Math.abs(((await line.boundingBox())?.y ?? Number.NaN) - (before ?? 0))).toBeLessThan(2);
+  expect(await currentFile(page)).toBe(reading);
+
+  // Back, from the line under the box rather than from the menu.
+  await page.getByRole('button', { name: 'Sorted by most changed. Show as tree' }).click();
+
+  await expect(tree.locator('[aria-expanded]').first()).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(Math.abs(((await line.boundingBox())?.y ?? Number.NaN) - (before ?? 0))).toBeLessThan(2);
+  expect(await currentFile(page)).toBe(reading);
 });
 
 /**

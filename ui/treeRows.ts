@@ -154,6 +154,26 @@ export function treeRows(
 }
 
 /**
+ * The rows for a list that is not a tree: one per file, in the order given.
+ *
+ * What the file tree draws while the review is read most changed first. A tree
+ * cannot show that order, because a `+1 −1` file could only sink to the bottom
+ * of its own folder. So there are no folders here, which means nothing to fold
+ * and no folder box that ticks several files at once. The order is the
+ * caller's: unlike {@link treeRows}, this keeps whatever order it is handed.
+ */
+export function flatRows(paths: readonly string[]): TreeRow[] {
+  return paths.map((path) => ({
+    path,
+    name: path.slice(path.lastIndexOf('/') + 1),
+    depth: 0,
+    kind: 'file',
+    expanded: false,
+    files: [],
+  }));
+}
+
+/**
  * Every changed file, in the order the tree lays them out.
  *
  * What the diff column, `j`/`k` and the thread list all read, so that the

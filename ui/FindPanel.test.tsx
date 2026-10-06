@@ -58,6 +58,7 @@ function Harness({
   onGoTo = vi.fn(),
   onClose = vi.fn(),
   hidden,
+  rank,
 }: {
   files?: readonly ReviewFile[];
   archives?: ArchiveIndexes;
@@ -65,6 +66,7 @@ function Harness({
   onGoTo?: (target: FindTarget) => void;
   onClose?: () => void;
   hidden?: ReadonlySet<string>;
+  rank?: ReadonlyMap<string, number> | null;
 }) {
   const [state, setState] = useState(initial);
   return (
@@ -76,6 +78,7 @@ function Harness({
       onGoTo={onGoTo}
       onClose={onClose}
       hidden={hidden}
+      rank={rank}
     />
   );
 }
@@ -105,6 +108,64 @@ describe('FindPanel, under the file filters', () => {
 });
 
 const box = (): HTMLInputElement => screen.getByRole('searchbox', { name: /search the diff/i });
+
+/**
+ * The results while the review is read most changed first.
+ *
+ * Flat, in the review's order, so that walking the results walks down the
+ * column in the order it is drawn. The order is the shell's, handed in as a
+ * rank; the panel does not work one out.
+ */
+describe('FindPanel, while the review is read most changed first', () => {
+  it('lists the files flat in the review’s order, each with its folder after its name', async () => {
+    render(
+      <Harness
+        rank={
+          new Map([
+            ['src/cache.ts', 0],
+            ['docs/guide.md', 1],
+          ])
+        }
+      />,
+    );
+
+    await userEvent.type(box(), 'e');
+
+    // File rows are the ones that fold; flat, there are no folder rows at all.
+    const holders = screen
+      .getAllByRole('treeitem')
+      .filter((row) => row.getAttribute('aria-expanded') !== null);
+    expect(holders.map((row) => row.getAttribute('title'))).toEqual(['src/cache.ts', 'docs/guide.md']);
+    expect(holders[0]?.querySelector('.tree-dir')?.textContent).toBe('src');
+  });
+
+  it('keeps the first results in the review’s order when there are too many to show', async () => {
+    // Two thousand hits in the file that comes first by folder, which is the
+    // whole of what the panel shows. Searched in folder order, the file the
+    // review puts first would not be in the results at all.
+    const many = Array.from({ length: 2000 }, (_, at) => `+x ${at}`);
+    const crowded = [
+      file('docs/a.md', patch('docs/a.md', ['@@ -0,0 +1,2000 @@', ...many])),
+      file('src/b.ts', patch('src/b.ts', ['@@ -1,1 +1,1 @@', '-y', '+x'])),
+    ];
+    render(
+      <Harness
+        files={crowded}
+        rank={
+          new Map([
+            ['src/b.ts', 0],
+            ['docs/a.md', 1],
+          ])
+        }
+      />,
+    );
+
+    await userEvent.type(box(), 'x');
+
+    expect(document.querySelector('[role="treeitem"][title="src/b.ts"]')).not.toBeNull();
+  });
+});
+
 
 describe('FindPanel', () => {
   it('says what to do before anything has been typed', () => {

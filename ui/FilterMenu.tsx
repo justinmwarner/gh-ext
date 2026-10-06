@@ -14,6 +14,11 @@
  * *show* — every box starts ticked, and unticking "Deleted" is how deleted
  * files go away — which is GitHub's own arrangement for the same list and the
  * one a reviewer arriving from there already knows.
+ *
+ * One section is not a filter. "Sort" has a single row, "Most changed first",
+ * and it lives here because this is where a reviewer shapes the list. It hides
+ * nothing, though, so it does not draw the funnel on, and "Show all files"
+ * leaves it alone. `lib/review/readingOrder.ts` has the order itself.
  */
 
 import type { Ref } from 'react';
@@ -25,6 +30,7 @@ import {
   NO_EXTENSION,
   NO_FILTERS,
 } from '@/lib/review/fileFilters';
+import type { ReadingOrder } from '@/lib/review/readingOrder';
 import { MenuButton, type MenuButtonHandle, type MenuGroup, type MenuItem } from './MenuButton';
 
 /** What the ownership row can offer, and what to say about it. */
@@ -86,6 +92,13 @@ export interface FilterMenuProps {
   ownership?: OwnershipNote;
   /** The menu opened or shut. One visit is one change — see `useFileFilter`. */
   onOpenChange?: (open: boolean) => void;
+  /** Which order the review is read in. */
+  order?: ReadingOrder;
+  /**
+   * Ask for the other order. No Sort section is drawn without it, which is the
+   * state of a component test that mounts the menu on its own.
+   */
+  onOrder?: (next: ReadingOrder) => void;
   ref?: Ref<MenuButtonHandle>;
 }
 
@@ -96,6 +109,8 @@ export function FilterMenu({
   active,
   ownership = UNASKED,
   onOpenChange,
+  order = 'folders',
+  onOrder,
   ref,
 }: FilterMenuProps) {
   const toggle = (
@@ -128,6 +143,28 @@ export function FilterMenu({
         }),
       ],
     },
+    // The order lives here because this is where the reviewer is already
+    // shaping the list. But it hides nothing, so it has its own heading, does
+    // not turn the funnel on, and is left alone by "Show all files". It sits
+    // above the kinds and types, whose lists can be long, so it never needs
+    // scrolling to.
+    ...(onOrder === undefined
+      ? []
+      : [
+          {
+            id: 'sort',
+            label: 'Sort',
+            items: [
+              {
+                id: 'sort:changes',
+                label: 'Most changed first',
+                checked: order === 'changes',
+                keepOpen: true,
+                onSelect: () => onOrder(order === 'changes' ? 'folders' : 'changes'),
+              },
+            ],
+          } satisfies MenuGroup,
+        ]),
     {
       id: 'kinds',
       label: 'Change type',
@@ -178,7 +215,18 @@ export function FilterMenu({
       ref={ref}
       label="File filters"
       groups={groups}
-      icon={<Funnel solid={active} />}
+      icon={
+        <>
+          <Funnel solid={active} />
+          {/* The mark a reviewer is looking for. A funnel that fills in is
+              a state you see only if you already know to look for it. A blue
+              dot on the corner is how GitHub shows that something is on, and
+              it can be read at a glance. The line under the box still says how
+              many files are left. Hidden from a screen reader, which already
+              gets the same fact from `description`. */}
+          {active && <span className="filter-dot" aria-hidden="true" />}
+        </>
+      }
       active={active}
       // The solid funnel's words, for a reader who cannot see it fill.
       description={active ? 'A filter is on' : undefined}
