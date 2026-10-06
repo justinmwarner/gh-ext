@@ -192,6 +192,17 @@ export interface FileFilters {
   hiddenKinds: ReadonlySet<ChangeKind>;
   /** By {@link fileType}. */
   hiddenTypes: ReadonlySet<string>;
+  /**
+   * The only types to show, or null for no such list.
+   *
+   * What a Ctrl-click in the menu sets: "only these". It has to be a list of
+   * what to show, not one more set of what to hide, for the longer types.
+   * "Only `.spec.tsx`" means hiding every other `.tsx` file, and no type names
+   * those. Empty is a list too: every box unticked, nothing shown.
+   * `hiddenTypes` still applies inside it, so a reviewer showing only `.tsx`
+   * can still untick `.spec.tsx`.
+   */
+  onlyTypes: ReadonlySet<string> | null;
   hideViewed: boolean;
   hideGenerated: boolean;
   hideMoved: boolean;
@@ -209,6 +220,7 @@ export interface FileFilters {
 export const NO_FILTERS: FileFilters = Object.freeze({
   hiddenKinds: new Set<ChangeKind>(),
   hiddenTypes: new Set<string>(),
+  onlyTypes: null,
   hideViewed: false,
   hideGenerated: false,
   hideMoved: false,
@@ -239,15 +251,76 @@ export interface FileFacts {
 /** Whether a file survives every filter at once. */
 export function passes(file: FilterableFile, filters: FileFilters, facts: FileFacts): boolean {
   if (filters.hiddenKinds.has(changeKind(file.changeType))) return false;
-  if (filters.hiddenTypes.has(fileType(file.path))) return false;
+  const type = fileType(file.path);
   const longer = compoundType(file.path);
+  if (filters.hiddenTypes.has(type)) return false;
   if (longer !== null && filters.hiddenTypes.has(longer)) return false;
+  const only = filters.onlyTypes;
+  if (only !== null && !only.has(type) && (longer === null || !only.has(longer))) return false;
   if (filters.hideMoved && isMoved(file)) return false;
   if (filters.hideViewed && facts.isViewed(file.path)) return false;
   if (filters.hideGenerated && facts.isGenerated(file.path)) return false;
   if (filters.onlyUnresolved && !facts.hasUnresolved(file.path)) return false;
   if (filters.onlyOwned && facts.isOwned !== null && !facts.isOwned(file.path)) return false;
   return true;
+}
+
+/**
+ * Whether a type's row in the menu reads as shown.
+ *
+ * The same answer `passes` gives that type's files, worked out for the type:
+ * shown unless it or its extension is hidden, and, while there is a list of
+ * types to show only, unless neither it nor its extension is on that list.
+ */
+export function typeShown(filters: FileFilters, type: string): boolean {
+  const parent = parentType(type);
+  if (filters.hiddenTypes.has(type)) return false;
+  if (parent !== null && filters.hiddenTypes.has(parent)) return false;
+  const only = filters.onlyTypes;
+  return only === null || only.has(type) || (parent !== null && only.has(parent));
+}
+
+/**
+ * A plain press on a type's row: show the type if it is hidden, hide it if it
+ * is shown.
+ *
+ * With no list of types to show only, that is the hidden set, as it has
+ * always been. With one, a press adds the type to the list or takes it off.
+ * A longer type shown only through its extension is hidden instead, which is
+ * how "only `.tsx`, but not the specs" is said.
+ */
+export function toggleType(filters: FileFilters, type: string): FileFilters {
+  const flip = new Set(filters.hiddenTypes);
+  if (filters.onlyTypes === null) {
+    if (!flip.delete(type)) flip.add(type);
+    return { ...filters, hiddenTypes: flip };
+  }
+
+  const only = new Set(filters.onlyTypes);
+  const parent = parentType(type);
+  if (typeShown(filters, type)) {
+    if (!only.delete(type)) flip.add(type);
+  } else {
+    flip.delete(type);
+    if (!only.has(type) && (parent === null || !only.has(parent))) only.add(type);
+  }
+  return { ...filters, hiddenTypes: flip, onlyTypes: only };
+}
+
+/**
+ * A Ctrl-press on a type's row: show only that type.
+ *
+ * `extend` is whether this press continues a run, Ctrl still held since the
+ * first. The first press of a run shows that type and nothing else, setting
+ * aside whatever was hidden before it, because "only this" means all of this.
+ * Every later press in the run adds its type, or takes it back off if it was
+ * already shown, so holding Ctrl and pressing three rows shows those three.
+ */
+export function onlyType(filters: FileFilters, type: string, extend: boolean): FileFilters {
+  if (!extend || filters.onlyTypes === null) {
+    return { ...filters, onlyTypes: new Set([type]), hiddenTypes: new Set() };
+  }
+  return toggleType(filters, type);
 }
 
 /**
@@ -408,7 +481,9 @@ export function isFiltering(filters: FileFilters, facets: FileFacets): boolean {
     filters.hideGenerated ||
     filters.hideMoved ||
     filters.onlyUnresolved ||
-    filters.onlyOwned
+    filters.onlyOwned ||
+    // A list of what to show is narrowing whatever is on it.
+    filters.onlyTypes !== null
   ) {
     return true;
   }

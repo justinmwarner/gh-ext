@@ -905,6 +905,58 @@ test('reading a type last moves it to the foot of the review without moving the 
 });
 
 /**
+ * Ctrl-clicking file types shows only those, and the menu still scrolls.
+ *
+ * Two things only a real browser can say. A click with Ctrl held reaches the
+ * row as a click, carrying the key. And with Ctrl held, the wheel over the
+ * menu scrolls the menu: left to the browser, Ctrl and the wheel zoom the
+ * whole page, which is the opposite of what someone picking types from a long
+ * list is trying to do.
+ */
+test('ctrl-clicking file types shows only those, and the menu scrolls while ctrl is held', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  const page = await context.newPage();
+  // Short enough that the menu has to scroll.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await openReview(page, extensionId);
+
+  await page.getByRole('button', { name: 'File filters' }).click();
+  const types = page.getByRole('group', { name: 'File type' });
+  const menu = page.getByRole('menu');
+  await page.keyboard.down('Control');
+  await types.getByRole('menuitemcheckbox', { name: /^\.md/ }).click();
+  await types.getByRole('menuitemcheckbox', { name: /^\.png/ }).click();
+
+  // Headless Chromium has no zoom to fall into, so a scroll alone would pass
+  // here either way. What can be seen is the event: it arrives with Ctrl held,
+  // and the menu has cancelled what the browser would otherwise do with it.
+  await page.evaluate(() => {
+    const seen: [boolean, boolean][] = [];
+    (window as unknown as { wheels: typeof seen }).wheels = seen;
+    window.addEventListener('wheel', (event) => seen.push([event.ctrlKey, event.defaultPrevented]));
+  });
+  const scrolled = await menu.evaluate((node) => node.scrollTop);
+  await menu.hover();
+  await page.mouse.wheel(0, 240);
+  await expect.poll(() => menu.evaluate((node) => node.scrollTop)).toBeGreaterThan(scrolled);
+  expect(
+    await page.evaluate(() => (window as unknown as { wheels: [boolean, boolean][] }).wheels[0]),
+  ).toEqual([true, true]);
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Escape');
+
+  const files = await page
+    .locator('#rail-panel-files .filetree-rows [data-path]:not([aria-expanded])')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-path') ?? ''));
+  expect(files.length).toBeGreaterThan(0);
+  expect(files.every((path) => path.endsWith('.md') || path.endsWith('.png'))).toBe(true);
+});
+
+/**
  * What the page cannot vouch for, in the bar rather than under it.
  *
  * A fine-grained token that grants the repository but not `Checks` gets the

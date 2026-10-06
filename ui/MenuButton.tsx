@@ -32,6 +32,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { resolveMod } from '@/lib/keymap';
+import { platformString } from './platform';
 
 /**
  * Opening the menu from somewhere other than its trigger.
@@ -46,11 +48,20 @@ export interface MenuButtonHandle {
   open(): void;
 }
 
+/** How an item was pressed. */
+export interface MenuPress {
+  /**
+   * The platform modifier was held: Ctrl, or ⌘ on a Mac, where Ctrl and a
+   * click is a right click. The file types read it as "only this one".
+   */
+  mod: boolean;
+}
+
 export interface MenuItem {
   /** Stable across renders. React's key, and nothing else. */
   id: string;
   label: string;
-  onSelect: () => void;
+  onSelect: (press: MenuPress) => void;
   /**
    * Disabled rather than absent, wherever there is a reason to give. A control
    * that appears and disappears with the pull request is one the reviewer has
@@ -101,6 +112,14 @@ export interface MenuItem {
   note?: string;
 }
 
+/** A run of items inside a section, under a smaller heading of its own. */
+export interface MenuSubgroup {
+  /** Stable across renders. */
+  id: string;
+  label: string;
+  items: readonly MenuItem[];
+}
+
 /** A run of items under one heading. */
 export interface MenuGroup {
   /** Stable across renders. */
@@ -110,7 +129,24 @@ export interface MenuGroup {
    * heading, which is what a flat `items` list becomes.
    */
   label?: string;
+  /**
+   * A sentence under the heading, drawn and read: how to use the section,
+   * when that is not something its rows can say. Read as the group's
+   * description, after its name.
+   */
+  hint?: string;
   items: readonly MenuItem[];
+  /**
+   * Runs of items after `items`, each under a smaller heading. For a list too
+   * long to read in one: the file types, by what sort of file they are. The
+   * arrows walk through them as one list, the way they walk the sections.
+   */
+  subgroups?: readonly MenuSubgroup[];
+}
+
+/** Whether the platform modifier was held for a click: ⌘ on a Mac, Ctrl elsewhere. */
+function modHeld(event: { ctrlKey: boolean; metaKey: boolean }): boolean {
+  return resolveMod(platformString()) === 'Meta' ? event.metaKey : event.ctrlKey;
 }
 
 export interface MenuButtonProps {
@@ -197,8 +233,11 @@ export function MenuButton({
   const [at, setAt] = useState(0);
 
   const sections: readonly MenuGroup[] = groups ?? [{ id: 'items', items }];
-  /** Every item, in the order the arrows walk them. */
-  const all = sections.flatMap((section) => section.items);
+  /** Every item, in the order the arrows walk them, runs within sections included. */
+  const all = sections.flatMap((section) => [
+    ...section.items,
+    ...(section.subgroups ?? []).flatMap((subgroup) => subgroup.items),
+  ]);
 
   // Read by the handle and by the unmount below, which are built once.
   const live = useRef({ open, all, onOpenChange });
@@ -293,6 +332,30 @@ export function MenuButton({
    * slid left until it fits, and one taller than the room below scrolls.
    * Measured again if the window changes size while it is open.
    */
+  /**
+   * Scroll the menu under the wheel while Ctrl is held, instead of zooming
+   * the page.
+   *
+   * Holding the modifier to pick several file types is exactly when a long
+   * menu needs scrolling, and Ctrl with the wheel is the browser's zoom. Taken
+   * only over a menu that can actually scroll, so the zoom still works
+   * everywhere else. Not passive, because a passive listener cannot stop the
+   * zoom, and React's `onWheel` is passive.
+   */
+  useEffect(() => {
+    const box = menu.current;
+    if (!open || box === null) return;
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey || box.scrollHeight <= box.clientHeight) return;
+      event.preventDefault();
+      // Lines and pages, for the mice and settings that report in them.
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? box.clientHeight : 1;
+      box.scrollTop += event.deltaY * unit;
+    };
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return () => box.removeEventListener('wheel', onWheel);
+  }, [open]);
+
   useLayoutEffect(() => {
     if (!open || placement !== 'escape') return;
     const place = (): void => {
@@ -373,9 +436,11 @@ export function MenuButton({
         aria-disabled={item.disabled}
         title={item.title}
         onFocus={() => setAt(position)}
-        onClick={() => {
+        onClick={(event) => {
           if (item.disabled === true) return;
-          item.onSelect();
+          // A click made from the keyboard carries the modifiers too, so
+          // Ctrl+Enter on a row is the same press as Ctrl and a click.
+          item.onSelect({ mod: modHeld(event) });
           if (item.keepOpen !== true) shut();
         }}
       >
@@ -457,11 +522,15 @@ export function MenuButton({
                 className="menu-group"
                 role="group"
                 aria-labelledby={`${noteId}-group-${section.id}`}
+                aria-describedby={
+                  section.hint === undefined ? undefined : `${noteId}-hint-${section.id}`
+                }
               >
                 {/* Hidden, and still the group's name: `aria-labelledby`
                     resolves a hidden node, and left exposed the heading would
                     be a stray run of text inside a menu, read once as its own
-                    line and again as the group's label. */}
+                    line and again as the group's label. The hint is hidden for
+                    the same reason, and read as the description. */}
                 <span
                   className="menu-heading"
                   id={`${noteId}-group-${section.id}`}
@@ -469,7 +538,33 @@ export function MenuButton({
                 >
                   {section.label}
                 </span>
+                {section.hint !== undefined && (
+                  <span
+                    className="menu-hint"
+                    id={`${noteId}-hint-${section.id}`}
+                    aria-hidden="true"
+                  >
+                    {section.hint}
+                  </span>
+                )}
                 {section.items.map(renderItem)}
+                {(section.subgroups ?? []).map((subgroup) => (
+                  <div
+                    key={subgroup.id}
+                    className="menu-subgroup"
+                    role="group"
+                    aria-labelledby={`${noteId}-sub-${section.id}-${subgroup.id}`}
+                  >
+                    <span
+                      className="menu-subheading"
+                      id={`${noteId}-sub-${section.id}-${subgroup.id}`}
+                      aria-hidden="true"
+                    >
+                      {subgroup.label}
+                    </span>
+                    {subgroup.items.map(renderItem)}
+                  </div>
+                ))}
               </div>
             ),
           )}

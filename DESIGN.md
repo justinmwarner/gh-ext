@@ -550,10 +550,18 @@ Foreground Muted to divide its sections (never an eyebrow), a muted count after
 each row, and ticks that stay open under the pointer, because the reviewer is
 there to set several things at once.
 
-The File type section lists longer types one step in under their extension,
-`.spec.tsx` under `.tsx`, where at least two files share one. While the
-extension is hidden, a longer type under it is drawn unticked and refused,
-because hiding `.tsx` already hides the specs.
+The File type section groups its rows under what sort of file each type is:
+Code, Styles, Docs, Data and config, Images, Fonts, Audio and video, Archives
+and binaries, and Other. Each group has a subheading in Foreground Muted at
+11px, lighter than the section's own heading so the two levels read as two.
+Under the section heading sits one line of hint in the same grey: "Ctrl-click
+to show only the ones you pick" (⌘ on a Mac). A Ctrl-click shows that type
+alone, each further Ctrl-click before the key is let go adds another, and
+while Ctrl is held the wheel scrolls the menu instead of zooming the page.
+Longer types sit one step in under their extension, `.spec.tsx` under `.tsx`,
+where at least two files share one. While the extension is hidden, a longer
+type under it is drawn unticked and refused, because hiding `.tsx` already
+hides the specs. The Read last section is grouped the same way.
 
 The same menu holds the two choices that are not filters, because they move
 files without hiding any. A **Sort** section has one row, "Most changed

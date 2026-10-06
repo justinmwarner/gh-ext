@@ -139,8 +139,9 @@ export function useFileFilter({
   // made on the whole pull request is never left acting on a commit's single
   // spec file with no row to undo it from.
   const facets = useMemo(
-    () => fileFacets(files, [...filters.hiddenTypes, ...chosenTypes]),
-    [files, filters.hiddenTypes, chosenTypes],
+    () =>
+      fileFacets(files, [...filters.hiddenTypes, ...(filters.onlyTypes ?? []), ...chosenTypes]),
+    [files, filters.hiddenTypes, filters.onlyTypes, chosenTypes],
   );
   const filtering = isFiltering(filters, facets);
 

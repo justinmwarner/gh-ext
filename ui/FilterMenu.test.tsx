@@ -8,10 +8,11 @@
  * what its label says.
  */
 
+import { useState } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { type FileFilters, NO_FILTERS, fileFacets } from '@/lib/review/fileFilters';
+import { type FileFacets, type FileFilters, NO_FILTERS, fileFacets } from '@/lib/review/fileFilters';
 import { FilterMenu } from './FilterMenu';
 
 const FACETS = fileFacets([
@@ -45,8 +46,9 @@ describe('the filter menu', () => {
     );
     // No "Renamed": this list has none, and a row for nothing is a row to ignore.
     expect(screen.queryByRole('menuitemcheckbox', { name: /Renamed/ })).toBeNull();
+    // Under what sort of file each is: Code, then Docs, then Other.
     expect(screen.getByRole('group', { name: 'File type' }).textContent).toMatch(
-      /\.md1.*\.ts2.*Dotfiles1/,
+      /Code.*\.ts2.*Docs.*\.md1.*Other.*Dotfiles1/,
     );
   });
 
@@ -249,10 +251,11 @@ describe('the filter menu, with longer types', () => {
     const types = within(screen.getByRole('group', { name: 'File type' }))
       .getAllByRole('menuitemcheckbox')
       .map((item) => [item.textContent, item.getAttribute('data-indent')]);
+    // Code before Images, and the specs under `.tsx` within Code.
     expect(types).toEqual([
-      ['.png1', null],
       ['.tsx3', null],
       ['.spec.tsx2', 'true'],
+      ['.png1', null],
     ]);
   });
 
@@ -307,6 +310,104 @@ describe('the filter menu, with longer types', () => {
     await userEvent.click(trigger());
 
     expect(screen.queryByRole('group', { name: 'Read last' })).toBeNull();
+  });
+});
+
+/**
+ * Showing only some types, with Ctrl.
+ *
+ * A Ctrl-click shows that type alone, and every Ctrl-click after it, before
+ * Ctrl is let go, adds one more. Let go and Ctrl-click again, and it starts
+ * from one type again. The menu is held by a parent here, as it is by the
+ * shell, so each press sees what the last one did.
+ */
+describe('the filter menu, showing only some types', () => {
+  function Held({ facets, onFilters }: { facets: FileFacets; onFilters: (next: FileFilters) => void }) {
+    const [filters, setFilters] = useState<FileFilters>(NO_FILTERS);
+    return (
+      <FilterMenu
+        filters={filters}
+        facets={facets}
+        onChange={(next) => {
+          setFilters(next);
+          onFilters(next);
+        }}
+        active={filters !== NO_FILTERS}
+      />
+    );
+  }
+
+  const typeRow = (name: RegExp) =>
+    within(screen.getByRole('group', { name: 'File type' })).getByRole('menuitemcheckbox', { name });
+  const shown = (onFilters: ReturnType<typeof vi.fn>) =>
+    [...((onFilters.mock.calls.at(-1)?.[0] as FileFilters | undefined)?.onlyTypes ?? [])];
+
+  it('says how, under the File type heading', async () => {
+    mount();
+    await userEvent.click(trigger());
+
+    const describedBy = screen.getByRole('group', { name: 'File type' }).getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(describedBy)?.textContent).toBe(
+      'Ctrl-click to show only the ones you pick',
+    );
+  });
+
+  it('shows only the type Ctrl-clicked, and each one after it while Ctrl is held', async () => {
+    const onFilters = vi.fn();
+    const user = userEvent.setup();
+    render(<Held facets={FACETS} onFilters={onFilters} />);
+    await user.click(trigger());
+
+    await user.keyboard('{Control>}');
+    await user.click(typeRow(/^\.ts/));
+    await user.click(typeRow(/^\.md/));
+    await user.keyboard('{/Control}');
+
+    expect(shown(onFilters)).toEqual(['.ts', '.md']);
+    expect(typeRow(/^\.ts/).getAttribute('aria-checked')).toBe('true');
+    expect(typeRow(/^Dotfiles/).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('starts again from one type once Ctrl has been let go', async () => {
+    const onFilters = vi.fn();
+    const user = userEvent.setup();
+    render(<Held facets={FACETS} onFilters={onFilters} />);
+    await user.click(trigger());
+    await user.keyboard('{Control>}');
+    await user.click(typeRow(/^\.ts/));
+    await user.click(typeRow(/^\.md/));
+    await user.keyboard('{/Control}');
+
+    await user.keyboard('{Control>}');
+    await user.click(typeRow(/^Dotfiles/));
+    await user.keyboard('{/Control}');
+
+    expect(shown(onFilters)).toEqual(['dotfile']);
+  });
+
+  it('adds a type back with a plain click while only some are shown', async () => {
+    const onFilters = vi.fn();
+    const user = userEvent.setup();
+    render(<Held facets={FACETS} onFilters={onFilters} />);
+    await user.click(trigger());
+    await user.keyboard('{Control>}');
+    await user.click(typeRow(/^\.ts/));
+    await user.keyboard('{/Control}');
+
+    await user.click(typeRow(/^\.md/));
+
+    expect(shown(onFilters)).toEqual(['.ts', '.md']);
+  });
+
+  it('groups the types to read last the same way', async () => {
+    render(
+      <FilterMenu filters={NO_FILTERS} facets={FACETS} onChange={vi.fn()} active={false} last={[]} onLast={vi.fn()} />,
+    );
+    await userEvent.click(trigger());
+
+    const last = screen.getByRole('group', { name: 'Read last' });
+    expect(within(last).getByRole('group', { name: 'Code' })).toBeDefined();
+    expect(within(last).getByRole('group', { name: 'Docs' })).toBeDefined();
   });
 });
 

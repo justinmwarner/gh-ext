@@ -23,8 +23,11 @@ import {
   isFiltering,
   isMoved,
   nearestShown,
+  onlyType,
   passes,
+  toggleType,
   typeMatches,
+  typeShown,
 } from './fileFilters';
 
 const file = (
@@ -266,6 +269,24 @@ describe('which files pass', () => {
     expect(passes(file('src/Button.spec.tsx'), set, NO_FACTS)).toBe(false);
   });
 
+  it('shows only the types on an only-list, by extension or by longer type', () => {
+    const set = filters({ onlyTypes: new Set(['.spec.tsx', '.png']) });
+    expect(passes(file('src/Button.spec.tsx'), set, NO_FACTS)).toBe(true);
+    expect(passes(file('assets/logo.png'), set, NO_FACTS)).toBe(true);
+    expect(passes(file('src/Button.tsx'), set, NO_FACTS)).toBe(false);
+    expect(passes(file('README.md'), set, NO_FACTS)).toBe(false);
+  });
+
+  it('still hides a type the reviewer unticked inside an only-list', () => {
+    const set = filters({ onlyTypes: new Set(['.tsx']), hiddenTypes: new Set(['.spec.tsx']) });
+    expect(passes(file('src/Button.tsx'), set, NO_FACTS)).toBe(true);
+    expect(passes(file('src/Button.spec.tsx'), set, NO_FACTS)).toBe(false);
+  });
+
+  it('shows nothing on an empty only-list, which is every box unticked', () => {
+    expect(passes(file('src/app.ts'), filters({ onlyTypes: new Set() }), NO_FACTS)).toBe(false);
+  });
+
   it('hides viewed files, and only those', () => {
     const facts = { ...NO_FACTS, isViewed: (path: string) => path === 'done.ts' };
     const set = filters({ hideViewed: true });
@@ -380,6 +401,11 @@ describe('whether anything is being filtered', () => {
     expect(isFiltering(filters({ hiddenTypes: new Set(['.ts']) }), facets)).toBe(true);
   });
 
+  it('is, with an only-list, whatever is on it', () => {
+    expect(isFiltering(filters({ onlyTypes: new Set(['.ts']) }), facets)).toBe(true);
+    expect(isFiltering(filters({ onlyTypes: new Set() }), facets)).toBe(true);
+  });
+
   it('is not, with only a type unticked that this list does not have', () => {
     // Kept from another scope — a lockfile hidden on the whole pull request,
     // then one commit opened that touches none. The menu lists no such row,
@@ -388,3 +414,65 @@ describe('whether anything is being filtered', () => {
     expect(isFiltering(filters({ hiddenKinds: new Set(['renamed']) }), facets)).toBe(false);
   });
 });
+
+/**
+ * What pressing a type's row does.
+ *
+ * A plain press flips the row, as it always has. A Ctrl-press shows only that
+ * type, and each Ctrl-press after it in the same run, before Ctrl is let go,
+ * adds one more. Rows read as shown or hidden from the same rule `passes`
+ * follows, so a tick never disagrees with the files it stands for.
+ */
+describe('pressing a file type', () => {
+  it('flips a type with a plain press, as before', () => {
+    expect([...toggleType(NO_FILTERS, '.md').hiddenTypes]).toEqual(['.md']);
+    expect(toggleType(filters({ hiddenTypes: new Set(['.md']) }), '.md').hiddenTypes.size).toBe(0);
+  });
+
+  it('shows only that type on the first Ctrl-press, whatever was hidden before', () => {
+    const next = onlyType(filters({ hiddenTypes: new Set(['.md']) }), '.ts', false);
+
+    expect([...(next.onlyTypes ?? [])]).toEqual(['.ts']);
+    expect(next.hiddenTypes.size).toBe(0);
+  });
+
+  it('adds a type with each Ctrl-press later in the same run, and takes it back on a second', () => {
+    const first = onlyType(NO_FILTERS, '.ts', false);
+    const second = onlyType(first, '.md', true);
+    expect([...(second.onlyTypes ?? [])]).toEqual(['.ts', '.md']);
+
+    expect([...(onlyType(second, '.md', true).onlyTypes ?? [])]).toEqual(['.ts']);
+  });
+
+  it('starts again from that one type on a Ctrl-press in a new run', () => {
+    const run = onlyType(onlyType(NO_FILTERS, '.ts', false), '.md', true);
+
+    expect([...(onlyType(run, '.png', false).onlyTypes ?? [])]).toEqual(['.png']);
+  });
+
+  it('adds or takes away a type with a plain press while only some are shown', () => {
+    const some = filters({ onlyTypes: new Set(['.ts']) });
+
+    expect([...(toggleType(some, '.md').onlyTypes ?? [])]).toEqual(['.ts', '.md']);
+    expect([...(toggleType(some, '.ts').onlyTypes ?? [])]).toEqual([]);
+  });
+
+  it('hides a longer type that its extension shows, by unticking it', () => {
+    // Only `.tsx` is shown, so the specs are, through it. Unticking them has
+    // to hide them without hiding the rest of `.tsx`.
+    const next = toggleType(filters({ onlyTypes: new Set(['.tsx']) }), '.spec.tsx');
+
+    expect(typeShown(next, '.tsx')).toBe(true);
+    expect(typeShown(next, '.spec.tsx')).toBe(false);
+  });
+
+  it('reads a row as shown exactly when its files pass the type rules', () => {
+    const only = filters({ onlyTypes: new Set(['.spec.tsx']) });
+
+    expect(typeShown(only, '.spec.tsx')).toBe(true);
+    expect(typeShown(only, '.tsx')).toBe(false);
+    expect(typeShown(filters({ hiddenTypes: new Set(['.tsx']) }), '.spec.tsx')).toBe(false);
+    expect(typeShown(NO_FILTERS, '.png')).toBe(true);
+  });
+});
+

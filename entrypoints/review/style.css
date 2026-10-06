@@ -759,6 +759,30 @@ button.scope-showing:hover {
   color: var(--fg-muted);
 }
 
+/* How to use a section, under its heading: the same grey a step smaller, and
+   allowed to wrap, since it is a sentence. */
+.menu-hint {
+  max-width: 260px;
+  padding: 0 10px 4px 28px;
+  font-size: 11px;
+  white-space: normal;
+  color: var(--fg-muted);
+}
+
+.menu-subgroup {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A run inside a section, such as Images or Fonts. Lighter than the section's
+   own heading, so the two levels read as two. */
+.menu-subheading {
+  padding: 6px 10px 2px 28px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
 /* On, as opposed to open or hovered. The rail tab's own treatment — a tint and
    a border — so a pressed control in the rail looks like the other pressed
    control in the rail, and the glyph inside turns solid, so the state is a

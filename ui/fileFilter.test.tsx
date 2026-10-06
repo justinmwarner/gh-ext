@@ -325,6 +325,33 @@ describe('filtering the review', () => {
     expect(treeRow('src/app.ts')).not.toBeNull();
   });
 
+  it('shows only the types Ctrl-clicked, in the tree and in the j walk', async () => {
+    const user = userEvent.setup();
+    render(
+      <Shell
+        retry={() => {}}
+        payload={prPayloadWithFiles([
+          fileFixture({ path: 'src/app.ts' }),
+          fileFixture({ path: 'docs/guide.md' }),
+          fileFixture({ path: 'styles/site.css' }),
+        ])}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'File filters' }));
+    await user.keyboard('{Control>}');
+    await user.click(screen.getByRole('menuitemcheckbox', { name: /^\.md/ }));
+    await user.click(screen.getByRole('menuitemcheckbox', { name: /^\.css/ }));
+    await user.keyboard('{/Control}');
+    await user.keyboard('{Escape}');
+
+    expect(treeRow('src/app.ts')).toBeNull();
+    await user.keyboard('j');
+    expect(currentFile()).toBe('docs/guide.md');
+    await user.keyboard('j');
+    expect(currentFile()).toBe('styles/site.css');
+  });
+
   it('says when the filters hide everything, and puts it all back from there', async () => {
     const user = userEvent.setup();
     render(<Shell retry={() => {}} payload={payload()} />);

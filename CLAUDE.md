@@ -63,7 +63,9 @@ ours" is the wrong instinct here.
   is not the folders') rather than laying its own files out. Their shared
   keyboard is `ui/treeKeys.ts`, for the same reason twice over. A file type is
   `fileType` or a longer `compoundType` (`.spec.tsx`), and `typeMatches` is the
-  one test for both, in the filters and in "Read last".
+  one test for both, in the filters and in "Read last". A type row's tick is
+  `typeShown`, which has to give the answer `passes` gives that type's files;
+  change the two together.
 
 - **The rail's two panels must not declare `visibility: visible`.** `FilesView`
   stacks the file tree and the find panel in one grid cell and hides the

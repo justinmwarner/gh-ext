@@ -377,6 +377,76 @@ describe('a menu of sections', () => {
     expect(screen.getByRole('menuitemcheckbox', { name: 'Read .png last' }).textContent).toContain('.png');
   });
 
+  it('lists a section’s runs under headings of their own, and walks into them', async () => {
+    mountGroups([
+      {
+        id: 'type',
+        label: 'File type',
+        items: [],
+        subgroups: [
+          { id: 'code', label: 'Code', items: [{ id: '.ts', label: '.ts', checked: true, keepOpen: true, onSelect: chose() }] },
+          { id: 'images', label: 'Images', items: [{ id: '.png', label: '.png', checked: true, keepOpen: true, onSelect: chose() }] },
+        ],
+      },
+    ]);
+    await userEvent.click(filters());
+
+    const types = screen.getByRole('group', { name: 'File type' });
+    expect(within(types).getByRole('group', { name: 'Images' }).textContent).toContain('.png');
+    await userEvent.keyboard('{ArrowDown}');
+    expect(document.activeElement?.textContent).toContain('.png');
+  });
+
+  it('puts a hint under a heading, and describes the section by it', async () => {
+    mountGroups([
+      {
+        id: 'type',
+        label: 'File type',
+        hint: 'Ctrl-click to show only the ones you pick',
+        items: [{ id: '.ts', label: '.ts', checked: true, keepOpen: true, onSelect: chose() }],
+      },
+    ]);
+    await userEvent.click(filters());
+
+    const types = screen.getByRole('group', { name: 'File type' });
+    const describedBy = types.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(describedBy)?.textContent).toBe(
+      'Ctrl-click to show only the ones you pick',
+    );
+  });
+
+  it('says whether the platform modifier was held when an item was pressed', async () => {
+    const onSelect = vi.fn();
+    mountGroups([
+      { id: 'type', items: [{ id: '.ts', label: '.ts', checked: true, keepOpen: true, onSelect }] },
+    ]);
+    const user = userEvent.setup();
+    await user.click(filters());
+
+    await user.click(screen.getByRole('menuitemcheckbox', { name: /\.ts/ }));
+    await user.keyboard('{Control>}');
+    await user.click(screen.getByRole('menuitemcheckbox', { name: /\.ts/ }));
+    await user.keyboard('{/Control}');
+
+    expect(onSelect.mock.calls.map(([how]) => how)).toEqual([{ mod: false }, { mod: true }]);
+  });
+
+  it('scrolls itself, rather than zooming the page, under the wheel while Ctrl is held', async () => {
+    // Holding Ctrl to pick several types is exactly when a long list has to
+    // scroll, and Ctrl and the wheel together zoom the whole page.
+    mountGroups(GROUPS);
+    await userEvent.click(filters());
+    const menu = screen.getByRole('menu');
+    Object.defineProperty(menu, 'scrollHeight', { configurable: true, value: 900 });
+    Object.defineProperty(menu, 'clientHeight', { configurable: true, value: 300 });
+
+    const wheel = new WheelEvent('wheel', { deltaY: 120, ctrlKey: true, bubbles: true, cancelable: true });
+    menu.dispatchEvent(wheel);
+
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(menu.scrollTop).toBe(120);
+  });
+
   it('marks a row that sits under the one above it', async () => {
     mountGroups([
       {
