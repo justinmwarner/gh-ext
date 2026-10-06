@@ -247,11 +247,16 @@ export interface FileTreeProps {
    */
   groups?: readonly TreeGroup[];
   /**
-   * Put the review back in folder order, with nothing read last. Pressing the
-   * line under the box does this, so the way back is right where the list
-   * says why it looks different.
+   * Put the review back in folder order, with the types the line names no
+   * longer read last. Pressing the line under the box does this, so the way
+   * back is right where the list says why it looks different.
+   *
+   * Handed the types it names rather than told to clear the lot, because the
+   * order is kept from one review to the next. A type sent to the end in some
+   * other review, which this one does not have, is not in the line, so the
+   * line is not what forgets it.
    */
-  onResetOrder?: () => void;
+  onResetOrder?: (named: readonly string[]) => void;
 }
 
 const NO_GROUPS: readonly TreeGroup[] = [];
@@ -633,7 +638,11 @@ export function FileTree({
              button. A reviewer who wonders where the folders went, or why the
              specs are at the bottom, is reading this line, so the line is what
              undoes it. */
-          <button type="button" className="filetree-order" onClick={onResetOrder}>
+          <button
+            type="button"
+            className="filetree-order"
+            onClick={() => onResetOrder(lastTypes)}
+          >
             {orderSentence(flat, lastTypes.map(typeLabel))}{' '}
             <span className="filetree-order-action">{flat ? 'Show as tree' : 'Put them back'}</span>
           </button>

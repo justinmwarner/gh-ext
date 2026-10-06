@@ -2,8 +2,10 @@
  * The order a review is read in, when it is not folder order.
  *
  * Folder order is `ui/treeRows.ts`'s, and it is still the default: a review
- * opens laid out the way the repository is. A reviewer can change it in two
- * ways, separately or together.
+ * opens laid out the way the repository is until the reviewer chooses another
+ * order, and then every review after opens in theirs (`ARRANGEMENT_KEY` in
+ * `lib/settings.ts` says why the order is kept when the filters are not). A
+ * reviewer can change it in two ways, separately or together.
  *
  * - **Most changed first.** For a pull request that is mostly small edits.
  *   Moving a directory, for example, leaves dozens of `+1 −1` import fixes
@@ -29,7 +31,7 @@
 
 import { typeMatches } from './fileFilters';
 
-/** Which of the two orders the review is in. Never stored, like the filters. */
+/** Which of the two orders the review is in. */
 export type ReadingOrder = 'folders' | 'changes';
 
 /**
@@ -45,8 +47,27 @@ export interface Arrangement {
   last: readonly string[];
 }
 
-/** Folder order, nothing sent to the end: how every review opens. */
+/**
+ * Folder order, nothing sent to the end: how a review opens until the reviewer
+ * picks another.
+ */
 export const AS_IS: Arrangement = Object.freeze({ sort: 'folders', last: [] });
+
+/**
+ * Whether two arrangements lay a review out alike.
+ *
+ * A remembered arrangement comes back from storage as a new object every time
+ * it is written, the page's own write included. Handing the review a new
+ * object that says the same thing would lay every surface out again for
+ * nothing, so only a real change gets through.
+ */
+export function sameArrangement(a: Arrangement, b: Arrangement): boolean {
+  return (
+    a.sort === b.sort &&
+    a.last.length === b.last.length &&
+    a.last.every((type, n) => type === b.last[n])
+  );
+}
 
 /** The files of one type read last, in reading order. */
 export interface LastGroup<T> {

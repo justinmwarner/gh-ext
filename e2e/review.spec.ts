@@ -905,6 +905,56 @@ test('reading a type last moves it to the foot of the review without moving the 
 });
 
 /**
+ * The order chosen in one review is the order every review after it opens in.
+ *
+ * What only a real browser can say: the order is written to the extension's
+ * own storage by one page, reaches a review already open in another tab, and
+ * is read back by the next review to open. That the page waits for it, rather
+ * than drawing folder order first, is `App.test.tsx`'s to pin: here storage
+ * always answers before the pull request does, so there is no race to see.
+ */
+test('the order chosen in one review is the order the next one opens in', async ({
+  context,
+  extensionId,
+  api,
+}) => {
+  void api;
+  // Folder order starts on the image, so a review in folder order would too.
+  expect(COLUMN_ORDER[0]).toBe(IMAGE_FILE);
+  const top = COLUMN_ORDER.find((path) => !path.endsWith('.png'));
+
+  const chooser = await context.newPage();
+  await openReview(chooser, extensionId);
+  const bystander = await context.newPage();
+  await openReview(bystander, extensionId);
+
+  await chooser.getByRole('button', { name: 'File filters' }).click();
+  await chooser.getByRole('menuitemcheckbox', { name: 'Read .png last' }).click();
+  await chooser.keyboard.press('Escape');
+
+  const group = (page: Page) =>
+    page.locator('#rail-panel-files .filetree-rows [data-group=".png"]');
+
+  // A review already open in another tab follows.
+  await expect(group(bystander)).toBeVisible();
+
+  // A review opened afterwards starts in it, and at the top of it.
+  const next = await context.newPage();
+  await openReview(next, extensionId);
+  await expect(group(next)).toBeVisible();
+  const cards = await cardTops(next);
+  const topmost = cards.reduce((a, b) => (b.top < a.top ? b : a));
+  expect(topmost.path).toBe(top);
+  expect(await next.locator(VIEW).evaluate((view) => view.scrollTop)).toBe(0);
+
+  // Put back in any review, it is put back in all of them.
+  await next.getByRole('button', { name: '.png read last. Put them back' }).click();
+  await expect(group(next)).toHaveCount(0);
+  await expect(group(chooser)).toHaveCount(0);
+  await expect(group(bystander)).toHaveCount(0);
+});
+
+/**
  * Ctrl-clicking file types shows only those, and the menu still scrolls.
  *
  * Two things only a real browser can say. A click with Ctrl held reaches the

@@ -50,7 +50,12 @@ ours" is the wrong instinct here.
   are laid out by the same rule without either caller knowing there is one.
   The funnel menu can switch the review to most changed first, and send file
   types to the end of it ("Read last"). Both are one `Arrangement`, laid out
-  by `arrange` in `lib/review/readingOrder.ts`, which `Shell` calls once. Do
+  by `arrange` in `lib/review/readingOrder.ts`, which `Shell` calls once. It
+  is remembered for every review and the filters never are; `ARRANGEMENT_KEY`
+  says why. `App` reads it (`useStoredArrangement`) before it mounts `Shell`,
+  so no review is drawn in folder order and then rearranged: do not move that
+  state back into the shell, and do not clear it wholesale from a surface
+  that only shows part of it (the tree's line undoes the types it names). Do
   not re-sort at a surface: they disagreed once, and a root-level `README.md`
   came first in the column and last in the tree. Every surface takes the
   shell's order. The walkers (`j`/`k`, `n`/`p`, `Mod+K`, Conversations) get

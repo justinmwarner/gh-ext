@@ -168,3 +168,45 @@ describe('reading types last', () => {
     expect(rowPaths()).toContain('src/app.ts');
   });
 });
+
+/**
+ * The order handed in by `App`, which remembers it from one review to the
+ * next, so it can name types this pull request does not have.
+ */
+describe('reading types last, as remembered', () => {
+  it('opens with the remembered types already at the end', () => {
+    render(
+      <Shell
+        retry={() => {}}
+        payload={payload()}
+        arrangement={{ sort: 'folders', last: ['.snap', '.spec.ts'] }}
+        onArrange={() => {}}
+      />,
+    );
+
+    expect(rowPaths().filter((path) => !path.endsWith('/')).slice(-2)).toEqual([
+      'src/app.spec.ts',
+      'src/util.spec.ts',
+    ]);
+  });
+
+  it('puts back only what the line names, and keeps a type this review does not have', async () => {
+    // `.snap` was sent to the end in some other review. Nothing here is one,
+    // so the line does not mention it, and pressing the line cannot be what
+    // forgets it.
+    const user = userEvent.setup();
+    const onArrange = vi.fn();
+    render(
+      <Shell
+        retry={() => {}}
+        payload={payload()}
+        arrangement={{ sort: 'folders', last: ['.snap', '.spec.ts'] }}
+        onArrange={onArrange}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '.spec.ts read last. Put them back' }));
+
+    expect(onArrange).toHaveBeenCalledWith({ sort: 'folders', last: ['.snap'] });
+  });
+});

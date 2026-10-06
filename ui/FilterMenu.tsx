@@ -29,8 +29,9 @@
  * and "Read last" lists the types again, to send to the end of the review
  * rather than out of it. They live here because this is where a reviewer
  * shapes the list. Neither hides anything, though, so neither draws the funnel
- * on, and "Show all files" leaves both alone. `lib/review/readingOrder.ts` has
- * the order itself.
+ * on, and "Show all files" leaves both alone. And unlike the filters, both are
+ * kept for every review after this one (`ARRANGEMENT_KEY` in `lib/settings.ts`).
+ * `lib/review/readingOrder.ts` has the order itself.
  */
 
 import { type Ref, useEffect, useRef } from 'react';

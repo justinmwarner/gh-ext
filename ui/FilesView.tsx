@@ -427,7 +427,15 @@ export function FilesView({
                 menuFiltering={filtering}
                 flat={arrangement.sort === 'changes'}
                 groups={groups}
-                onResetOrder={onArrange === undefined ? undefined : () => onArrange(AS_IS)}
+                onResetOrder={
+                  onArrange === undefined
+                    ? undefined
+                    : (named) =>
+                        onArrange({
+                          sort: 'folders',
+                          last: arrangement.last.filter((type) => !named.includes(type)),
+                        })
+                }
                 filterMenu={
                   onFilters === undefined ? undefined : (
                     <FilterMenu

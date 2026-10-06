@@ -6,13 +6,14 @@
  * wrong decision rather than that the extension APIs were missing.
  */
 
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ARRANGEMENT_KEY } from '@/lib/settings';
 import { App } from './App';
 import { request } from './background';
 import { openOptions } from './openOptions';
-import { prPayload } from './prPayload.fixture';
+import { fileFixture, prPayload, prPayloadWithFiles } from './prPayload.fixture';
 
 vi.mock('./background', () => ({ request: vi.fn() }));
 vi.mock('./openOptions', () => ({ openOptions: vi.fn() }));
@@ -48,6 +49,7 @@ afterEach(async () => {
   // would otherwise decide the state of every test after it.
   await vaultStorage().remove('github-token-vault');
   await vaultStorage().remove('settings');
+  await vaultStorage().remove(ARRANGEMENT_KEY);
 });
 
 describe('App', () => {
@@ -151,6 +153,99 @@ describe('App', () => {
     expect(
       await screen.findByRole('heading', { name: 'Cache the diff on head SHA' }),
     ).toBeDefined();
+  });
+});
+
+/**
+ * The order a review opens in, which is the reviewer's from its first frame.
+ *
+ * Drawn before the order was known, the review would be drawn in folder order
+ * and then rearranged into the reviewer's, column and tree both. So the page
+ * waits for the order the way it waits for the pull request.
+ */
+describe('App, the order a review opens in', () => {
+  type Area = { get(key?: string): Promise<Record<string, unknown>> };
+  /** The fake storage area, reached the way `vaultStorage` reaches it. */
+  const storageArea = () =>
+    (globalThis as unknown as { browser: { storage: { local: Area } } }).browser.storage.local;
+
+  let restoreGet: (() => void) | null = null;
+
+  afterEach(() => {
+    restoreGet?.();
+    restoreGet = null;
+  });
+
+  /** Answer reads of the stored order only once the returned function is called. */
+  function holdOrderRead(): () => void {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const area = storageArea();
+    const real = area.get.bind(area);
+    Object.defineProperty(area, 'get', {
+      value: async (key?: string) => {
+        const answer = await real(key);
+        if (key === ARRANGEMENT_KEY) await gate;
+        return answer;
+      },
+      writable: true,
+      configurable: true,
+    });
+    restoreGet = () => {
+      Object.defineProperty(area, 'get', { value: real, writable: true, configurable: true });
+    };
+    return release;
+  }
+
+  /**
+   * A pull request with files in it, since an empty one has no tree to lay
+   * out. Every other request the review makes gets an empty answer.
+   */
+  const answerWithFiles = (): void => {
+    const payload = prPayloadWithFiles([
+      fileFixture({ path: 'src/app.ts' }),
+      fileFixture({ path: 'lib/big.ts', additions: 30, deletions: 5 }),
+    ]);
+    requestMock.mockImplementation((message: { kind: string }) =>
+      Promise.resolve(
+        message.kind === 'get-pr' ? { ok: true, data: payload } : { ok: true, data: { data: {} } },
+      ),
+    );
+  };
+
+  it('opens the review in the order the reviewer chose last time', async () => {
+    await vaultStorage().set({ [ARRANGEMENT_KEY]: { sort: 'changes', last: [] } });
+    answerWithFiles();
+
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Cache the diff on head SHA' });
+    // Asked the moment the review is there rather than waited for: the order
+    // is part of the review's first frame, not something that arrives after.
+    expect(screen.getByRole('button', { name: /sorted by most changed/i })).toBeDefined();
+  });
+
+  it('draws nothing until it knows the order, even with the pull request in hand', async () => {
+    const release = holdOrderRead();
+    await vaultStorage().set({ [ARRANGEMENT_KEY]: { sort: 'changes', last: [] } });
+    answerWithFiles();
+
+    const { container } = render(<App />);
+    // Long enough for the worker's reply to have landed.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(requestMock).toHaveBeenCalled();
+    expect(container.innerHTML).toBe('');
+
+    await act(async () => {
+      release();
+    });
+
+    await screen.findByRole('heading', { name: 'Cache the diff on head SHA' });
+    expect(screen.getByRole('button', { name: /sorted by most changed/i })).toBeDefined();
   });
 });
 

@@ -10,6 +10,8 @@
 
 import { type ComparisonKind, isRememberedKind, modesFor } from './compare/modes';
 import { THEME_FOLLOWS_PAGE, isDiffTheme } from './compare/themes';
+import { isFileType } from './review/fileFilters';
+import type { Arrangement, ReadingOrder } from './review/readingOrder';
 
 /** Where a review opens. */
 export type OpenIn = 'new-tab' | 'new-window' | 'same-tab';
@@ -228,12 +230,11 @@ export const MODE_MEMORY_KEY = 'mode-memory';
  * every drag while the options page writes the settings object, and two writers
  * doing read-modify-write on one key will eventually lose one of the two edits.
  *
- * Not on the options page at all, and that is the point of it. `ui/Shell.tsx`
- * argues that nothing on the review page is remembered because everything there
- * is an answer to *this* pull request — but a rail width is not an answer to a
- * pull request, it is an answer to a monitor, and it is the same on all of
- * them. A control for it would be a number field for something the reviewer has
- * already said with a drag.
+ * Not on the options page at all, and that is the point of it. The file filters
+ * are never remembered, because each one is an answer to *this* pull request —
+ * but a rail width is not an answer to a pull request, it is an answer to a
+ * monitor, and it is the same on all of them. A control for it would be a
+ * number field for something the reviewer has already said with a drag.
  */
 export const RAIL_WIDTH_KEY = 'rail-width';
 
@@ -247,6 +248,64 @@ export const RAIL_WIDTH_KEY = 'rail-width';
 export function parseRailWidth(raw: unknown, min: number, max: number): number | null {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
   return Math.min(Math.max(Math.round(raw), min), max);
+}
+
+/**
+ * `storage.local` key holding the order reviews open in: folder order or most
+ * changed first, and the file types read last.
+ *
+ * Its own key rather than a field on {@link Settings}, for the reason
+ * {@link CARD_COLLAPSED_KEY} is: the review page writes this on every press in
+ * the funnel menu while the options page writes the settings object.
+ *
+ * Kept, where the filters beside it in that menu are not, and the difference is
+ * the whole argument. A filter takes files out of the review, and one that
+ * arrived already on would be a review missing files nobody asked this pull
+ * request to leave out. An order takes nothing out. Every file is still there,
+ * and the line at the top of the tree says how they were laid out and is the
+ * button that puts them back. Reading the stories last is a habit rather than
+ * an answer to one pull request, and a habit that has to be set again on every
+ * review is one a reviewer stops using.
+ */
+export const ARRANGEMENT_KEY = 'reading-order';
+
+/**
+ * The most types a stored order sends to the end.
+ *
+ * Every one is matched against every file on the way to drawing the review, so
+ * a corrupted list without a bound would be work without one. Far beyond what
+ * any reviewer sends: the types gather from one pull request to the next, but
+ * nobody reads a hundred kinds of file last.
+ */
+export const MAX_LAST_TYPES = 100;
+
+/**
+ * Read a stored order, falling back per field.
+ *
+ * Like {@link parseSettings}: an order this build does not know opens in
+ * folder order without discarding the types stored beside it, and an entry
+ * that is not a type, or one sent twice, is dropped without discarding the
+ * rest. The types keep the order they were sent in, which is the order they
+ * are read in.
+ */
+export function parseArrangement(raw: unknown): Arrangement {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { sort: 'folders', last: [] };
+  }
+
+  const stored = raw as Record<string, unknown>;
+  const sort: ReadingOrder = stored.sort === 'changes' ? 'changes' : 'folders';
+  const last: string[] = [];
+
+  if (Array.isArray(stored.last)) {
+    for (const type of stored.last) {
+      if (typeof type !== 'string' || !isFileType(type) || last.includes(type)) continue;
+      last.push(type);
+      if (last.length === MAX_LAST_TYPES) break;
+    }
+  }
+
+  return { sort, last };
 }
 
 /** Which mode each remembered kind opens in. Absent means "the kind's default". */

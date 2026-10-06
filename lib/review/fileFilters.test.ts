@@ -20,6 +20,7 @@ import {
   fileFacets,
   fileType,
   hiddenPaths,
+  isFileType,
   isFiltering,
   isMoved,
   nearestShown,
@@ -126,6 +127,40 @@ describe('a file’s longer type', () => {
     expect(typeMatches('src/Button.spec.tsx', '.tsx')).toBe(true);
     expect(typeMatches('src/Button.spec.tsx', '.spec.tsx')).toBe(true);
     expect(typeMatches('src/Button.tsx', '.spec.tsx')).toBe(false);
+  });
+});
+
+/**
+ * What a list of types read back from storage is held to. It may have been
+ * written by another build, or by nothing that meant it, so the test is
+ * whether the string is one these rules could have produced.
+ */
+describe('whether a string is a type', () => {
+  it.each([
+    'src/app.ts',
+    'src/Button.spec.tsx',
+    'src/Card.Stories.TSX',
+    'vendor/jquery-3.6.0.min.js',
+    'archive.tar.gz',
+    'config/.gitignore',
+    'Makefile',
+  ])('takes every type %s has', (path) => {
+    expect(isFileType(fileType(path))).toBe(true);
+    const longer = compoundType(path);
+    if (longer !== null) expect(isFileType(longer)).toBe(true);
+  });
+
+  it.each([
+    ['', 'nothing'],
+    ['.', 'a dot alone'],
+    ['ts', 'no dot'],
+    ['.TS', 'capitals, which a type never has'],
+    ['.spec.', 'nothing after the last dot'],
+    ['.a.b.c', 'two words before the extension'],
+    ['.v1.ts', 'a word with a number in it'],
+    ['.ts/x', 'a slash'],
+  ])('refuses %j: %s', (value) => {
+    expect(isFileType(value)).toBe(false);
   });
 });
 

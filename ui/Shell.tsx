@@ -87,14 +87,21 @@ function step<T>(items: readonly T[], from: number, direction: 1 | -1): T | unde
   return items[Math.min(Math.max(next, 0), items.length - 1)];
 }
 
-export function Shell({
-  payload,
-  retry,
-}: {
+interface ShellProps {
   payload: PrPayload;
   /** Ask the worker for this pull request again. */
   retry: () => void;
-}) {
+  /**
+   * The order the review is laid out in, and the way to change it. Both or
+   * neither: `App` passes both, and remembers the order for every review after
+   * this one. Without them the shell holds an order of its own, which opens in
+   * folder order and is forgotten — as in a test that mounts the shell alone.
+   */
+  arrangement?: Arrangement;
+  onArrange?: (next: Arrangement) => void;
+}
+
+export function Shell({ payload, retry, arrangement, onArrange }: ShellProps) {
   return (
     // The session wraps the whole shell rather than the column alone: a
     // resolve has to be visible everywhere at once, and the pending-review
@@ -106,13 +113,18 @@ export function Shell({
       threads={payload.threads}
     >
       <ShortcutTargetsProvider>
-        <ReviewSurface payload={payload} retry={retry} />
+        <ReviewSurface
+          payload={payload}
+          retry={retry}
+          arrangement={arrangement}
+          onArrange={onArrange}
+        />
       </ShortcutTargetsProvider>
     </ReviewSessionProvider>
   );
 }
 
-function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => void }) {
+function ReviewSurface({ payload, retry, arrangement: given, onArrange }: ShellProps) {
   const session = useReviewSession();
   const targets = useShortcutTargets();
 
@@ -181,12 +193,15 @@ function ReviewSurface({ payload, retry }: { payload: PrPayload; retry: () => vo
    * How the review is laid out: folder order or most changed first, and the
    * file types sent to the end.
    *
-   * Here for the reason the filters are. Every surface that walks the files
-   * reads it, and it has to outlast `FilesView`, which is unmounted while a
-   * commit comparison loads. Never stored either: like a filter, it is an
-   * answer to this pull request, so every review opens in folder order.
+   * Read here for the reason the filters are: every surface that walks the
+   * files reads it. Held above the shell, though, by `App`, and unlike a
+   * filter it is kept, so every review after this one opens in it.
+   * `ARRANGEMENT_KEY` says why one is kept and the other is not. The shell's
+   * own state is only for a shell mounted without it.
    */
-  const [arrangement, setArrangement] = useState<Arrangement>(AS_IS);
+  const [own, setOwn] = useState<Arrangement>(AS_IS);
+  const arrangement = given ?? own;
+  const setArrangement = onArrange ?? setOwn;
 
   /**
    * What the repository declares about its own generated files.

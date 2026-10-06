@@ -22,6 +22,7 @@ import { Shell } from './Shell';
 import { usePageTheme } from './pageTheme';
 import { useHashRoute } from './useHashRoute';
 import { usePrPayload } from './usePrPayload';
+import { useStoredArrangement } from './useStoredArrangement';
 import { unlockVault, useVaultState } from './useVaultState';
 
 export function App() {
@@ -52,6 +53,10 @@ function PullRequest({ pr }: { pr: { owner: string; repo: string; number: number
   // reading storage on every mount is cheap next to the round trip the page is
   // already making.
   const vault = useVaultState();
+  // The order every review opens in. Here rather than in the shell, so it is
+  // read alongside the pull request rather than after it, and so it outlives
+  // a shell that unmounts for a retry.
+  const [arrangement, setArrangement] = useStoredArrangement();
 
   switch (load.status) {
     case 'loading':
@@ -73,6 +78,18 @@ function PullRequest({ pr }: { pr: { owner: string; repo: string; number: number
         <SetupState pr={pr} error={load.error} />
       );
     case 'ready':
-      return <Shell payload={load.payload} retry={load.retry} />;
+      // Not before the order is known, for the reason the vault is waited on
+      // above: drawn now, the review would be drawn in folder order and then
+      // rearranged into the reviewer's when storage answered. Storage answers
+      // well before the worker does, so this is a wait in principle only.
+      if (arrangement === null) return <LoadingState />;
+      return (
+        <Shell
+          payload={load.payload}
+          retry={load.retry}
+          arrangement={arrangement}
+          onArrange={setArrangement}
+        />
+      );
   }
 }

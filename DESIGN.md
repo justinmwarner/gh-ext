@@ -572,7 +572,10 @@ sends every type in it to the end at once.
 The same menu holds the two choices that are not filters, because they move
 files without hiding any. A **Sort** section has one row, "Most changed
 first", and a **Read last** section lists the file types again. Neither draws
-the funnel on, and "Show all files" leaves both alone.
+the funnel on, and "Show all files" leaves both alone. Both are remembered:
+every review after opens in the same order, and a review open in another tab
+follows at once. The filters are not, because a review that opened with files
+already hidden would be missing files nobody asked it to leave out.
 
 While the review is sorted, the tree goes flat. Each file is one row: tick,
 icon, name, and then its directory in Foreground Muted at 12px, inside the
@@ -590,7 +593,9 @@ Under the box, one line says what has moved, in the count line's size and
 colour: "Sorted by most changed.", "Sorted by most changed, .png last." or
 ".png read last.". It ends in Accent Foreground with "Show as tree" or "Put
 them back". The whole line is one button, and pressing it puts the review back
-in folder order with nothing read last, keeping the folds the reviewer had.
+in folder order with the types it names no longer read last, for every review,
+keeping the folds the reviewer had. A type read last in some other review that
+this one has none of is not named, and stays.
 
 ### The injected card (signature component)
 

@@ -905,7 +905,10 @@ describe('reading types last', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '.md read last. Put them back' }));
 
+    // Handed the types the line names, and only those: the order is kept from
+    // one review to the next, so the line can only undo what it says.
     expect(onResetOrder).toHaveBeenCalledTimes(1);
+    expect(onResetOrder).toHaveBeenCalledWith(['.md']);
   });
 
   it('says the sort and the groups in one line while the review is sorted', () => {

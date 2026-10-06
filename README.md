@@ -14,8 +14,8 @@ Approve and request changes. Plus keyboard navigation, viewed state, drafts that
 survive a failed post, multi-line comments, suggestion authoring, noise
 filtering, diff search, a filter on the file tree, file filters like GitHub's
 (grouped by kind of file, and Ctrl-click to show only some), a most-changed-first
-order for the whole review, file types sent to the end of it (`.spec.tsx`,
-`.snap`, `.png`), expand-unchanged-context, and
+order and file types sent to the end of the review (`.spec.tsx`, `.snap`,
+`.png`), both remembered from one review to the next, expand-unchanged-context, and
 scoping the diff to one commit, a range of commits, or "changes since my last
 review".
 

@@ -9,14 +9,17 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { AS_IS } from './review/readingOrder';
 import {
   DEFAULT_SETTINGS,
   EMPTY_MODE_MEMORY,
+  MAX_LAST_TYPES,
   MAX_PATTERNS,
   MAX_PATTERN_LENGTH,
   autoOpenAvailable,
   isLineDiff,
   isOpenIn,
+  parseArrangement,
   parseModeMemory,
   parsePatterns,
   parseRailWidth,
@@ -439,6 +442,50 @@ describe('parseRailWidth', () => {
 
   it('rounds a fractional width to a whole pixel', () => {
     expect(parseRailWidth(320.6, 180, 560)).toBe(321);
+  });
+});
+
+describe('parseArrangement', () => {
+  it.each([undefined, null, 'changes', 42, []])('opens in folder order on %p', (raw) => {
+    expect(parseArrangement(raw)).toEqual(AS_IS);
+  });
+
+  it('reads the order back, with the types read last in the order they were sent', () => {
+    expect(parseArrangement({ sort: 'changes', last: ['.story.ts', '.snap', '.md'] })).toEqual({
+      sort: 'changes',
+      last: ['.story.ts', '.snap', '.md'],
+    });
+  });
+
+  it('keeps the types read last when the order is one this build does not know', () => {
+    // An order from a later build is a choice this one cannot draw, but the
+    // types beside it were chosen too and mean the same thing here.
+    expect(parseArrangement({ sort: 'newest', last: ['.snap'] })).toEqual({
+      sort: 'folders',
+      last: ['.snap'],
+    });
+  });
+
+  it('keeps the order when the types are not a list', () => {
+    expect(parseArrangement({ sort: 'changes', last: '.snap' })).toEqual({
+      sort: 'changes',
+      last: [],
+    });
+  });
+
+  it('drops what is not a type, and a type sent twice, and keeps the rest', () => {
+    expect(
+      parseArrangement({ last: ['.snap', 42, 'snap', '.SNAP', '.snap', '', null, '.md'] }),
+    ).toEqual({ sort: 'folders', last: ['.snap', '.md'] });
+  });
+
+  it(`keeps the first ${MAX_LAST_TYPES} types sent and no more`, () => {
+    // Every type is matched against every file on the way to drawing the
+    // review, so a list without a bound is work without one.
+    const types = Array.from({ length: MAX_LAST_TYPES + 5 }, (_, n) => `.t${n}`);
+    expect(parseArrangement({ sort: 'folders', last: types }).last).toEqual(
+      types.slice(0, MAX_LAST_TYPES),
+    );
   });
 });
 

@@ -144,6 +144,22 @@ export function typeMatches(path: string, type: string): boolean {
   return fileType(path) === type || compoundType(path) === type;
 }
 
+/**
+ * Whether a string is a type: one that {@link fileType} or {@link compoundType}
+ * could have given some file.
+ *
+ * What a list of types read back from storage is held to. Here rather than
+ * beside the parser, so the shape it checks sits next to the two functions
+ * that make it: a change to what counts as a type that missed this would
+ * quietly drop every remembered type of the new kind.
+ */
+export function isFileType(value: string): boolean {
+  if (value === DOTFILE || value === NO_EXTENSION) return true;
+  // An extension, with a word before it for a longer type. Lowercase, as both
+  // functions return it, so a capital means it came from somewhere else.
+  return /^\.(?:[a-z]+\.)?[^./]+$/.test(value) && value === value.toLowerCase();
+}
+
 /** A changed file, as far as these rules read it. `ReviewFile` satisfies it. */
 export interface FilterableFile {
   path: string;
@@ -186,7 +202,9 @@ export function isMoved(file: FilterableFile): boolean {
  *
  * Never stored. Every review opens with {@link NO_FILTERS}: a filter is an
  * answer to *this* pull request, and one that arrived already on would be a
- * review quietly missing files it never said it was missing.
+ * review quietly missing files it never said it was missing. The order beside
+ * the filters in the menu is stored, and `ARRANGEMENT_KEY` in
+ * `lib/settings.ts` says why the two differ.
  */
 export interface FileFilters {
   hiddenKinds: ReadonlySet<ChangeKind>;

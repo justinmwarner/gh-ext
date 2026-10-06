@@ -11,11 +11,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   AS_IS,
+  type Arrangement,
   arrange,
   changedLines,
   inReadingOrder,
   mostChangedFirst,
   rankOf,
+  sameArrangement,
 } from './readingOrder';
 
 const file = (path: string, additions: number, deletions: number) => ({
@@ -204,3 +206,24 @@ describe('arrange', () => {
   });
 });
 
+
+/**
+ * Whether two arrangements lay a review out alike. A remembered order comes
+ * back from storage as a new object every time it is written, the writer's own
+ * write included, and only a real change should reach the review.
+ */
+describe('sameArrangement', () => {
+  const READ: Arrangement = { sort: 'changes', last: ['.snap', '.md'] };
+
+  it('is the same order with the same types sent last, as a new object', () => {
+    expect(sameArrangement(READ, { sort: 'changes', last: ['.snap', '.md'] })).toBe(true);
+  });
+
+  it.each<[Arrangement, string]>([
+    [{ sort: 'folders', last: ['.snap', '.md'] }, 'the other order'],
+    [{ sort: 'changes', last: ['.md', '.snap'] }, 'the same types, sent in the other order'],
+    [{ sort: 'changes', last: ['.snap'] }, 'one type fewer'],
+  ])('is not the same as %j: %s', (other) => {
+    expect(sameArrangement(READ, other)).toBe(false);
+  });
+});

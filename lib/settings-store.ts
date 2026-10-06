@@ -14,13 +14,16 @@
 import { browser } from 'wxt/browser';
 import { OVERRIDES_KEY, type Overrides, parseOverrides } from './dashboard/overrides';
 import { setLoggingEnabled } from './log';
+import type { Arrangement } from './review/readingOrder';
 import {
+  ARRANGEMENT_KEY,
   CARD_COLLAPSED_KEY,
   MODE_MEMORY_KEY,
   RAIL_WIDTH_KEY,
   SETTINGS_KEY,
   type ModeMemory,
   type Settings,
+  parseArrangement,
   parseModeMemory,
   parseRailWidth,
   parseSettings,
@@ -171,6 +174,39 @@ export function onModeMemoryChanged(onChange: (memory: ModeMemory) => void): () 
     const change = changes[MODE_MEMORY_KEY];
     if (change === undefined) return;
     onChange(parseModeMemory(change.newValue));
+  };
+
+  browser.storage.onChanged.addListener(listener);
+  return () => {
+    browser.storage.onChanged.removeListener(listener);
+  };
+}
+
+export async function readArrangement(): Promise<Arrangement> {
+  const stored = await browser.storage.local.get(ARRANGEMENT_KEY);
+  return parseArrangement(stored[ARRANGEMENT_KEY]);
+}
+
+export async function writeArrangement(arrangement: Arrangement): Promise<void> {
+  await browser.storage.local.set({ [ARRANGEMENT_KEY]: arrangement });
+}
+
+/**
+ * Call back whenever the remembered order changes, in any extension context.
+ *
+ * For the reason {@link onModeMemoryChanged} exists: the reviewer who sends the
+ * stories to the end in one review expects the review open in the next tab to
+ * have done the same, not to find it there on the next reload.
+ */
+export function onArrangementChanged(onChange: (arrangement: Arrangement) => void): () => void {
+  const listener = (
+    changes: Record<string, { newValue?: unknown }>,
+    areaName: string,
+  ): void => {
+    if (areaName !== 'local') return;
+    const change = changes[ARRANGEMENT_KEY];
+    if (change === undefined) return;
+    onChange(parseArrangement(change.newValue));
   };
 
   browser.storage.onChanged.addListener(listener);
