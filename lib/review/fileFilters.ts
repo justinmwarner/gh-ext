@@ -317,10 +317,55 @@ export function toggleType(filters: FileFilters, type: string): FileFilters {
  * already shown, so holding Ctrl and pressing three rows shows those three.
  */
 export function onlyType(filters: FileFilters, type: string, extend: boolean): FileFilters {
+  return showOnly(filters, [type], extend);
+}
+
+/**
+ * Whether every type in a group reads as shown, some of them, or none: the
+ * tick on a category's heading, which is mixed for some.
+ */
+export function typesShown(filters: FileFilters, types: readonly string[]): 'all' | 'some' | 'none' {
+  let shown = 0;
+  for (const type of types) if (typeShown(filters, type)) shown += 1;
+  return shown === types.length ? 'all' : shown === 0 ? 'none' : 'some';
+}
+
+/**
+ * Every type in a group shown, or every one hidden.
+ *
+ * Each type that is not already that way is pressed in turn, the way a
+ * reviewer would press its row, so the result is exactly what those presses
+ * would leave. In list order, which puts an extension before the longer types
+ * under it: pressed first, it decides whether they still need a press.
+ */
+export function withTypesShown(
+  filters: FileFilters,
+  types: readonly string[],
+  shown: boolean,
+): FileFilters {
+  return types.reduce(
+    (next, type) => (typeShown(next, type) === shown ? next : toggleType(next, type)),
+    filters,
+  );
+}
+
+/**
+ * A Ctrl-press on a group of types, or on one: show only those.
+ *
+ * The first press of a run shows them and nothing else, setting aside
+ * whatever was hidden before, because "only these" means all of these. Every
+ * later press in the run shows its group alongside, or takes it back off if it
+ * was all shown already.
+ */
+export function showOnly(
+  filters: FileFilters,
+  types: readonly string[],
+  extend: boolean,
+): FileFilters {
   if (!extend || filters.onlyTypes === null) {
-    return { ...filters, onlyTypes: new Set([type]), hiddenTypes: new Set() };
+    return { ...filters, onlyTypes: new Set(types), hiddenTypes: new Set() };
   }
-  return toggleType(filters, type);
+  return withTypesShown(filters, types, typesShown(filters, types) !== 'all');
 }
 
 /**

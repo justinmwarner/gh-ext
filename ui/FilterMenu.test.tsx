@@ -250,6 +250,8 @@ describe('the filter menu, with longer types', () => {
 
     const types = within(screen.getByRole('group', { name: 'File type' }))
       .getAllByRole('menuitemcheckbox')
+      // The type rows; the categories' own heading rows are pinned below.
+      .filter((item) => !item.hasAttribute('data-header'))
       .map((item) => [item.textContent, item.getAttribute('data-indent')]);
     // Code before Images, and the specs under `.tsx` within Code.
     expect(types).toEqual([
@@ -408,6 +410,127 @@ describe('the filter menu, showing only some types', () => {
     const last = screen.getByRole('group', { name: 'Read last' });
     expect(within(last).getByRole('group', { name: 'Code' })).toBeDefined();
     expect(within(last).getByRole('group', { name: 'Docs' })).toBeDefined();
+  });
+});
+
+/**
+ * A category's heading, and the reset.
+ *
+ * "Code" ticks every code type at once, or unticks them all when they are all
+ * ticked already, and reads as partly ticked while only some are. A Ctrl-press
+ * on it shows only code. "Show all types" puts every type back without
+ * touching the other filters, which "Show all files" would.
+ */
+describe('the filter menu, by category', () => {
+  const at = (path: string) => ({
+    path,
+    changeType: 'MODIFIED' as const,
+    additions: 1,
+    deletions: 1,
+    isBinary: false,
+  });
+  const MIXED = fileFacets([at('src/a.ts'), at('src/b.tsx'), at('assets/logo.png'), at('docs/readme.md')]);
+
+  function Held({ initial, onFilters }: { initial: FileFilters; onFilters: (next: FileFilters) => void }) {
+    const [filters, setFilters] = useState<FileFilters>(initial);
+    return (
+      <FilterMenu
+        filters={filters}
+        facets={MIXED}
+        onChange={(next) => {
+          setFilters(next);
+          onFilters(next);
+        }}
+        active={filters !== NO_FILTERS}
+      />
+    );
+  }
+
+  const types = () => screen.getByRole('group', { name: 'File type' });
+  const header = (name: string) =>
+    within(within(types()).getByRole('group', { name })).getAllByRole('menuitemcheckbox')[0] as HTMLElement;
+  const typeRow = (name: RegExp) => within(types()).getByRole('menuitemcheckbox', { name });
+
+  it('unticks every type in a category from its heading, and ticks them back', async () => {
+    const onFilters = vi.fn();
+    const user = userEvent.setup();
+    render(<Held initial={NO_FILTERS} onFilters={onFilters} />);
+    await user.click(trigger());
+    expect(header('Code').getAttribute('aria-checked')).toBe('true');
+
+    await user.click(header('Code'));
+    expect(typeRow(/^\.ts\d/).getAttribute('aria-checked')).toBe('false');
+    expect(typeRow(/^\.tsx/).getAttribute('aria-checked')).toBe('false');
+    expect(typeRow(/^\.png/).getAttribute('aria-checked')).toBe('true');
+
+    await user.click(header('Code'));
+    expect(typeRow(/^\.ts\d/).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('reads a category as partly ticked, and ticks the rest from its heading', async () => {
+    const user = userEvent.setup();
+    render(<Held initial={{ ...NO_FILTERS, hiddenTypes: new Set(['.tsx']) }} onFilters={vi.fn()} />);
+    await user.click(trigger());
+    expect(header('Code').getAttribute('aria-checked')).toBe('mixed');
+
+    await user.click(header('Code'));
+
+    expect(typeRow(/^\.tsx/).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('shows only a category with a Ctrl-press on its heading', async () => {
+    const user = userEvent.setup();
+    render(<Held initial={NO_FILTERS} onFilters={vi.fn()} />);
+    await user.click(trigger());
+
+    await user.keyboard('{Control>}');
+    await user.click(header('Images'));
+    await user.keyboard('{/Control}');
+
+    expect(typeRow(/^\.png/).getAttribute('aria-checked')).toBe('true');
+    expect(typeRow(/^\.ts\d/).getAttribute('aria-checked')).toBe('false');
+    expect(typeRow(/^\.md/).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('puts every type back with "Show all types", and leaves the other filters alone', async () => {
+    const onFilters = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Held
+        initial={{ ...NO_FILTERS, hideViewed: true, onlyTypes: new Set(['.png']) }}
+        onFilters={onFilters}
+      />,
+    );
+    await user.click(trigger());
+
+    await user.click(within(types()).getByRole('menuitem', { name: 'Show all types' }));
+
+    const last = onFilters.mock.calls.at(-1)?.[0] as FileFilters;
+    expect(last.onlyTypes).toBeNull();
+    expect(last.hiddenTypes.size).toBe(0);
+    expect(last.hideViewed).toBe(true);
+  });
+
+  it('will not "Show all types" while every type is shown', async () => {
+    render(<Held initial={NO_FILTERS} onFilters={vi.fn()} />);
+    await userEvent.click(trigger());
+
+    expect(
+      within(types()).getByRole('menuitem', { name: 'Show all types' }).getAttribute('aria-disabled'),
+    ).toBe('true');
+  });
+
+  it('sends every type in a category to the end from its heading in Read last', async () => {
+    const onLast = vi.fn();
+    render(
+      <FilterMenu filters={NO_FILTERS} facets={MIXED} onChange={vi.fn()} active={false} last={['.md']} onLast={onLast} />,
+    );
+    await userEvent.click(trigger());
+    const code = within(screen.getByRole('group', { name: 'Read last' })).getByRole('group', { name: 'Code' });
+
+    await userEvent.click(within(code).getAllByRole('menuitemcheckbox')[0] as HTMLElement);
+
+    expect(onLast).toHaveBeenLastCalledWith(['.md', '.ts', '.tsx']);
   });
 });
 

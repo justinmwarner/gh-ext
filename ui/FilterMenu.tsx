@@ -21,7 +21,9 @@
  * so a long list can be read by its headings (`lib/review/fileCategories.ts`).
  * A plain click on a type flips it. A Ctrl-click (⌘ on a Mac) shows only that
  * type, and further Ctrl-clicks before the key comes up add more, which is
- * `onlyType` and the run below.
+ * `onlyType` and the run below. Each category's heading is a row too, which
+ * does the same to every type in it at once (`withTypesShown`, `showOnly`),
+ * and "Show all types" puts the types back without touching anything else.
  *
  * Two sections are not filters. "Sort" has a single row, "Most changed first",
  * and "Read last" lists the types again, to send to the end of the review
@@ -33,7 +35,7 @@
 
 import { type Ref, useEffect, useRef } from 'react';
 import { resolveMod } from '@/lib/keymap';
-import { CATEGORY_LABELS, byCategory } from '@/lib/review/fileCategories';
+import { CATEGORY_LABELS, type FileCategory, byCategory } from '@/lib/review/fileCategories';
 import {
   type ChangeKind,
   DOTFILE,
@@ -43,9 +45,12 @@ import {
   NO_FILTERS,
   onlyType,
   parentType,
+  showOnly,
   toggleType,
   typeLabel,
   typeShown,
+  typesShown,
+  withTypesShown,
 } from '@/lib/review/fileFilters';
 import type { ReadingOrder } from '@/lib/review/readingOrder';
 import { MenuButton, type MenuButtonHandle, type MenuGroup, type MenuItem } from './MenuButton';
@@ -85,6 +90,12 @@ const lastName = (type: string): string =>
     : type === NO_EXTENSION
       ? 'Read files with no extension last'
       : `Read ${type} last`;
+
+/** What a screen reader calls a category's heading in "Read last". */
+const lastCategoryName = (category: FileCategory): string =>
+  category === 'other'
+    ? 'Read other types last'
+    : `Read ${CATEGORY_LABELS[category].toLowerCase()} last`;
 
 /** One more or one fewer, without touching the set the caller holds. */
 function flipped<T>(set: ReadonlySet<T>, value: T): Set<T> {
@@ -191,6 +202,10 @@ export function FilterMenu({
     ...extra,
   });
 
+  /** Nothing to reset: no only-list, and every type listed here is shown. */
+  const everyTypeShown =
+    filters.onlyTypes === null && typesShown(filters, [...facets.types.keys()]) === 'all';
+
   const groups: MenuGroup[] = [
     {
       id: 'toggles',
@@ -248,41 +263,75 @@ export function FilterMenu({
       id: 'types',
       label: 'File type',
       hint: `${MOD_LABEL}-click to show only the ones you pick`,
-      items: [],
+      items: [
+        {
+          id: 'types:all',
+          label: 'Show all types',
+          // Every type, and only the types: the other filters stay as they
+          // were, which is the difference from "Show all files" at the foot.
+          // Kept open, because a reviewer resetting the types is usually about
+          // to pick some again.
+          keepOpen: true,
+          onSelect: () => onChange({ ...filters, hiddenTypes: new Set(), onlyTypes: null }),
+          ...(everyTypeShown ? { disabled: true, title: 'Every type is shown.' } : {}),
+        },
+      ],
       // Under what sort of file each type is, so `.woff2` is found under
       // Fonts rather than by reading thirty rows. `.spec.tsx` stays under
       // `.tsx`, which is where its category comes from.
-      subgroups: byCategory(facets.types.keys()).map((group) => ({
-        id: `types:${group.category}`,
-        label: CATEGORY_LABELS[group.category],
-        items: group.types.map((type): MenuItem => {
-          const parent = parentType(type);
-          // Hiding `.tsx` hides the specs too, so `.spec.tsx` cannot be shown
-          // while it is. Drawn unticked and refused rather than left ticked
-          // over files that are not on screen, with the reason in its title.
-          const hiddenAbove = parent !== null && filters.hiddenTypes.has(parent);
-          return {
-            id: `type:${type}`,
-            label: typeLabel(type),
-            detail: `${facets.types.get(type) ?? 0}`,
-            checked: typeShown(filters, type),
-            indent: parent !== null,
+      subgroups: byCategory(facets.types.keys()).map((group) => {
+        const state = typesShown(filters, group.types);
+        return {
+          id: `types:${group.category}`,
+          label: CATEGORY_LABELS[group.category],
+          // The heading is a box for the whole category: ticked when every type
+          // in it is shown, partly when some are. A press shows them all, or
+          // hides them all when they all show already; a Ctrl-press shows only
+          // this category, as it shows only one type on a type's row.
+          header: {
+            id: `types:${group.category}:all`,
+            label: CATEGORY_LABELS[group.category],
+            checked: state === 'all' ? true : state === 'none' ? false : 'mixed',
             keepOpen: true,
-            ...(hiddenAbove ? { disabled: true, title: `Hidden along with ${parent}.` } : {}),
             onSelect: ({ mod }) => {
               if (!mod) {
-                onChange(toggleType(filters, type));
+                onChange(withTypesShown(filters, group.types, state !== 'all'));
                 return;
               }
-              // The first Ctrl-click of a run shows this type alone; the
-              // rest of the run, until Ctrl is let go, add to it.
               const extend = run.current;
               run.current = true;
-              onChange(onlyType(filters, type, extend));
+              onChange(showOnly(filters, group.types, extend));
             },
-          };
-        }),
-      })),
+          },
+          items: group.types.map((type): MenuItem => {
+            const parent = parentType(type);
+            // Hiding `.tsx` hides the specs too, so `.spec.tsx` cannot be shown
+            // while it is. Drawn unticked and refused rather than left ticked
+            // over files that are not on screen, with the reason in its title.
+            const hiddenAbove = parent !== null && filters.hiddenTypes.has(parent);
+            return {
+              id: `type:${type}`,
+              label: typeLabel(type),
+              detail: `${facets.types.get(type) ?? 0}`,
+              checked: typeShown(filters, type),
+              indent: parent !== null,
+              keepOpen: true,
+              ...(hiddenAbove ? { disabled: true, title: `Hidden along with ${parent}.` } : {}),
+              onSelect: ({ mod }) => {
+                if (!mod) {
+                  onChange(toggleType(filters, type));
+                  return;
+                }
+                // The first Ctrl-click of a run shows this type alone; the
+                // rest of the run, until Ctrl is let go, add to it.
+                const extend = run.current;
+                run.current = true;
+                onChange(onlyType(filters, type, extend));
+              },
+            };
+          }),
+        };
+      }),
     },
     // The same types again, to send to the end of the review rather than out
     // of it. Each tick puts its type after every type already there, so the
@@ -294,23 +343,44 @@ export function FilterMenu({
             id: 'last',
             label: 'Read last',
             items: [],
-            subgroups: byCategory(facets.types.keys()).map((group) => ({
-              id: `last:${group.category}`,
-              label: CATEGORY_LABELS[group.category],
-              items: group.types.map(
-                (type): MenuItem => ({
-                  id: `last:${type}`,
-                  label: typeLabel(type),
-                  ariaLabel: lastName(type),
-                  detail: `${facets.types.get(type) ?? 0}`,
-                  checked: last.includes(type),
-                  indent: parentType(type) !== null,
+            subgroups: byCategory(facets.types.keys()).map((group) => {
+              const sent = group.types.filter((type) => last.includes(type)).length;
+              return {
+                id: `last:${group.category}`,
+                label: CATEGORY_LABELS[group.category],
+                // Every type in the category sent to the end at once, in the
+                // order they are listed, or all of them taken back once they
+                // are all there.
+                header: {
+                  id: `last:${group.category}:all`,
+                  label: CATEGORY_LABELS[group.category],
+                  ariaLabel: lastCategoryName(group.category),
+                  checked: sent === group.types.length ? true : sent === 0 ? false : 'mixed',
                   keepOpen: true,
                   onSelect: () =>
-                    onLast(last.includes(type) ? last.filter((each) => each !== type) : [...last, type]),
-                }),
-              ),
-            })),
+                    onLast(
+                      sent === group.types.length
+                        ? last.filter((type) => !group.types.includes(type))
+                        : [...last, ...group.types.filter((type) => !last.includes(type))],
+                    ),
+                },
+                items: group.types.map(
+                  (type): MenuItem => ({
+                    id: `last:${type}`,
+                    label: typeLabel(type),
+                    ariaLabel: lastName(type),
+                    detail: `${facets.types.get(type) ?? 0}`,
+                    checked: last.includes(type),
+                    indent: parentType(type) !== null,
+                    keepOpen: true,
+                    onSelect: () =>
+                      onLast(
+                        last.includes(type) ? last.filter((each) => each !== type) : [...last, type],
+                      ),
+                  }),
+                ),
+              };
+            }),
           } satisfies MenuGroup,
         ]),
     {

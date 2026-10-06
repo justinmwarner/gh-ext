@@ -552,16 +552,22 @@ there to set several things at once.
 
 The File type section groups its rows under what sort of file each type is:
 Code, Styles, Docs, Data and config, Images, Fonts, Audio and video, Archives
-and binaries, and Other. Each group has a subheading in Foreground Muted at
-11px, lighter than the section's own heading so the two levels read as two.
-Under the section heading sits one line of hint in the same grey: "Ctrl-click
-to show only the ones you pick" (⌘ on a Mac). A Ctrl-click shows that type
-alone, each further Ctrl-click before the key is let go adds another, and
-while Ctrl is held the wheel scrolls the menu instead of zooming the page.
-Longer types sit one step in under their extension, `.spec.tsx` under `.tsx`,
-where at least two files share one. While the extension is hidden, a longer
-type under it is drawn unticked and refused, because hiding `.tsx` already
-hides the specs. The Read last section is grouped the same way.
+and binaries, and Other. Each group's heading is itself a row, drawn as a
+heading (12px, the section heading's weight and grey) with a box like any
+other: ticked when every type in it is shown, a dash when only some are. A
+press shows every type in the group, or hides them all when they all show
+already. Under the section heading sits one line of hint in the same grey:
+"Ctrl-click to show only the ones you pick" (⌘ on a Mac). A Ctrl-click shows
+that type alone, or that group alone on a group's heading, and each further
+Ctrl-click before the key is let go adds another. While Ctrl is held, the
+wheel scrolls the menu instead of zooming the page. "Show all types", the
+first row under the hint, puts every type back without touching the other
+filters, and is refused while every type is already shown. Longer types sit
+one step in under their extension, `.spec.tsx` under `.tsx`, where at least
+two files share one. While the extension is hidden, a longer type under it is
+drawn unticked and refused, because hiding `.tsx` already hides the specs.
+The Read last section is grouped the same way, and a group's heading there
+sends every type in it to the end at once.
 
 The same menu holds the two choices that are not filters, because they move
 files without hiding any. A **Sort** section has one row, "Most changed

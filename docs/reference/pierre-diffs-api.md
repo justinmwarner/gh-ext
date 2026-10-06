@@ -2000,10 +2000,14 @@ the end, leave one more `diffs-container` than there are headers.
 `ui/strandedCards.ts` is the repair. After the wrapper has drawn the new list, which it does
 synchronously in its own layout effect, it applies `CodeView`'s own keep-or-release test
 (`item.top > top - item.height && item.top <= bottom`, against `windowSpecs`) to every
-record and releases the rest through `releaseRenderedItem`. All of that is private, so it
-is feature-checked and does nothing against a `CodeView` laid out differently. The e2e tests
-"sorting by most changed…" and "reading a type last…" are the checks to rerun after an
-upgrade.
+drawn record *outside* `renderState.firstIndex..lastIndex`, and releases the ones that fail
+it through `releaseRenderedItem`. Records inside that range are left to `CodeView`'s own
+pass, even ones the test would fail. While heights settle, a card at the edge of the range
+can sit outside the window for a frame. An earlier version released it, `CodeView` drew it
+again on the next frame, and a card being released and redrawn over and over is one a click
+cannot land on. All of this is private, so it is feature-checked and does nothing against a
+`CodeView` laid out differently. The e2e tests "sorting by most changed…" and "reading a
+type last…" are the checks to rerun after an upgrade.
 
 ## G.3 Item ownership for very large PRs
 

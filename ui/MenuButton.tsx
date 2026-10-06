@@ -72,9 +72,10 @@ export interface MenuItem {
   /**
    * Present for a toggle, absent for a command. A state the reviewer is in is
    * not an action they take once, and a plain `menuitem` cannot say which way
-   * it is set.
+   * it is set. `mixed` is a box that stands for several, some ticked and some
+   * not: a category's heading.
    */
-  checked?: boolean;
+  checked?: boolean | 'mixed';
   /**
    * Leave the menu open once this has run, with the keyboard still on it.
    *
@@ -118,6 +119,13 @@ export interface MenuSubgroup {
   id: string;
   label: string;
   items: readonly MenuItem[];
+  /**
+   * The heading as a row of its own, for a run whose heading acts on the whole
+   * run: "Code", which ticks every code type at once. Drawn as a heading and
+   * walked by the arrows like any row, first in its run. `label` still names
+   * the run.
+   */
+  header?: MenuItem;
 }
 
 /** A run of items under one heading. */
@@ -236,7 +244,10 @@ export function MenuButton({
   /** Every item, in the order the arrows walk them, runs within sections included. */
   const all = sections.flatMap((section) => [
     ...section.items,
-    ...(section.subgroups ?? []).flatMap((subgroup) => subgroup.items),
+    ...(section.subgroups ?? []).flatMap((subgroup) => [
+      ...(subgroup.header === undefined ? [] : [subgroup.header]),
+      ...subgroup.items,
+    ]),
   ]);
 
   // Read by the handle and by the unmount below, which are built once.
@@ -407,7 +418,7 @@ export function MenuButton({
   /** The index across every section, which is what the keyboard counts in. */
   let index = -1;
 
-  const renderItem = (item: MenuItem) => {
+  const renderItem = (item: MenuItem, asHeader = false) => {
     index += 1;
     const position = index;
     const described = item.note === undefined ? undefined : `${noteId}-${item.id}`;
@@ -426,6 +437,7 @@ export function MenuButton({
         aria-label={item.ariaLabel}
         aria-describedby={described}
         data-indent={item.indent === true ? 'true' : undefined}
+        data-header={asHeader ? 'true' : undefined}
         // Tab leaves a menu rather than moving inside one, so exactly one
         // item is in the sequence and the arrows do the rest.
         tabIndex={position === at ? 0 : -1}
@@ -515,7 +527,7 @@ export function MenuButton({
             // commands in a nameless group would announce a boundary with
             // nothing on the other side of it.
             section.label === undefined ? (
-              section.items.map(renderItem)
+              section.items.map((item) => renderItem(item))
             ) : (
               <div
                 key={section.id}
@@ -547,7 +559,7 @@ export function MenuButton({
                     {section.hint}
                   </span>
                 )}
-                {section.items.map(renderItem)}
+                {section.items.map((item) => renderItem(item))}
                 {(section.subgroups ?? []).map((subgroup) => (
                   <div
                     key={subgroup.id}
@@ -555,14 +567,19 @@ export function MenuButton({
                     role="group"
                     aria-labelledby={`${noteId}-sub-${section.id}-${subgroup.id}`}
                   >
+                    {/* Still the run's name when the heading is a row: the
+                        row says more than the name (a count, a tick), and the
+                        run is called what its heading reads. */}
                     <span
                       className="menu-subheading"
                       id={`${noteId}-sub-${section.id}-${subgroup.id}`}
                       aria-hidden="true"
+                      hidden={subgroup.header !== undefined}
                     >
                       {subgroup.label}
                     </span>
-                    {subgroup.items.map(renderItem)}
+                    {subgroup.header !== undefined && renderItem(subgroup.header, true)}
+                    {subgroup.items.map((item) => renderItem(item))}
                   </div>
                 ))}
               </div>

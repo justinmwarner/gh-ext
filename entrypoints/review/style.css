@@ -690,6 +690,23 @@ button.scope-showing:hover {
   content: '\2713' / '';
 }
 
+/* Partly ticked: a box that stands for several, some on and some off. A dash,
+   the way the tree draws a part-viewed folder. Not read, for the reason the
+   tick is not: `aria-checked` already says it. */
+.menu-item[aria-checked='mixed']::before {
+  content: '\2013';
+  content: '\2013' / '';
+}
+
+/* A run's heading that is also a row, such as "Code", which ticks every code
+   type. Drawn as the heading it stands in for, and still answers the pointer
+   like any row. */
+.menu-item[data-header='true'] {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
 .menu-item:hover,
 .menu-item:focus-visible {
   background: var(--neutral-hover);

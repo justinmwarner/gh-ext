@@ -447,6 +447,44 @@ describe('a menu of sections', () => {
     expect(menu.scrollTop).toBe(120);
   });
 
+  it('says a box that stands for several is partly ticked', async () => {
+    mountGroups([
+      { id: 'type', items: [{ id: 'code', label: 'Code', checked: 'mixed', keepOpen: true, onSelect: chose() }] },
+    ]);
+    await userEvent.click(filters());
+
+    expect(screen.getByRole('menuitemcheckbox', { name: /Code/ }).getAttribute('aria-checked')).toBe('mixed');
+  });
+
+  it('makes a run’s heading a row of its own when it acts on the whole run', async () => {
+    const onHeader = vi.fn();
+    mountGroups([
+      {
+        id: 'type',
+        label: 'File type',
+        items: [],
+        subgroups: [
+          {
+            id: 'code',
+            label: 'Code',
+            header: { id: 'cat:code', label: 'Code', checked: true, keepOpen: true, onSelect: onHeader },
+            items: [{ id: '.ts', label: '.ts', checked: true, keepOpen: true, onSelect: chose() }],
+          },
+        ],
+      },
+    ]);
+    const user = userEvent.setup();
+    await user.click(filters());
+
+    // Named as before, and first in the walk: the arrows reach it like any row.
+    const code = screen.getByRole('group', { name: 'Code' });
+    const header = within(code).getAllByRole('menuitemcheckbox')[0];
+    expect(header?.getAttribute('data-header')).toBe('true');
+    expect(document.activeElement).toBe(header);
+    await user.keyboard('{Enter}');
+    expect(onHeader).toHaveBeenCalledTimes(1);
+  });
+
   it('marks a row that sits under the one above it', async () => {
     mountGroups([
       {

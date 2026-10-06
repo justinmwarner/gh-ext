@@ -949,11 +949,29 @@ test('ctrl-clicking file types shows only those, and the menu scrolls while ctrl
   await page.keyboard.up('Control');
   await page.keyboard.press('Escape');
 
-  const files = await page
-    .locator('#rail-panel-files .filetree-rows [data-path]:not([aria-expanded])')
-    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-path') ?? ''));
+  const fileRows = () =>
+    page
+      .locator('#rail-panel-files .filetree-rows [data-path]:not([aria-expanded])')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-path') ?? ''));
+  const files = await fileRows();
   expect(files.length).toBeGreaterThan(0);
   expect(files.every((path) => path.endsWith('.md') || path.endsWith('.png'))).toBe(true);
+
+  // A category's heading, Ctrl-pressed, is only that category.
+  await page.getByRole('button', { name: 'File filters' }).click();
+  await page.keyboard.down('Control');
+  await types.getByRole('group', { name: 'Code' }).getByRole('menuitemcheckbox').first().click();
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Escape');
+  const code = await fileRows();
+  expect(code.length).toBeGreaterThan(0);
+  expect(code.every((path) => /\.(ts|tsx|js)$/.test(path))).toBe(true);
+
+  // And the reset puts every type back.
+  await page.getByRole('button', { name: 'File filters' }).click();
+  await types.getByRole('menuitem', { name: 'Show all types' }).click();
+  await page.keyboard.press('Escape');
+  expect((await fileRows()).length).toBe(COLUMN_ORDER.length);
 });
 
 /**

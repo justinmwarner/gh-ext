@@ -25,9 +25,12 @@ import {
   nearestShown,
   onlyType,
   passes,
+  showOnly,
   toggleType,
   typeMatches,
   typeShown,
+  typesShown,
+  withTypesShown,
 } from './fileFilters';
 
 const file = (
@@ -473,6 +476,58 @@ describe('pressing a file type', () => {
     expect(typeShown(only, '.tsx')).toBe(false);
     expect(typeShown(filters({ hiddenTypes: new Set(['.tsx']) }), '.spec.tsx')).toBe(false);
     expect(typeShown(NO_FILTERS, '.png')).toBe(true);
+  });
+});
+
+/**
+ * Pressing a group of types at once: a category's heading, or the reset.
+ *
+ * The same two presses as on one type, made over several. A plain press shows
+ * every type in the group, or hides them all when they are all shown already.
+ * A Ctrl-press shows only the group. A group's own tick is all, some or none.
+ */
+describe('pressing a group of file types', () => {
+  const CODE = ['.ts', '.spec.ts', '.tsx'];
+
+  it('reads a group as all shown, some, or none', () => {
+    expect(typesShown(NO_FILTERS, CODE)).toBe('all');
+    expect(typesShown(filters({ hiddenTypes: new Set(['.tsx']) }), CODE)).toBe('some');
+    expect(typesShown(filters({ onlyTypes: new Set(['.md']) }), CODE)).toBe('none');
+  });
+
+  it('shows every type in a group, including one hidden under its extension', () => {
+    const next = withTypesShown(filters({ hiddenTypes: new Set(['.ts', '.spec.ts']) }), CODE, true);
+
+    expect(typesShown(next, CODE)).toBe('all');
+  });
+
+  it('hides every type in a group', () => {
+    const next = withTypesShown(NO_FILTERS, CODE, false);
+
+    expect(typesShown(next, CODE)).toBe('none');
+    expect(typeShown(next, '.md')).toBe(true);
+  });
+
+  it('shows every type in a group inside an only-list too', () => {
+    const next = withTypesShown(filters({ onlyTypes: new Set(['.md']) }), CODE, true);
+
+    expect(typesShown(next, CODE)).toBe('all');
+    expect(typeShown(next, '.md')).toBe(true);
+    expect(typeShown(next, '.png')).toBe(false);
+  });
+
+  it('shows only the group on the first Ctrl-press, and adds or takes away later in the run', () => {
+    const first = showOnly(NO_FILTERS, CODE, false);
+    expect(typesShown(first, CODE)).toBe('all');
+    expect(typeShown(first, '.md')).toBe(false);
+
+    const more = showOnly(first, ['.md'], true);
+    expect(typeShown(more, '.md')).toBe(true);
+    expect(typesShown(showOnly(more, CODE, true), CODE)).toBe('none');
+  });
+
+  it('is what a Ctrl-press on one type does, for one type', () => {
+    expect(onlyType(NO_FILTERS, '.ts', false)).toEqual(showOnly(NO_FILTERS, ['.ts'], false));
   });
 });
 
